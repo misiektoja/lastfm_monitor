@@ -11,11 +11,12 @@ lastfm_monitor is a Python script which allows for real-time monitoring of Last.
 - Saving all listened songs with timestamps to the CSV file
 - Clickable Spotify, Apple and Genius search URLs printed in the console & included in email notifications
 - Showing basic statistics for user's playing session (how long, time span, number of listened & skipped songs, time of paused playback)
+- Support for detecting offline mode
 - Support for detecting Spotify private mode (not 100% accurate)
 - Possibility to control the running copy of the script via signals
 
 <p align="center">
-   <img src="./assets/lastfm_monitor.png" alt="lastfm_monitor_screenshot" width="70%"/>
+   <img src="./assets/lastfm_monitor.png" alt="lastfm_monitor_screenshot" width="80%"/>
 </p>
 
 ## Change Log
@@ -114,6 +115,8 @@ It is suggested to use sth like **tmux** or **screen** to have the script runnin
 
 The tool automatically saves its output to *lastfm_monitor_username.log* file (can be changed in the settings or disabled with -d).
 
+The tool also saves the last activity information (artist, track, timestamp) to *lastfm_username_last_activity.json file*, so it can be reused in case the tool needs to be restarted.
+
 ### Listing mode
 
 There is also other mode of the tool which prints the recently listened tracks for the user (-l parameter). You can also add -n to define how many tracks should be displayed, by default it shows 30 last tracks:
@@ -139,7 +142,7 @@ Make sure you defined your SMTP settings earlier (see [SMTP settings](#smtp-sett
 Example email:
 
 <p align="center">
-   <img src="./assets/lastfm_monitor_email_notifications.png" alt="lastfm_monitor_email_notifications" width="55%"/>
+   <img src="./assets/lastfm_monitor_email_notifications.png" alt="lastfm_monitor_email_notifications" width="65%"/>
 </p>
 
 If you also want to be informed every time a user listens to specific songs, you can use **track_notification** functionality (-t). 
@@ -193,7 +196,7 @@ If you want to see nice progress indicator which should show you estimated posit
 ```
 
 <p align="center">
-   <img src="./assets/lastfm_monitor_progress_indicator.png" alt="lastfm_monitor_progress_indicator" width="70%"/>
+   <img src="./assets/lastfm_monitor_progress_indicator.png" alt="lastfm_monitor_progress_indicator" width="80%"/>
 </p>
 
 For this functionality to work correctly it is suggested to have the active check interval (-k) set to low value (like 2-5 seconds).
@@ -247,7 +250,7 @@ I suspect it is related to some bug in Spotify and it mainly happens if the user
 However keep in mind it is not 100% accurate. I observed duplicate entries also with no private mode, but in such case number of duplicate entries is limited. So do not treat it as something 100% certain, but it is pretty good indicator that private mode was used.
 
 <p align="center">
-   <img src="./assets/lastfm_monitor_private_mode.png" alt="lastfm_monitor_private_mode" width="70%"/>
+   <img src="./assets/lastfm_monitor_private_mode.png" alt="lastfm_monitor_private_mode" width="80%"/>
 </p>
 
 There is one other method I discovered which is related to activity reported by Spotify Web API itself, but it requires deeper integration with it to detect it more reliably. I plan to cover it in the future.
