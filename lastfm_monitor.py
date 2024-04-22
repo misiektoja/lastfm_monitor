@@ -26,8 +26,9 @@ VERSION=1.0
 LASTFM_API_KEY = "your_API_key" # Last.fm 'API key'
 LASTFM_API_SECRET = "your_API_secret" # Last.fm 'Shared secret'
 
-# Log in to Spotify web client (https://open.spotify.com/) and use the value of sp_dc cookie below
-# You can use Cookie-Editor by cgagnier to get it easily (available for all major web browsers): https://cookie-editor.com/ 
+# Log in to Spotify web client (https://open.spotify.com/) and put the value of sp_dc cookie below
+# Newly generated Spotify's sp_dc cookie should be valid for 1 year
+# You can use Cookie-Editor by cgagnier to get it easily (available for all major web browsers): https://cookie-editor.com/
 # It is needed only for track_songs functionality, so we can find track ID and trigger Spotify client to play it
 SP_DC_COOKIE = "your_sp_dc_cookie_value"
 

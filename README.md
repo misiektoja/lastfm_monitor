@@ -75,6 +75,8 @@ If you want to use ***'track_songs'*** functionality (-g parameter), so the scri
 
 You can use Cookie-Editor by cgagnier to get it easily (available for all major web browsers): [https://cookie-editor.com/](https://cookie-editor.com/)
 
+Newly generated Spotify's sp_dc cookie should be valid for 1 year. You will be informed by the tool once the cookie expires (proper message on the console and in email if errors notifications have not disabled).
+
 ### SMTP settings
 
 If you want to use email notifications functionality you need to change the SMTP settings (host, port, user, password, sender, recipient).
