@@ -3,7 +3,8 @@
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
 v1.0
 
-Last.fm user monitoring tool: https://github.com/misiektoja/lastfm_monitor/
+Script which allows for real-time monitoring of Last.fm users music activity:
+https://github.com/misiektoja/lastfm_monitor/
 
 Python pip3 requirements:
 
