@@ -953,9 +953,9 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                         except Exception as e:
                             print("* Error -", e)
                         if duplicate_entries:
-                            private_mode="\n\nDuplicate entries found, possible private mode between " + get_short_date_from_ts(lf_active_ts_last_old) + " and " + get_short_date_from_ts(lf_track_ts_start)
-                            private_mode_html="<br><br>Duplicate entries found, possible <b>private mode</b> between <b>" + get_short_date_from_ts(lf_active_ts_last_old) + "</b> and <b>" + get_short_date_from_ts(lf_track_ts_start) + "</b>"                            
-                            print("\n*** Duplicate entries found, possible PRIVATE MODE between " + get_short_date_from_ts(lf_active_ts_last_old) + " and " + get_short_date_from_ts(lf_track_ts_start))
+                            private_mode="\n\nDuplicate entries found, possible private mode (" + get_range_of_dates_from_tss(lf_active_ts_last_old,lf_track_ts_start,short=True) + ")"
+                            private_mode_html="<br><br>Duplicate entries found, possible <b>private mode</b> (<b>" + get_range_of_dates_from_tss(lf_active_ts_last_old,lf_track_ts_start,short=True) + "</b>)"                            
+                            print("\n*** Duplicate entries found, possible PRIVATE MODE (" + get_range_of_dates_from_tss(lf_active_ts_last_old,lf_track_ts_start,short=True) + ")")
 
                         print("\n*** User got ACTIVE after being offline for",calculate_timespan(int(lf_track_ts_start),int(lf_active_ts_last)),last_track_start_changed)
                         print("*** Last activity:\t" + get_date_from_ts(lf_active_ts_last))
