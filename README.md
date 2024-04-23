@@ -261,7 +261,7 @@ There is one other method I discovered which is related to activity reported by 
 
 Check other supported parameters using -h.
 
-You can of course combine all the parameters mentioned earlier together.
+You can of course combine all the parameters mentioned earlier together (in monitoring mode, listing mode only supports -l and -n).
 
 ## Limitations
 
