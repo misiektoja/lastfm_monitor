@@ -9,7 +9,7 @@ lastfm_monitor is a Python script which allows for real-time monitoring of Last.
 - Information about how long the user listened to a song, if shorter/longer than track duration, if song has been skipped
 - Email notifications for different events (user gets active/inactive, specific/all songs, new entries showed up while user was offline, errors)
 - Saving all listened songs with timestamps to the CSV file
-- Clickable Spotify, Apple and Genius search URLs printed in the console & included in email notifications
+- Clickable Spotify, Apple Music and Genius search URLs printed in the console & included in email notifications
 - Showing basic statistics for user's playing session (how long, time span, number of listened & skipped songs, time of paused playback)
 - Support for detecting offline mode
 - Support for detecting Spotify private mode (not 100% accurate)
