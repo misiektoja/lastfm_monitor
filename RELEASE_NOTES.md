@@ -2,6 +2,13 @@
 
 This is a high-level summary of the most important changes. 
 
+# Changes in 1.1 (25 Apr 2024)
+
+**Features and Improvements**:
+
+- Better way of handling situations where historical Last.fm entries are not in sync and behind few songs; it happens very rarely, but it results in intepreting the current song as skipped and played on loop
+- Detection of wrongly set SP_DC_COOKIE variable (empty or default value) - it will prevent track_songs functionality (-g) from kicking in
+
 # Changes in 1.0 (22 Apr 2024)
 
 **Features and Improvements**:

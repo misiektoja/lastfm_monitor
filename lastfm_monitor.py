@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v1.0
+v1.1
 
 Script implementing real-time monitoring of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -14,7 +14,7 @@ requests
 urllib3
 """
 
-VERSION=1.0
+VERSION=1.1
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -527,6 +527,7 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
     lf_active_ts_start=0
     lf_active_ts_last=0
     lf_track_ts_start=0
+    lf_track_ts_start_old=0    
     lf_track_ts_start_after_resume=0
     lf_user_online=False
     alive_counter = 0
@@ -584,6 +585,7 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
         sys.exit(1)
 
     last_track_start_ts_old2=int(recent_tracks[0].timestamp)
+    lf_track_ts_start_old=last_track_start_ts_old2
 
     # User is offline (does not play music at the moment)
     if new_track is None:
@@ -682,7 +684,7 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
         lf_user_online = True
 
         # If tracking functionality is enabled then play the current song via Spotify client
-        if track_songs:
+        if track_songs and SP_DC_COOKIE and SP_DC_COOKIE!="your_sp_dc_cookie_value":
             accessToken=spotify_get_access_token(SP_DC_COOKIE)
             sp_track_id=spotify_search_song_trackid(accessToken,artist,track,album)
             spotify_trigger_url=spotify_search_url
@@ -731,6 +733,7 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
             if not lf_user_online:
                 if last_track_start_ts>last_track_start_ts_old2:
                     print("\n*** New last.fm entries showed up while user was offline!\n")
+                    lf_track_ts_start_old=last_track_start_ts
                     duplicate_entries=False
                     i = 0
                     added_entries_list=""
@@ -793,7 +796,7 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                     last_track_start_ts_old = last_track_start_ts
 
                 # Track has changed
-                if (new_track != playing_track or last_track_start_ts > last_track_start_ts_old):
+                if (new_track != playing_track or (last_track_start_ts > last_track_start_ts_old and last_track_start_ts>lf_track_ts_start_old-20)):
 
                     alive_counter = 0
 
@@ -874,6 +877,8 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                     if listened_songs==2:
                         signal_previous_the_same=False
 
+                    if lf_track_ts_start>0:
+                        lf_track_ts_start_old=lf_track_ts_start
                     lf_track_ts_start=int(time.time())
                     lf_track_ts_start_after_resume=lf_track_ts_start
                     last_track_start_ts_old = last_track_start_ts                    
@@ -911,7 +916,7 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                         duration_m_body_html="<br>Duration: " + display_time(track_duration)
 
                     # If tracking functionality is enabled then play the current song via Spotify client
-                    if track_songs:
+                    if track_songs and SP_DC_COOKIE and SP_DC_COOKIE!="your_sp_dc_cookie_value":
                         accessToken=spotify_get_access_token(SP_DC_COOKIE)
                         sp_track_id=spotify_search_song_trackid(accessToken,artist,track,album)
                         spotify_trigger_url=spotify_search_url
