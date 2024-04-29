@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v1.1
+v1.2
 
 Script implementing real-time monitoring of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -14,7 +14,7 @@ requests
 urllib3
 """
 
-VERSION=1.1
+VERSION=1.2
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -48,6 +48,9 @@ LASTFM_ACTIVE_CHECK_INTERVAL=5 # 5 seconds
 
 # After which time do we consider user as inactive (after last activity); in seconds
 LASTFM_INACTIVITY_CHECK=180 # 3 mins
+
+# How many consecutive plays of the same song is considered as being on loop
+SONG_ON_LOOP_VALUE=3
 
 # If the value is more than 0 it will show when user stops playing/resumes (while active), play break is assumed to be LASTFM_BREAK_CHECK_MULTIPLIER*LASTFM_ACTIVE_CHECK_INTERVAL;
 # So if LASTFM_BREAK_CHECK_MULTIPLIER=4 and LASTFM_ACTIVE_CHECK_INTERVAL=5, then music pause will be reported after 4*5=20 seconds of inactivity
@@ -110,6 +113,7 @@ inactive_notification=False
 song_notification=False
 track_notification=False
 offline_entries_notification=False
+song_on_loop_notification=False
 progress_indicator=False
 track_songs=False
 
@@ -539,12 +543,14 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
     playing_track=None
     new_track=None
     listened_songs=0
+    looped_songs=0
     skipped_songs=0
     signal_previous_the_same=False
     artist=""
     track=""
     artist_old=""
     track_old=""
+    song_on_loop=0
 
     try:
         if csv_file_name:
@@ -625,6 +631,7 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
         lf_track_ts_start=lf_active_ts_start
         lf_track_ts_start_after_resume=lf_active_ts_start
         playing_resumed_ts=lf_active_ts_start
+        song_on_loop=1
         artist=str(new_track.artist)
         track=str(new_track.title)
         album=str(new_track.info['album'])
@@ -800,6 +807,13 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
 
                     alive_counter = 0
 
+                    if new_track == playing_track:
+                        song_on_loop+=1
+                        if song_on_loop==SONG_ON_LOOP_VALUE:
+                            looped_songs+=1                   
+                    else:
+                        song_on_loop=1
+
                     playing_track=new_track
                     artist=str(playing_track.artist)
                     track=str(playing_track.title)
@@ -973,6 +987,7 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                         paused_counter=0
                         listened_songs=1
                         skipped_songs=0
+                        looped_songs=0
                         lf_active_ts_start=lf_track_ts_start
                         playing_resumed_ts=lf_track_ts_start
                         m_subject="Last.fm user " + str(username) + " is active: '" + str(artist) + " - " + str(track) + "' (after " + calculate_timespan(int(lf_track_ts_start),int(lf_active_ts_last),show_seconds=False) + " - " + get_short_date_from_ts(lf_active_ts_last) + ")"
@@ -1002,6 +1017,19 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                         send_email(m_subject,m_body,m_body_html,SMTP_SSL)
                         email_sent=True
 
+                    if song_on_loop==SONG_ON_LOOP_VALUE:
+                        print("---------------------------------------------------------------------------------------------------------")                        
+                        print(f"User plays song on LOOP ({song_on_loop} times)")
+                        print("---------------------------------------------------------------------------------------------------------")                        
+
+                    if song_on_loop==SONG_ON_LOOP_VALUE and song_on_loop_notification:
+                            m_subject="Last.fm user " + str(username) + " plays song on loop: '" + str(artist) + " - " + str(track) + "'"
+                            m_body="Track: " + str(artist) + " - " + str(track) + duration_m_body + "\nAlbum: " + str(album) + "\n\nSpotify search URL: " + spotify_search_url + "\nApple search URL: " + apple_search_url + "\nGenius lyrics URL: " + genius_search_url + played_for_m_body + "\n\nUser plays song on LOOP (" + str(song_on_loop) + " times)" + get_cur_ts("\n\nTimestamp: ")
+                            m_body_html="<html><head></head><body>Track: <b><a href=\"" + spotify_search_url + "\">" + str(artist) + " - " + str(track) + "</a></b>" + duration_m_body_html + "<br>Album: " + str(album) + "<br><br>Apple search URL: <a href=\"" + apple_search_url + "\">" + str(artist) + " - " + str(track) + "</a>" + "<br>Genius lyrics URL: <a href=\"" + genius_search_url + "\">" + str(artist) + " - " + str(track) + "</a>" + played_for_m_body_html + "<br><br>User plays song on LOOP (<b>" + str(song_on_loop) + "</b> times)" + get_cur_ts("<br><br>Timestamp: ") + "</body></html>"
+                            if not email_sent:
+                                print("Sending email notification to",RECEIVER_EMAIL)
+                            send_email(m_subject,m_body,m_body_html,SMTP_SSL)    
+
                     lf_user_online=True
                     lf_active_ts_last=int(time.time())
 
@@ -1014,7 +1042,7 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                     except Exception as e:
                         print("* Cannot write CSV entry -", e)
 
-                    print_cur_ts("\nTimestamp:\t\t")
+                    print_cur_ts("\nTimestamp:\t\t")                   
                 
                 # Track has not changed, user is online and continues playing
                 else:
@@ -1077,11 +1105,20 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                     listened_songs_text="*** User played " + str(listened_songs) + " songs"
                     listened_songs_mbody="\n\nUser played " + str(listened_songs) + " songs"
                     listened_songs_mbody_html="<br><br>User played <b>" + str(listened_songs) + "</b> songs"
+
                     if skipped_songs>0:
                         skipped_songs_text=", skipped " + str(skipped_songs) + " songs (" + str(int((skipped_songs/listened_songs)*100)) + "%)"
                         listened_songs_text=listened_songs_text + skipped_songs_text
                         listened_songs_mbody=listened_songs_mbody + skipped_songs_text
                         listened_songs_mbody_html=listened_songs_mbody_html + ", skipped <b>" + str(skipped_songs) + "</b> songs <b>(" + str(int((skipped_songs/listened_songs)*100)) + "%)</b>"
+
+                    if looped_songs>0:
+                        looped_songs_text="\n*** User played " + str(looped_songs) + " songs on loop"
+                        looped_songs_mbody="\nUser played " + str(looped_songs) + " songs on loop"
+                        looped_songs_mbody_html="<br>User played <b>" + str(looped_songs) + "</b> songs on loop"                        
+                        listened_songs_text=listened_songs_text + looped_songs_text
+                        listened_songs_mbody=listened_songs_mbody + looped_songs_mbody
+                        listened_songs_mbody_html=listened_songs_mbody_html + looped_songs_mbody_html
 
                     print(listened_songs_text + "\n")
 
@@ -1125,6 +1162,7 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                     playing_track = None
                     last_track_start_ts = 0
                     listened_songs=0
+                    looped_songs=0
                     skipped_songs=0
                     print_cur_ts("\nTimestamp:\t\t")                                                
 
@@ -1181,8 +1219,9 @@ if __name__ == "__main__":
     parser.add_argument("-i","--inactive_notification", help="Send email notification once user gets inactive", action='store_true')
     parser.add_argument("-t","--track_notification", help="Send email notification once monitored track/album is found", action='store_true')
     parser.add_argument("-j","--song_notification", help="Send email notification for every changed song", action='store_true')
-    parser.add_argument("-e","--error_notification", help="Disable sending email notifications in case of errors like invalid API key", action='store_false')
     parser.add_argument("-f","--offline_entries_notification", help="Send email notification in case new entries are detected while user is offline", action='store_true')
+    parser.add_argument("-x","--song_on_loop_notification", help="Send email notification if user plays a song on loop (>= SONG_ON_LOOP_VALUE times)", action='store_true')        
+    parser.add_argument("-e","--error_notification", help="Disable sending email notifications in case of errors like invalid API key", action='store_false')
     parser.add_argument("-c", "--check_interval", help="Time between monitoring checks if user is offline, in seconds", type=int)
     parser.add_argument("-k", "--active_check_interval", help="Time between monitoring checks if user is active, in seconds", type=int)
     parser.add_argument("-o", "--offline_timer", help="Time required to mark inactive user as offline, in seconds", type=int)
@@ -1258,11 +1297,12 @@ if __name__ == "__main__":
     song_notification=args.song_notification
     track_notification=args.track_notification
     offline_entries_notification=args.offline_entries_notification
+    song_on_loop_notification=args.song_on_loop_notification
     progress_indicator=args.progress_indicator
     track_songs=args.track_songs
 
     print("* Last.fm timers:\t\t[check interval: " + display_time(LASTFM_CHECK_INTERVAL) + "] [active check interval: " + display_time(LASTFM_ACTIVE_CHECK_INTERVAL) + "] [inactivity: " + display_time(LASTFM_INACTIVITY_CHECK) + "]")
-    print("* Email notifications:\t\t[active = " + str(active_notification) + "] [inactive = " + str(inactive_notification) + "] [tracked = " + str(track_notification) + "]\n* \t\t\t\t[every song = " + str(song_notification) + "] [offline entries = " + str(offline_entries_notification) + "] [errors = " + str(args.error_notification) + "]")
+    print("* Email notifications:\t\t[active = " + str(active_notification) + "] [inactive = " + str(inactive_notification) + "] [tracked = " + str(track_notification) + "] [every song = " + str(song_notification) + "]\n* \t\t\t\t[songs on loop = " + str(song_on_loop_notification) + "] [offline entries = " + str(offline_entries_notification) + "] [errors = " + str(args.error_notification) + "]")
     print("* Output logging disabled:\t" + str(args.disable_logging))
     print("* Progress indicator enabled:\t" + str(progress_indicator))
     print("* Track listened songs:\t\t" + str(track_songs))

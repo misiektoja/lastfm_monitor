@@ -2,6 +2,12 @@
 
 This is a high-level summary of the most important changes. 
 
+# Changes in 1.2 (29 Apr 2024)
+
+**Features and Improvements**:
+
+- New feature to detect songs listened on loop; if user plays the same song consecutively >= SONG_ON_LOOP_VALUE times (3 by default, configurable in the .py file) then there will be proper message on the console + you can get email notification (new -x / --song_on_loop_notification parameter)
+
 # Changes in 1.1 (25 Apr 2024)
 
 **Features and Improvements**:
