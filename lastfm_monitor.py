@@ -777,7 +777,7 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
 
                 # User paused music earlier
                 if playing_paused==True and lf_user_online:
-                    playing_resumed_ts=int(time.time())
+                    playing_resumed_ts=int(time.time())-LASTFM_ACTIVE_CHECK_INTERVAL
                     lf_track_ts_start_after_resume+=(playing_resumed_ts-playing_paused_ts)-LASTFM_ACTIVE_CHECK_INTERVAL
                     paused_counter+=(int(playing_resumed_ts)-int(playing_paused_ts))
                     print("User RESUMED playing after",calculate_timespan(int(playing_resumed_ts),int(playing_paused_ts)))
@@ -1087,8 +1087,7 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                
                 # User got inactive
                 if ((int(time.time()) - lf_active_ts_last) > LASTFM_INACTIVITY_CHECK) and lf_user_online and lf_active_ts_last>0 and lf_active_ts_start>0:
-                    if progress_indicator:
-                        print("---------------------------------------------------------------------------------------------------------")
+
                     lf_user_online=False
 
                     played_for_m_body=""
@@ -1096,7 +1095,7 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
 
                     # Handling how long user played the last track - in case track duration is available
                     if track_duration>0 and lf_track_ts_start_after_resume>0:
-                        played_for_time=lf_active_ts_last-lf_track_ts_start_after_resume
+                        played_for_time=(lf_active_ts_last+LASTFM_ACTIVE_CHECK_INTERVAL)-lf_track_ts_start_after_resume
                         listened_percentage=(played_for_time) / (track_duration-LASTFM_ACTIVE_CHECK_INTERVAL-1)
 
                         if (played_for_time) < (track_duration-LASTFM_ACTIVE_CHECK_INTERVAL-1):
@@ -1108,21 +1107,17 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
 
                         played_for_m_body="\n\nUser played the last track for: " + played_for
                         played_for_m_body_html="<br><br>User played the last track for: " + played_for_html
-                        if progress_indicator:
-                            print("---------------------------------------------------------------------------------------------------------")
                         print("User played the last track for: " + played_for)
                         if not progress_indicator:
                             print("---------------------------------------------------------------------------------------------------------")                    
                     # Handling how long user played the last track - in case track duration is NOT available
                     elif track_duration<=0 and lf_track_ts_start_after_resume>0:
-                        played_for=display_time(lf_active_ts_last-lf_track_ts_start_after_resume)
+                        played_for=display_time((lf_active_ts_last+LASTFM_ACTIVE_CHECK_INTERVAL)-lf_track_ts_start_after_resume)
 
                         played_for_m_body="\n\nUser played the last track for: " + played_for
                         played_for_m_body_html="<br><br>User played the last track for: <b>" + played_for + "</b>"
                         played_for_str="User played the last track for: " + played_for
 
-                        if progress_indicator:
-                            print("---------------------------------------------------------------------------------------------------------")
                         print(played_for_str)
                         if not progress_indicator:
                             print("---------------------------------------------------------------------------------------------------------")
