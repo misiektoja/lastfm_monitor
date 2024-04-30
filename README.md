@@ -144,7 +144,7 @@ Make sure you defined your SMTP settings earlier (see [SMTP settings](#smtp-sett
 Example email:
 
 <p align="center">
-   <img src="./assets/lastfm_monitor_email_notifications.png" alt="lastfm_monitor_email_notifications" width="70%"/>
+   <img src="./assets/lastfm_monitor_email_notifications.png" alt="lastfm_monitor_email_notifications" width="80%"/>
 </p>
 
 If you also want to be informed every time a user listens to specific songs, you can use **track_notification** functionality (**-t**). 
