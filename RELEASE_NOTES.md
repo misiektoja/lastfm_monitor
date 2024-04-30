@@ -2,11 +2,17 @@
 
 This is a high-level summary of the most important changes. 
 
-# Changes in 1.2 (29 Apr 2024)
+# Changes in 1.2 (30 Apr 2024)
 
 **Features and Improvements**:
 
-- New feature to detect songs listened on loop; if user plays the same song consecutively >= SONG_ON_LOOP_VALUE times (3 by default, configurable in the .py file) then there will be proper message on the console + you can get email notification (new -x / --song_on_loop_notification parameter)
+- New feature to detect songs listened on loop; if user plays the same song consecutively SONG_ON_LOOP_VALUE times (3 by default, configurable in the .py file) then there will be proper message on the console + you can get email notification (new -x / --song_on_loop_notification parameter); the alarm is triggered only once, when the SONG_ON_LOOP_VALUE is reached and once the user changes the song the timer is zeroed
+- Information about how long the user played the last song (after getting offline) is now put into the console & inactive email notification
+- Code related to string concatenation has been cleaned up
+
+**Bugfixes**:
+
+- Fix for missing last track duration in inactive email notification
 
 # Changes in 1.1 (25 Apr 2024)
 

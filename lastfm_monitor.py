@@ -778,8 +778,8 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                 # User paused music earlier
                 if playing_paused==True and lf_user_online:
                     playing_resumed_ts=int(time.time())
-                    lf_track_ts_start_after_resume=lf_track_ts_start_after_resume+(playing_resumed_ts-playing_paused_ts)-LASTFM_ACTIVE_CHECK_INTERVAL
-                    paused_counter=paused_counter+(int(playing_resumed_ts)-int(playing_paused_ts))
+                    lf_track_ts_start_after_resume+=(playing_resumed_ts-playing_paused_ts)-LASTFM_ACTIVE_CHECK_INTERVAL
+                    paused_counter+=(int(playing_resumed_ts)-int(playing_paused_ts))
                     print("User RESUMED playing after",calculate_timespan(int(playing_resumed_ts),int(playing_paused_ts)))
                     print_cur_ts("\nTimestamp:\t\t")
                     
@@ -830,18 +830,18 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                             played_for=display_time(played_for_time) + " (out of " + display_time(track_duration) + ")"              
                             if listened_percentage <= SKIPPED_SONG_THRESHOLD2:
                                 if signal_previous_the_same:
-                                    played_for=played_for + " - CONT (" + str(int(listened_percentage*100)) + "%)"
+                                    played_for+=" - CONT (" + str(int(listened_percentage*100)) + "%)"
                                     signal_previous_the_same=False
                                 else:
-                                    played_for=played_for + " - SKIPPED (" + str(int(listened_percentage*100)) + "%)"
+                                    played_for+=" - SKIPPED (" + str(int(listened_percentage*100)) + "%)"
                                     skipped_songs+=1
                             else:
-                                played_for=played_for + " (" + str(int(listened_percentage*100)) + "%)"
+                                played_for+=" (" + str(int(listened_percentage*100)) + "%)"
                             played_for_display=True
                         else:
                             played_for=display_time(played_for_time)
                             if listened_percentage >= 1.20 or (played_for_time-track_duration>=15):
-                                played_for=played_for + " - LONGER than track duration (+ " + display_time(played_for_time-track_duration) + ", " + str(int(listened_percentage*100)) + "%)"
+                                played_for+=" - LONGER than track duration (+ " + display_time(played_for_time-track_duration) + ", " + str(int(listened_percentage*100)) + "%)"
                                 played_for_display=True
 
                         if played_for_display:
@@ -1090,6 +1090,46 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                     if progress_indicator:
                         print("---------------------------------------------------------------------------------------------------------")
                     lf_user_online=False
+
+                    # Handling how long user played the last track - in case track duration is available
+                    if track_duration>0 and lf_track_ts_start_after_resume>0:
+                        played_for_time=lf_active_ts_last-lf_track_ts_start_after_resume
+                        listened_percentage=(played_for_time) / (track_duration-LASTFM_ACTIVE_CHECK_INTERVAL-1)
+
+                        if (played_for_time) < (track_duration-LASTFM_ACTIVE_CHECK_INTERVAL-1):
+                            played_for=display_time(played_for_time) + " (out of " + display_time(track_duration) + ")"
+                            played_for_html="<b>" + display_time(played_for_time) + "</b> (out of " + display_time(track_duration) + ")" 
+                        else:
+                            played_for=display_time(played_for_time)
+                            played_for_html="<b>" + display_time(played_for_time) + "</b>"
+
+                        played_for_m_body="\n\nUser played the last track for: " + played_for
+                        played_for_m_body_html="<br><br>User played the last track for: " + played_for_html
+                        if progress_indicator:
+                            print("---------------------------------------------------------------------------------------------------------")
+                        print("User played the last track for: " + played_for)
+                        if not progress_indicator:
+                            print("---------------------------------------------------------------------------------------------------------")                    
+                    # Handling how long user played the last track - in case track duration is NOT available
+                    elif track_duration<=0 and lf_track_ts_start_after_resume>0:
+                        played_for=display_time(lf_active_ts_last-lf_track_ts_start_after_resume)
+
+                        played_for_m_body="\n\nUser played the last track for: " + played_for
+                        played_for_m_body_html="<br><br>User played the last track for: <b>" + played_for + "</b>"
+                        played_for_str="User played the last track for: " + played_for
+
+                        if progress_indicator:
+                            print("---------------------------------------------------------------------------------------------------------")
+                        print(played_for_str)
+                        if not progress_indicator:
+                            print("---------------------------------------------------------------------------------------------------------")
+                    else:
+                        played_for_m_body=""
+                        played_for_m_body_html="" 
+
+                    if progress_indicator:
+                        print("---------------------------------------------------------------------------------------------------------")
+
                     print("*** User got INACTIVE after listening to music for",calculate_timespan(int(lf_active_ts_last),int(lf_active_ts_start)))
                     print("*** User played music from " + get_range_of_dates_from_tss(lf_active_ts_start,lf_active_ts_last,short=True,between_sep=" to "))
                     playing_resumed_ts=int(time.time())
@@ -1108,17 +1148,17 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
 
                     if skipped_songs>0:
                         skipped_songs_text=", skipped " + str(skipped_songs) + " songs (" + str(int((skipped_songs/listened_songs)*100)) + "%)"
-                        listened_songs_text=listened_songs_text + skipped_songs_text
-                        listened_songs_mbody=listened_songs_mbody + skipped_songs_text
-                        listened_songs_mbody_html=listened_songs_mbody_html + ", skipped <b>" + str(skipped_songs) + "</b> songs <b>(" + str(int((skipped_songs/listened_songs)*100)) + "%)</b>"
+                        listened_songs_text+=skipped_songs_text
+                        listened_songs_mbody+=skipped_songs_text
+                        listened_songs_mbody_html+=", skipped <b>" + str(skipped_songs) + "</b> songs <b>(" + str(int((skipped_songs/listened_songs)*100)) + "%)</b>"
 
                     if looped_songs>0:
                         looped_songs_text="\n*** User played " + str(looped_songs) + " songs on loop"
                         looped_songs_mbody="\nUser played " + str(looped_songs) + " songs on loop"
                         looped_songs_mbody_html="<br>User played <b>" + str(looped_songs) + "</b> songs on loop"                        
-                        listened_songs_text=listened_songs_text + looped_songs_text
-                        listened_songs_mbody=listened_songs_mbody + looped_songs_mbody
-                        listened_songs_mbody_html=listened_songs_mbody_html + looped_songs_mbody_html
+                        listened_songs_text+=looped_songs_text
+                        listened_songs_mbody+=looped_songs_mbody
+                        listened_songs_mbody_html+=looped_songs_mbody_html
 
                     print(listened_songs_text + "\n")
 
@@ -1152,8 +1192,8 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                         json.dump(last_activity_to_save, f, indent=2)                        
                     if inactive_notification:
                         m_subject="Last.fm user " + str(username) + " is inactive: '" + str(artist) + " - " + str(track) + "' (after " + calculate_timespan(int(lf_active_ts_last),int(lf_active_ts_start),show_seconds=False) + ": " + get_range_of_dates_from_tss(lf_active_ts_start,lf_active_ts_last,short=True) + ")"
-                        m_body="Last played: " + str(artist) + " - " + str(track) + "\nAlbum: " + str(album) + "\n\nSpotify search URL: " + spotify_search_url + "\nApple search URL: " + apple_search_url + "\nGenius lyrics URL: " + genius_search_url + "\n\nUser got inactive after listening to music for " + calculate_timespan(int(lf_active_ts_last),int(lf_active_ts_start)) + "\nUser played music from " + get_range_of_dates_from_tss(lf_active_ts_start,lf_active_ts_last,short=True,between_sep=" to ") + paused_mbody + listened_songs_mbody + "\n\nLast activity: " + get_date_from_ts(lf_active_ts_last) + "\nInactivity timer: " + display_time(LASTFM_INACTIVITY_CHECK) + get_cur_ts("\nTimestamp: ")
-                        m_body_html="<html><head></head><body>Last played: <b><a href=\"" + spotify_search_url + "\">" + str(artist) + " - " + str(track) + "</a></b>" + "<br>Album: " + str(album) + "<br><br>Apple search URL: <a href=\"" + apple_search_url + "\">" + str(artist) + " - " + str(track) + "</a>" + "<br>Genius lyrics URL: <a href=\"" + genius_search_url + "\">" + str(artist) + " - " + str(track) + "</a><br><br>User got inactive after listening to music for <b>" + calculate_timespan(int(lf_active_ts_last),int(lf_active_ts_start)) + "</b><br>User played music from <b>" + get_range_of_dates_from_tss(lf_active_ts_start,lf_active_ts_last,short=True,between_sep="</b> to <b>") + "</b>" + paused_mbody_html + listened_songs_mbody_html + "<br><br>Last activity: <b>" + get_date_from_ts(lf_active_ts_last) + "</b>" + "<br>Inactivity timer: " + display_time(LASTFM_INACTIVITY_CHECK) + get_cur_ts("<br>Timestamp: ") + "</body></html>"
+                        m_body="Last played: " + str(artist) + " - " + str(track) + duration_m_body + "\nAlbum: " + str(album) + "\n\nSpotify search URL: " + spotify_search_url + "\nApple search URL: " + apple_search_url + "\nGenius lyrics URL: " + genius_search_url + "\n\nUser got inactive after listening to music for " + calculate_timespan(int(lf_active_ts_last),int(lf_active_ts_start)) + "\nUser played music from " + get_range_of_dates_from_tss(lf_active_ts_start,lf_active_ts_last,short=True,between_sep=" to ") + paused_mbody + listened_songs_mbody + played_for_m_body +  "\n\nLast activity: " + get_date_from_ts(lf_active_ts_last) + "\nInactivity timer: " + display_time(LASTFM_INACTIVITY_CHECK) + get_cur_ts("\nTimestamp: ")
+                        m_body_html="<html><head></head><body>Last played: <b><a href=\"" + spotify_search_url + "\">" + str(artist) + " - " + str(track) + "</a></b>" + duration_m_body_html + "<br>Album: " + str(album) + "<br><br>Apple search URL: <a href=\"" + apple_search_url + "\">" + str(artist) + " - " + str(track) + "</a>" + "<br>Genius lyrics URL: <a href=\"" + genius_search_url + "\">" + str(artist) + " - " + str(track) + "</a><br><br>User got inactive after listening to music for <b>" + calculate_timespan(int(lf_active_ts_last),int(lf_active_ts_start)) + "</b><br>User played music from <b>" + get_range_of_dates_from_tss(lf_active_ts_start,lf_active_ts_last,short=True,between_sep="</b> to <b>") + "</b>" + paused_mbody_html + listened_songs_mbody_html + played_for_m_body_html + "<br><br>Last activity: <b>" + get_date_from_ts(lf_active_ts_last) + "</b>" + "<br>Inactivity timer: " + display_time(LASTFM_INACTIVITY_CHECK) + get_cur_ts("<br>Timestamp: ") + "</body></html>"
 
                         print("Sending email notification to",RECEIVER_EMAIL)
                         send_email(m_subject,m_body,m_body_html,SMTP_SSL)
