@@ -820,6 +820,9 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                     album=str(playing_track.info['album'])
                     info=playing_track.info                                     
 
+                    played_for_m_body=""
+                    played_for_m_body_html="" 
+
                     # Handling how long user played the previous track, if skipped it etc. - in case track duration is available
                     if track_duration>0 and lf_track_ts_start_after_resume>0 and lf_user_online:
                         played_for_display=False
@@ -876,9 +879,6 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                         print(played_for_str)
                         if not progress_indicator:
                             print("---------------------------------------------------------------------------------------------------------")
-                    else:
-                        played_for_m_body=""
-                        played_for_m_body_html="" 
 
                     if progress_indicator:
                         print("---------------------------------------------------------------------------------------------------------")
@@ -1091,6 +1091,9 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                         print("---------------------------------------------------------------------------------------------------------")
                     lf_user_online=False
 
+                    played_for_m_body=""
+                    played_for_m_body_html="" 
+
                     # Handling how long user played the last track - in case track duration is available
                     if track_duration>0 and lf_track_ts_start_after_resume>0:
                         played_for_time=lf_active_ts_last-lf_track_ts_start_after_resume
@@ -1123,9 +1126,6 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                         print(played_for_str)
                         if not progress_indicator:
                             print("---------------------------------------------------------------------------------------------------------")
-                    else:
-                        played_for_m_body=""
-                        played_for_m_body_html="" 
 
                     if progress_indicator:
                         print("---------------------------------------------------------------------------------------------------------")

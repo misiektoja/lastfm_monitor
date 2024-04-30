@@ -13,6 +13,7 @@ This is a high-level summary of the most important changes.
 **Bugfixes**:
 
 - Fix for missing last track duration in inactive email notification
+- Fix for displaying wrong "played for" information in loop song email notifications
 
 # Changes in 1.1 (25 Apr 2024)
 
