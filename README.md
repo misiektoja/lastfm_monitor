@@ -4,7 +4,7 @@ lastfm_monitor is a Python script which allows for real-time monitoring of Last.
 
 ## Features
 
-- Real-time monitoring of songs listened by Last.fm user (including detection when user gets online & offline)
+- Real-time monitoring of songs listened by Last.fm users (including detection when user gets online & offline)
 - Showing when user pauses or resumes playback
 - Information about how long the user listened to a song, if shorter/longer than track duration, if song has been skipped
 - Email notifications for different events (user gets active/inactive, specific/all songs, songs on loop, new entries showed up while user was offline, errors)
@@ -67,7 +67,7 @@ Edit the *[lastfm_monitor.py](lastfm_monitor.py)* file and change any desired co
 
 Mandatory activity is to create your Last.fm **API key** and **Shared secret** by going to [https://www.last.fm/api/account/create](https://www.last.fm/api/account/create) (or get your existing one from [https://www.last.fm/api/accounts](https://www.last.fm/api/accounts))
 
-Then change **LASTFM_API_KEY** & **LASTFM_API_SECRET** variables to respective values.
+Then change **LASTFM_API_KEY** and **LASTFM_API_SECRET** variables to respective values (or use **-u** and **-w** parameters).
 
 ### Spotify sp_dc cookie
 
@@ -75,7 +75,7 @@ If you want to use ***'track_songs'*** functionality (-g parameter), so the scri
 
 You can use Cookie-Editor by cgagnier to get it easily (available for all major web browsers): [https://cookie-editor.com/](https://cookie-editor.com/)
 
-Newly generated Spotify's sp_dc cookie should be valid for 1 year. You will be informed by the tool once the cookie expires (proper message on the console and in email if errors notifications have not been disabled via **-e**).
+Newly generated Spotify's sp_dc cookie should be valid for 1 year. You will be informed by the tool once the cookie expires (proper message on the console and in email if error notifications have not been disabled via **-e** parameter).
 
 ### SMTP settings
 
@@ -109,13 +109,19 @@ To monitor specific user activity, just type Last.fm username as parameter (**mi
 ./lastfm_monitor.py misiektoja
 ```
 
+If you have not changed **LASTFM_API_KEY** and **LASTFM_API_SECRET** variables in the *[lastfm_monitor.py](lastfm_monitor.py)* file, you can use **-u** and **-w** parameters:
+
+```sh
+./lastfm_monitor.py misiektoja -u "your_API_key" -w "your_API_secret"
+```
+
 The tool will run infinitely and monitor the user until the script is interrupted (Ctrl+C) or killed the other way.
 
 You can monitor multiple Last.fm users by spawning multiple copies of the script. 
 
 It is suggested to use sth like **tmux** or **screen** to have the script running after you log out from the server.
 
-The tool automatically saves its output to *lastfm_monitor_username.log* file (can be changed in the settings or disabled with **-d**).
+The tool automatically saves its output to *lastfm_monitor_username.log* file (can be changed in the settings or disabled with **-d** parameter).
 
 The tool also saves the last activity information (artist, track, timestamp) to *lastfm_username_last_activity.json file*, so it can be reused in case the tool needs to be restarted.
 
@@ -147,7 +153,7 @@ Example email:
    <img src="./assets/lastfm_monitor_email_notifications.png" alt="lastfm_monitor_email_notifications" width="80%"/>
 </p>
 
-If you also want to be informed every time a user listens to specific songs, you can use **track_notification** functionality (**-t**). 
+If you also want to be informed every time a user listens to specific songs, you can use **track_notification** functionality (**-t** parameter). 
 
 For that you need to create a file with list of songs you want to track (one track and/or album per line). The file needs to be indicated by **-s** parameter. The script checks if the listened track or album is in the file. Example file *lastfm_tracks_misiektoja*:
 
@@ -159,19 +165,19 @@ Something Changed
 I Will Be There
 ```
 
-Then run the tool with **-t** & **-s** parameters:
+Then run the tool with **-t** and **-s** parameters:
 
 ```sh
 ./lastfm_monitor.py misiektoja -t -s ./lastfm_tracks_misiektoja
 ```
 
-If you want to get email notifications for every listened song (**-j**):
+If you want to get email notifications for every listened song (**-j** parameter):
 
 ```sh
 ./lastfm_monitor.py misiektoja -j
 ```
 
-If you want to get email notifications when user listens to the same song on loop (**-x**):
+If you want to get email notifications when user listens to the same song on loop (**-x** parameter):
 
 ```sh
 ./lastfm_monitor.py misiektoja -x
@@ -187,7 +193,7 @@ If you want to save all the listened songs in the CSV file, use **-b** parameter
 
 ### Automatic playing of tracks listened by the user in Spotify client
 
-If you want the script to automatically track what the user listens and to play it in your Spotify client (**-g**):
+If you want the script to automatically track what the user listens and to play it in your Spotify client (**-g** parameter):
 
 ```sh
 ./lastfm_monitor.py misiektoja -g
@@ -197,7 +203,7 @@ Currently the script only supports playing the songs in Spotify client in Mac OS
 
 ### Progress indicator
 
-If you want to see nice progress indicator which should show you estimated position of what user is currently listening (**-p**):
+If you want to see nice progress indicator which should show you estimated position of what user is currently listening (**-p** parameter):
 
 ```sh
 ./lastfm_monitor.py misiektoja -p
@@ -207,7 +213,7 @@ If you want to see nice progress indicator which should show you estimated posit
    <img src="./assets/lastfm_monitor_progress_indicator.png" alt="lastfm_monitor_progress_indicator" width="80%"/>
 </p>
 
-For this functionality to work correctly it is suggested to have the active check interval (**-k**) set to low value (like 2-5 seconds).
+For this functionality to work correctly it is suggested to have the active check interval (**-k** parameter) set to low value (like 2-5 seconds).
 
 ### Check intervals and offline timer 
 
@@ -217,7 +223,7 @@ If you want to change the check interval when the user is offline to 10 seconds 
 ./lastfm_monitor.py misiektoja -c 10 -k 2
 ```
 
-If you want to change the time required to mark the user as inactive (**-o**) to 2 mins - 120 seconds (the timer starts once user stops playing the music):
+If you want to change the time required to mark the user as inactive to 2 mins - 120 seconds (**-o** parameter, the timer starts once user stops playing the music):
 
 ```sh
 ./lastfm_monitor.py misiektoja -o 120
@@ -265,7 +271,7 @@ However keep in mind it is not 100% accurate. I observed duplicate entries also 
 
 Check other supported parameters using **-h**.
 
-You can of course combine all the parameters mentioned earlier together (in monitoring mode, listing mode only supports **-l** and **-n**).
+You can combine all the parameters mentioned earlier in monitoring mode (listing mode only supports **-l** and **-n**).
 
 ## Limitations
 

@@ -2,6 +2,23 @@
 
 This is a high-level summary of the most important changes. 
 
+# Changes in 1.3 (08 May 2024)
+
+**Features and Improvements**:
+
+- Possbility to define LASTFM_API_KEY via command line argument (-u / --lastfm_api_key)
+- Possbility to define LASTFM_API_SECRET via command line argument (-w / --lastfm_shared_secret)
+- The artist and track are included in notification emails when informing how long the previous track was played
+- Email sending function send_email() has been rewritten to detect invalid SMTP settings
+- Strings have been converted to f-strings for better code visibility
+- Info about CSV file name in the start screen
+- Better calculations for how long the user played the previous track
+- Corrected HTML formatting for some notification emails
+
+**Bugfixes**:
+
+- If user played only one track its "played for" time was always greater by LASTFM_ACTIVE_CHECK_INTERVAL than overall playing time
+
 # Changes in 1.2 (30 Apr 2024)
 
 **Features and Improvements**:
