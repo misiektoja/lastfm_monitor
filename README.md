@@ -289,7 +289,7 @@ I suspect it is related to some bug in Spotify and it mainly happens if the user
 However keep in mind it is not 100% accurate. I observed duplicate entries also with no private mode, but in such case number of duplicate entries is limited. So do not treat it as something 100% certain, but it is pretty good indicator that private mode was used.
 
 <p align="center">
-   <img src="./assets/lastfm_monitor_private_mode.png" alt="lastfm_monitor_private_mode" width="80%"/>
+   <img src="./assets/lastfm_monitor_private_mode.png" alt="lastfm_monitor_private_mode" width="90%"/>
 </p>
 
 ### Other
