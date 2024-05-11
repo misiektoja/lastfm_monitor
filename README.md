@@ -16,7 +16,7 @@ lastfm_monitor is a Python script which allows for real-time monitoring of Last.
 - Possibility to control the running copy of the script via signals
 
 <p align="center">
-   <img src="./assets/lastfm_monitor.png" alt="lastfm_monitor_screenshot" width="80%"/>
+   <img src="./assets/lastfm_monitor.png" alt="lastfm_monitor_screenshot" width="90%"/>
 </p>
 
 ## Change Log
@@ -134,7 +134,7 @@ There is also other mode of the tool which prints the recently listened tracks f
 ```
 
 <p align="center">
-   <img src="./assets/lastfm_monitor_listing.png" alt="lastfm_monitor_listing" width="80%"/>
+   <img src="./assets/lastfm_monitor_listing.png" alt="lastfm_monitor_listing" width="95%"/>
 </p>
 
 You can use the **-l** functionality regardless if the monitoring is used or not (it does not interfere). 
@@ -154,7 +154,7 @@ Make sure you defined your SMTP settings earlier (see [SMTP settings](#smtp-sett
 Example email:
 
 <p align="center">
-   <img src="./assets/lastfm_monitor_email_notifications.png" alt="lastfm_monitor_email_notifications" width="80%"/>
+   <img src="./assets/lastfm_monitor_email_notifications.png" alt="lastfm_monitor_email_notifications" width="90%"/>
 </p>
 
 If you also want to be informed every time a user listens to specific songs, you can use **track_notification** functionality (**-t** parameter). 
