@@ -2,6 +2,20 @@
 
 This is a high-level summary of the most important changes. 
 
+# Changes in 1.4 (11 May 2024)
+
+**Features and Improvements**:
+
+- New feature allowing to fetch track duration from Spotify, instead of Last.fm which very often reports wrong duration (or none at all); if you enable **USE_TRACK_DURATION_FROM_SPOTIFY** to **True** in *[lastfm_monitor.py](lastfm_monitor.py)* file (or use **-r** / **--fetch_duration_from_spotify** parameter) and have SP_DC_COOKIE set in the script (or via new -z / --spotify_dc_cookie parameter) then the tool will try to get the track duration from Spotify; you will be able to tell if the track duration comes from Spotify as it has S* suffix at the end (e.g. 3 minutes, 42 seconds S*), while those coming from Last.fm have L* (e.g. 2 minutes, 13 seconds L*); you can disable showing the track duration marks (L*, S*) via **-q** / **--do_not_show_duration_marks** parameter; duration marks are not shown if the functionality to get track durations from Spotify is disabled
+- Function to search for Spotify track ID of the currently listened song (-g / --track_songs functionality) has been rewritten to also return track duration and to better detect proper song; previously sometimes wrong results were returned as we relied on the best single guess of Spotify; in this version we narrowed down the filters (specific artist, track, album) + we perform deterministic case insensitive search for the best fitting track out of the 5 search results, first by doing exact track name comparison and if it fails also substring one; once it fails we perform the search again without album name, so we do 4 different attempts to find the proper track
+- Possbility to define SP_DC_COOKIE via command line argument (**-z** / **--spotify_dc_cookie**)
+- The tool now counts and displays number of times the user paused music in the session, it is also included in email notifications
+- Fine-tuned different parameters and thresholds for detecting skipped songs and those played longer than its track duration
+
+**Bugfixes**:
+
+- Spotify track ID was not returned for track names containing single apostrophe characters
+
 # Changes in 1.3 (08 May 2024)
 
 **Features and Improvements**:

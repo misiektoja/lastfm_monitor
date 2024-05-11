@@ -9,8 +9,8 @@ lastfm_monitor is a Python script which allows for real-time monitoring of Last.
 - Information about how long the user listened to a song, if shorter/longer than track duration, if song has been skipped
 - Email notifications for different events (user gets active/inactive, specific/all songs, songs on loop, new entries showed up while user was offline, errors)
 - Saving all listened songs with timestamps to the CSV file
-- Clickable Spotify, Apple Music and Genius search URLs printed in the console & included in email notifications
-- Showing basic statistics for user's playing session (how long, time span, number of listened & skipped songs, songs on loop, time of paused playback)
+- Clickable Spotify, Apple Music and Genius Lyrics search URLs printed in the console & included in email notifications
+- Showing basic statistics for user's playing session (how long, time span, number of listened & skipped songs, songs on loop, time of paused playback, number of pauses)
 - Support for detecting offline mode
 - Support for detecting Spotify private mode (not 100% accurate)
 - Possibility to control the running copy of the script via signals
@@ -71,7 +71,7 @@ Then change **LASTFM_API_KEY** and **LASTFM_API_SECRET** variables to respective
 
 ### Spotify sp_dc cookie
 
-If you want to use ***'track_songs'*** functionality (-g parameter), so the script automatically plays the track listened by the user in your Spotify client, then you need to log in to Spotify web client [https://open.spotify.com/](https://open.spotify.com/) in your web browser and copy the value of sp_dc cookie to **SP_DC_COOKIE** variable. 
+If you want to get track duration from Spotify (**-r** parameter) or you want to use ***track_songs*** functionality (**-g** parameter), so the script automatically plays the track listened by the user in your Spotify client, then you need to log in to Spotify web client [https://open.spotify.com/](https://open.spotify.com/) in your web browser and copy the value of sp_dc cookie to **SP_DC_COOKIE** variable (or use **-z** parameter). 
 
 You can use Cookie-Editor by cgagnier to get it easily (available for all major web browsers): [https://cookie-editor.com/](https://cookie-editor.com/)
 
@@ -79,7 +79,7 @@ Newly generated Spotify's sp_dc cookie should be valid for 1 year. You will be i
 
 ### SMTP settings
 
-If you want to use email notifications functionality you need to change the SMTP settings (host, port, user, password, sender, recipient).
+If you want to use email notifications functionality you need to change the SMTP settings (host, port, user, password, sender, recipient). If you leave the default settings then no notifications will be sent.
 
 ### Other settings
 
@@ -109,10 +109,10 @@ To monitor specific user activity, just type Last.fm username as parameter (**mi
 ./lastfm_monitor.py misiektoja
 ```
 
-If you have not changed **LASTFM_API_KEY** and **LASTFM_API_SECRET** variables in the *[lastfm_monitor.py](lastfm_monitor.py)* file, you can use **-u** and **-w** parameters:
+If you have not changed **LASTFM_API_KEY** & **LASTFM_API_SECRET** variables in the *[lastfm_monitor.py](lastfm_monitor.py)* file, you can use **-u** and **-w** parameters:
 
 ```sh
-./lastfm_monitor.py misiektoja -u "your_API_key" -w "your_API_secret"
+./lastfm_monitor.py misiektoja -u "your_lastfm_api_key" -w "your_lastfm_api_secret"
 ```
 
 The tool will run infinitely and monitor the user until the script is interrupted (Ctrl+C) or killed the other way.
@@ -121,17 +121,21 @@ You can monitor multiple Last.fm users by spawning multiple copies of the script
 
 It is suggested to use sth like **tmux** or **screen** to have the script running after you log out from the server.
 
-The tool automatically saves its output to *lastfm_monitor_username.log* file (can be changed in the settings or disabled with **-d** parameter).
+The tool automatically saves its output to *lastfm_monitor_{username}.log* file (can be changed in the settings or disabled with **-d** parameter).
 
 The tool also saves the last activity information (artist, track, timestamp) to *lastfm_username_last_activity.json file*, so it can be reused in case the tool needs to be restarted.
 
 ### Listing mode
 
-There is also other mode of the tool which prints the recently listened tracks for the user (**-l** parameter). You can also add **-n** to define how many tracks should be displayed, by default it shows 30 last tracks:
+There is also other mode of the tool which prints the recently listened tracks for the user (**-l** parameter). You can also add **-n** parameter to define how many tracks should be displayed, by default it shows 30 last tracks:
 
 ```sh
-./lastfm_monitor.py -l misiektoja -n 50
+./lastfm_monitor.py -l misiektoja -n 10
 ```
+
+<p align="center">
+   <img src="./assets/lastfm_monitor_listing.png" alt="lastfm_monitor_listing" width="80%"/>
+</p>
 
 You can use the **-l** functionality regardless if the monitoring is used or not (it does not interfere). 
 
@@ -199,6 +203,8 @@ If you want the script to automatically track what the user listens and to play 
 ./lastfm_monitor.py misiektoja -g
 ```
 
+In order to use this functionality you need to have properly defined sp_dc cookie value as described [here](#spotify-sp_dc-cookie).
+
 Currently the script only supports playing the songs in Spotify client in Mac OS. There are conditionals in the code prepared for Linux and Windows, so feel free to test it and add proper commands.
 
 ### Progress indicator
@@ -210,20 +216,40 @@ If you want to see nice progress indicator which should show you estimated posit
 ```
 
 <p align="center">
-   <img src="./assets/lastfm_monitor_progress_indicator.png" alt="lastfm_monitor_progress_indicator" width="80%"/>
+   <img src="./assets/lastfm_monitor_progress_indicator.png" alt="lastfm_monitor_progress_indicator" width="90%"/>
 </p>
 
 For this functionality to work correctly it is suggested to have the active check interval (**-k** parameter) set to low value (like 2-5 seconds).
 
+### Getting track duration from Spotify
+
+If you want the tool to fetch track duration from Spotify, instead of Last.fm which very often reports wrong duration (or none at all), then enable **USE_TRACK_DURATION_FROM_SPOTIFY** to **True** in *[lastfm_monitor.py](lastfm_monitor.py)* file or use **-r** parameter:
+
+```sh
+./lastfm_monitor.py misiektoja -r
+```
+
+In order to use this functionality you need to have properly defined sp_dc cookie value as described [here](#spotify-sp_dc-cookie).
+
+You will be able to tell if the track duration comes from Spotify as it has S* suffix at the end (e.g. 3 minutes, 42 seconds S*), while those coming from Last.fm have L* (e.g. 2 minutes, 13 seconds L*).
+
+You can disable showing the track duration marks (L*, S*) via **-q** parameter:
+
+```sh
+./lastfm_monitor.py misiektoja -r -q
+```
+
+Duration marks are not shown if the functionality to get track durations from Spotify is disabled.
+
 ### Check intervals and offline timer 
 
-If you want to change the check interval when the user is offline to 10 seconds (**-c**) and active to 2 seconds (**-k**):
+If you want to change the check interval when the user is offline to 10 seconds use **-c** parameter and when the user is active to 2 seconds use **-k** parameter:
 
 ```sh
 ./lastfm_monitor.py misiektoja -c 10 -k 2
 ```
 
-If you want to change the time required to mark the user as inactive to 2 mins - 120 seconds (**-o** parameter, the timer starts once user stops playing the music):
+If you want to change the time required to mark the user as inactive to 2 mins (120 seconds) use **-o** parameter (the timer starts once the user stops playing the music):
 
 ```sh
 ./lastfm_monitor.py misiektoja -o 120
@@ -231,17 +257,16 @@ If you want to change the time required to mark the user as inactive to 2 mins -
 
 ### Controlling the script via signals
 
-
 The tool has several signal handlers implemented which allow to change behaviour of the tool without a need to restart it with new parameters.
 
 List of supported signals:
 
 | Signal | Description |
 | ----------- | ----------- |
-| USR1 | Toggle email notifications when user gets active/inactive |
-| USR2 | Toggle email notifications for every song |
-| HUP  | Toggle showing of progress indicator |
-| CONT | Toggle email notifications for tracked songs |
+| USR1 | Toggle email notifications when user gets active/inactive (-a, -i) |
+| USR2 | Toggle email notifications for every song (-j) |
+| HUP  | Toggle showing of progress indicator (-p) |
+| CONT | Toggle email notifications for tracked songs (-t) |
 | TRAP | Increase the inactivity check timer (by 30 seconds) |
 | ABRT | Decrease the inactivity check timer (by 30 seconds) |
 
@@ -277,7 +302,7 @@ You can combine all the parameters mentioned earlier in monitoring mode (listing
 
 The script has been tested with Last.fm account integrated with Spotify client, however it should work with other clients.
 
-Currently the ***'track_songs'*** functionality (**-g** parameter) only supports playing the songs in Spotify client in Mac OS. There are conditionals in the code prepared for Linux and Windows, so feel free to test it and add proper commands.
+Currently the ***track_songs*** functionality (**-g** parameter) only supports playing the songs in Spotify client in Mac OS. There are conditionals in the code prepared for Linux and Windows, so feel free to test it and add proper commands.
 
 ## Colouring log output with GRC
 
