@@ -123,7 +123,7 @@ It is suggested to use sth like **tmux** or **screen** to have the script runnin
 
 The tool automatically saves its output to *lastfm_monitor_{username}.log* file (can be changed in the settings or disabled with **-d** parameter).
 
-The tool also saves the last activity information (artist, track, timestamp) to *lastfm_username_last_activity.json file*, so it can be reused in case the tool needs to be restarted.
+The tool also saves the last activity information (artist, track, timestamp) to *lastfm_{username}_last_activity.json file*, so it can be reused in case the tool needs to be restarted.
 
 ### Listing mode
 
