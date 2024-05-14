@@ -678,20 +678,21 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
     last_activity_artist=""
     last_activity_track=""
 
-    try:
-        if os.path.isfile(lastfm_last_activity_file):
+    if os.path.isfile(lastfm_last_activity_file):
+        try:
             with open(lastfm_last_activity_file, 'r', encoding="utf-8") as f:
                 last_activity_read=json.load(f)
-            if last_activity_read:
-                last_activity_ts=last_activity_read[0]
-                last_activity_artist=last_activity_read[1]
-                last_activity_track=last_activity_read[2]
-                lastfm_last_activity_file_mdate_dt=datetime.fromtimestamp(int(os.path.getmtime(lastfm_last_activity_file)))
-                lastfm_last_activity_file_mdate=lastfm_last_activity_file_mdate_dt.strftime("%d %b %Y, %H:%M:%S")
-                lastfm_last_activity_file_mdate_weekday=str(calendar.day_abbr[(lastfm_last_activity_file_mdate_dt).weekday()])
-                print(f"* Last activity loaded from file '{lastfm_last_activity_file}' ({lastfm_last_activity_file_mdate_weekday} {lastfm_last_activity_file_mdate})")
-    except Exception as e:
-        print(f"Error - {e}")
+        except Exception as e:
+            print(f"* Cannot load last status from '{lastfm_last_activity_file}' file - {e}")
+        if last_activity_read:
+            last_activity_ts=last_activity_read[0]
+            last_activity_artist=last_activity_read[1]
+            last_activity_track=last_activity_read[2]
+            lastfm_last_activity_file_mdate_dt=datetime.fromtimestamp(int(os.path.getmtime(lastfm_last_activity_file)))
+            lastfm_last_activity_file_mdate=lastfm_last_activity_file_mdate_dt.strftime("%d %b %Y, %H:%M:%S")
+            lastfm_last_activity_file_mdate_weekday=str(calendar.day_abbr[(lastfm_last_activity_file_mdate_dt).weekday()])
+            print(f"* Last activity loaded from file '{lastfm_last_activity_file}' ({lastfm_last_activity_file_mdate_weekday} {lastfm_last_activity_file_mdate})")
+
 
     try:
         new_track=user.get_now_playing()
@@ -788,8 +789,12 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
         last_activity_to_save.append(artist)
         last_activity_to_save.append(track)
         last_activity_to_save.append(album)
-        with open(lastfm_last_activity_file, 'w', encoding="utf-8") as f:
-            json.dump(last_activity_to_save, f, indent=2)              
+
+        try:
+            with open(lastfm_last_activity_file, 'w', encoding="utf-8") as f:
+                json.dump(last_activity_to_save, f, indent=2)
+        except Exception as e:
+            print(f"* Cannot save last status to '{lastfm_last_activity_file}' file - {e}")
 
         try: 
             if csv_file_name:
@@ -1071,8 +1076,11 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                     last_activity_to_save.append(artist)
                     last_activity_to_save.append(track)
                     last_activity_to_save.append(album)
-                    with open(lastfm_last_activity_file, 'w', encoding="utf-8") as f:
-                        json.dump(last_activity_to_save, f, indent=2)         
+                    try:
+                        with open(lastfm_last_activity_file, 'w', encoding="utf-8") as f:
+                            json.dump(last_activity_to_save, f, indent=2)
+                    except Exception as e:
+                        print(f"* Cannot save last status to '{lastfm_last_activity_file}' file - {e}")
 
                     duration_m_body=""
                     duration_m_body_html=""
@@ -1339,8 +1347,11 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                     last_activity_to_save.append(artist)
                     last_activity_to_save.append(track)
                     last_activity_to_save.append(album)
-                    with open(lastfm_last_activity_file, 'w', encoding="utf-8") as f:
-                        json.dump(last_activity_to_save, f, indent=2)                        
+                    try:
+                        with open(lastfm_last_activity_file, 'w', encoding="utf-8") as f:
+                            json.dump(last_activity_to_save, f, indent=2)
+                    except Exception as e:
+                        print(f"* Cannot save last status to '{lastfm_last_activity_file}' file - {e}")
                     if inactive_notification:
                         m_subject=f"Last.fm user {username} is inactive: '{artist} - {track}' (after {calculate_timespan(int(lf_active_ts_last),int(lf_active_ts_start),show_seconds=False)}: {get_range_of_dates_from_tss(lf_active_ts_start,lf_active_ts_last,short=True)})"
                         m_body=f"Last played: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple search URL: {apple_search_url}\nGenius lyrics URL: {genius_search_url}\n\nUser got inactive after listening to music for {calculate_timespan(int(lf_active_ts_last),int(lf_active_ts_start))}\nUser played music from {get_range_of_dates_from_tss(lf_active_ts_start,lf_active_ts_last,short=True,between_sep=" to ")}{paused_mbody}{listened_songs_mbody}{played_for_m_body}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}\nInactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts("\nTimestamp: ")}"
