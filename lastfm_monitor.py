@@ -26,7 +26,7 @@ VERSION=1.5
 LASTFM_API_KEY="your_lastfm_api_key" # Last.fm 'API key'
 LASTFM_API_SECRET="your_lastfm_api_secret" # Last.fm 'Shared secret'
 
-# This setting is optional and only needed if you want to get track duration from Spotify (more accurate than Last.fm) or 
+# This setting is optional and only needed if you want to get track duration from Spotify (-r option, more accurate than Last.fm) or 
 # if you want to use -g / --track_songs functionality, so we can find Spotify track ID and play it in your Spotify client
 # 
 # Log in to Spotify web client (https://open.spotify.com/) and put the value of sp_dc cookie below (or use -z parameter)
@@ -60,6 +60,29 @@ LASTFM_ACTIVE_CHECK_INTERVAL=3 # 3 seconds
 # After which time do we consider user as inactive (after last activity); in seconds
 # You can also use -o parameter
 LASTFM_INACTIVITY_CHECK=180 # 3 mins
+
+# What method should we use to play the song listened by the tracked user in Spotify client under macOS
+# (i.e. when -g / --track_songs functionality is enabled)
+# Methods:
+#       "apple-script" (recommended)
+#       "trigger-url"
+MACOS_PLAYING_METHOD="apple-script"
+
+# What method should we use to play the song listened by the tracked user in Spotify client under Linux OS 
+# (i.e. when -g / --track_songs functionality is enabled)
+# Methods:
+#       "dbus-send" (most common one)
+#       "qdbus"
+#       "trigger-url"
+LINUX_PLAYING_METHOD="dbus-send"
+
+# What method should we use to play the song listened by the tracked user in Spotify client under Windows OS 
+# (if -g / --track_songs functionality is enabled)
+# Methods:
+#       "start-uri" (recommended)
+#       "spotify-cmd"
+#       "trigger-url"
+WINDOWS_PLAYING_METHOD="start-uri"
 
 # How many consecutive plays of the same song is considered as being on loop
 SONG_ON_LOOP_VALUE=3
@@ -621,14 +644,54 @@ def spotify_search_song_trackid_duration(access_token,artist,track,album=""):
 
     return sp_track_uri, sp_track_duration
 
-def spotify_win_play_song(method,sp_track_id):
+def spotify_macos_play_song(sp_track_id,method=MACOS_PLAYING_METHOD):
+    if method=="apple-script":    # apple-script
+        script=f'tell app "Spotify" to play track "spotify:track:{sp_track_id}"'
+        proc=subprocess.Popen(['osascript', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        stdout, stderr=proc.communicate(script)
+    else:                       # trigger-url - just trigger track URL in the client
+        subprocess.call(('open', spotify_convert_uri_to_url(f"spotify:track:{sp_track_id}")))
+
+def spotify_macos_play_pause(action,method=MACOS_PLAYING_METHOD):
+    if method=="apple-script":    # apple-script
+        if str(action).lower()=="pause":
+            script='tell app "Spotify" to pause'
+            proc=subprocess.Popen(['osascript', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+            stdout, stderr=proc.communicate(script)
+        elif str(action).lower()=="play":
+            script='tell app "Spotify" to play'
+            proc=subprocess.Popen(['osascript', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+            stdout, stderr=proc.communicate(script)         
+
+def spotify_linux_play_song(sp_track_id,method=LINUX_PLAYING_METHOD):
+    if method=="dbus-send":     # dbus-send
+        subprocess.call((f"dbus-send --type=method_call --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.OpenUri string:'spotify:track:{sp_track_id}'"), shell=True)
+    elif method=="qdbus":       # qdbus
+        subprocess.call((f"qdbus org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.OpenUri spotify:track:{sp_track_id}"), shell=True)        
+    else:                       # trigger-url - just trigger track URL in the client
+        subprocess.call(('xdg-open', spotify_convert_uri_to_url(f"spotify:track:{sp_track_id}")))
+
+def spotify_linux_play_pause(action,method=LINUX_PLAYING_METHOD):
+    if method=="dbus-send":     # dbus-send
+        if str(action).lower()=="pause":
+            subprocess.call((f"dbus-send --type=method_call --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.Pause"), shell=True)
+        elif str(action).lower()=="play":
+            subprocess.call((f"dbus-send --type=method_call --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.Play"), shell=True)            
+    elif method=="qdbus":       # qdbus
+        if str(action).lower()=="pause":
+            subprocess.call((f"qdbus org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.Pause"), shell=True)
+        elif str(action).lower()=="play":
+            subprocess.call((f"qdbus org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.Play"), shell=True) 
+
+def spotify_win_play_song(sp_track_id,method=WINDOWS_PLAYING_METHOD):
     WIN_SPOTIFY_APP_PATH=r'%APPDATA%\Spotify\Spotify.exe'
 
-    if method==1:
-        subprocess.call(('start', f"spotify:track:{sp_track_id}"), shell=True)
-    elif method==2:
-        subprocess.call((WIN_SPOTIFY_APP_PATH, f"--uri=spotify:track:{sp_track_id}"), shell=True)
-    else:
+    if method=="start-uri":     # start-uri
+        #subprocess.call(('start', f"spotify:track:{sp_track_id}"), shell=True)
+        subprocess.call((f"start spotify:track:{sp_track_id}"), shell=True)        
+    elif method=="spotify-cmd": # spotify-cmd
+        subprocess.call((f"{WIN_SPOTIFY_APP_PATH} --uri=spotify:track:{sp_track_id}"), shell=True)
+    else:                       # trigger-url - just trigger track URL in the client
         os.startfile(spotify_convert_uri_to_url(f"spotify:track:{sp_track_id}"))
 
 # Main function monitoring activity of the specified Last.fm user
@@ -821,22 +884,13 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
         lf_user_online=True
 
         # If tracking functionality is enabled then play the current song via Spotify client
-        if track_songs:
-            spotify_trigger_url=spotify_search_url
-            if sp_track_id:                        
-                spotify_trigger_url=spotify_convert_uri_to_url(f"spotify:track:{sp_track_id}")
-                         
+        if track_songs and sp_track_id:
             if platform.system() == 'Darwin':       # macOS
-                if sp_track_id:
-                    script=f'tell app "Spotify" to play track "spotify:track:{sp_track_id}"'
-                    proc=subprocess.Popen(['osascript', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-                    stdout, stderr=proc.communicate(script)
-                else:
-                    subprocess.call(('open', spotify_trigger_url))
+                spotify_macos_play_song(sp_track_id)
             elif platform.system() == 'Windows':    # Windows
-                spotify_win_play_song(1,sp_track_id)
-            else:                                   # linux variants
-                subprocess.call(('xdg-open', spotify_trigger_url))
+                spotify_win_play_song(sp_track_id)
+            else:                                   # Linux variants
+                spotify_linux_play_song(sp_track_id)
 
     i=0
     duplicate_entries=False
@@ -918,13 +972,11 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                     # If tracking functionality is enabled then RESUME the current song via Spotify client
                     if track_songs:                                         
                         if platform.system() == 'Darwin':       # macOS
-                            script='tell app "Spotify" to play'
-                            proc=subprocess.Popen(['osascript', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-                            stdout, stderr=proc.communicate(script)
+                            spotify_macos_play_pause("play")
                         elif platform.system() == 'Windows':    # Windows
                             pass
                         else:                                   # Linux variants
-                            pass                               
+                            spotify_linux_play_pause("play")
 
                 playing_paused=False
 
@@ -1089,22 +1141,13 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                         duration_m_body_html=f"<br>Duration: {display_time(track_duration)}{duration_mark}"
 
                     # If tracking functionality is enabled then play the current song via Spotify client
-                    if track_songs:
-                        spotify_trigger_url=spotify_search_url
-                        if sp_track_id:                         
-                            spotify_trigger_url=spotify_convert_uri_to_url(f"spotify:track:{sp_track_id}")
-                                     
+                    if track_songs and sp_track_id:
                         if platform.system() == 'Darwin':       # macOS
-                            if sp_track_id:
-                                script=f'tell app "Spotify" to play track "spotify:track:{sp_track_id}"'
-                                proc=subprocess.Popen(['osascript', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-                                stdout, stderr=proc.communicate(script)
-                            else:
-                                subprocess.call(('open', spotify_trigger_url))
+                            spotify_macos_play_song(sp_track_id)
                         elif platform.system() == 'Windows':    # Windows
-                            spotify_win_play_song(1,sp_track_id)
-                        else:                                   # linux variants
-                            subprocess.call(('xdg-open', spotify_trigger_url))
+                            spotify_win_play_song(sp_track_id)
+                        else:                                   # Linux variants
+                            spotify_linux_play_song(sp_track_id)
 
                     # User was offline and got active
                     if (not lf_user_online and (lf_track_ts_start-lf_active_ts_last) > LASTFM_INACTIVITY_CHECK and lf_active_ts_last>0) or (not lf_user_online and lf_active_ts_last>0 and app_started_and_user_offline):
@@ -1233,13 +1276,11 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                     # If tracking functionality is enabled then PAUSE the current song via Spotify client
                     if track_songs:                                         
                         if platform.system() == 'Darwin':       # macOS
-                            script='tell app "Spotify" to pause'
-                            proc=subprocess.Popen(['osascript', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-                            stdout, stderr=proc.communicate(script)
+                            spotify_macos_play_pause("pause")
                         elif platform.system() == 'Windows':    # Windows
                             pass
                         else:                                   # Linux variants
-                            pass                               
+                            spotify_linux_play_pause("pause")
                
                 # User got inactive
                 if ((int(time.time()) - lf_active_ts_last) > LASTFM_INACTIVITY_CHECK) and lf_user_online and lf_active_ts_last>0 and lf_active_ts_start>0:
@@ -1320,27 +1361,24 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                     if track_songs:  
                         if SP_USER_GOT_OFFLINE_TRACK_ID:
                             if platform.system() == 'Darwin':       # macOS
-                                script=f'tell app "Spotify" to play track "spotify:track:{SP_USER_GOT_OFFLINE_TRACK_ID}"'
-                                proc=subprocess.Popen(['osascript', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-                                stdout, stderr=proc.communicate(script)
+                                spotify_macos_play_song(SP_USER_GOT_OFFLINE_TRACK_ID)
                                 if SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE > 0:
                                     time.sleep(SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE)
-                                    script='tell app "Spotify" to pause'
-                                    proc=subprocess.Popen(['osascript', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)                                                     
-                                    stdout, stderr=proc.communicate(script)
+                                    spotify_macos_play_pause("pause")
                             elif platform.system() == 'Windows':    # Windows
                                 pass
                             else:                                   # Linux variants
-                                pass                               
+                                spotify_linux_play_song(SP_USER_GOT_OFFLINE_TRACK_ID)
+                                if SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE > 0:
+                                    time.sleep(SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE)
+                                    spotify_linux_play_pause("pause")                                
                         else:
                             if platform.system() == 'Darwin':       # macOS
-                                script='tell app "Spotify" to pause'
-                                proc=subprocess.Popen(['osascript', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)                                                     
-                                stdout, stderr=proc.communicate(script)
+                                spotify_macos_play_pause("pause")
                             elif platform.system() == 'Windows':    # Windows
                                 pass
                             else:                                   # Linux variants
-                                pass                               
+                                spotify_linux_play_pause("pause")                               
                       
                     last_activity_to_save=[]
                     last_activity_to_save.append(lf_active_ts_last)
