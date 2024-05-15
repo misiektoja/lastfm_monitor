@@ -51,7 +51,7 @@ RECEIVER_EMAIL="your_receiver_email"
 
 # How often do we perform checks for user activity when considered offline (not playing music right now); in seconds
 # You can also use -c parameter
-LASTFM_CHECK_INTERVAL=10 # 15 seconds
+LASTFM_CHECK_INTERVAL=10 # 10 seconds
 
 # How often do we perform checks for user activity when online (playing music right now); in seconds
 # You can also use -k parameter
@@ -61,28 +61,28 @@ LASTFM_ACTIVE_CHECK_INTERVAL=3 # 3 seconds
 # You can also use -o parameter
 LASTFM_INACTIVITY_CHECK=180 # 3 mins
 
-# What method should we use to play the song listened by the tracked user in Spotify client under macOS
+# What method should we use to play the song listened by the tracked user in local Spotify client under macOS
 # (i.e. when -g / --track_songs functionality is enabled)
 # Methods:
 #       "apple-script" (recommended)
 #       "trigger-url"
-MACOS_PLAYING_METHOD="apple-script"
+SPOTIFY_MACOS_PLAYING_METHOD="apple-script"
 
-# What method should we use to play the song listened by the tracked user in Spotify client under Linux OS 
+# What method should we use to play the song listened by the tracked user in local Spotify client under Linux OS 
 # (i.e. when -g / --track_songs functionality is enabled)
 # Methods:
 #       "dbus-send" (most common one)
 #       "qdbus"
 #       "trigger-url"
-LINUX_PLAYING_METHOD="dbus-send"
+SPOTIFY_LINUX_PLAYING_METHOD="dbus-send"
 
-# What method should we use to play the song listened by the tracked user in Spotify client under Windows OS 
+# What method should we use to play the song listened by the tracked user in local Spotify client under Windows OS 
 # (if -g / --track_songs functionality is enabled)
 # Methods:
 #       "start-uri" (recommended)
 #       "spotify-cmd"
 #       "trigger-url"
-WINDOWS_PLAYING_METHOD="start-uri"
+SPOTIFY_WINDOWS_PLAYING_METHOD="start-uri"
 
 # How many consecutive plays of the same song is considered as being on loop
 SONG_ON_LOOP_VALUE=3
@@ -126,7 +126,7 @@ CHECK_INTERNET_URL='http://www.google.com/'
 CHECK_INTERNET_TIMEOUT=5
 
 # The name of the .log file; the tool by default will output its messages to lastfm_monitor_username.log file
-lf_logfile="lastfm_monitor"
+LF_LOGFILE="lastfm_monitor"
 
 # Value used by signal handlers increasing/decreasing the inactivity check (LASTFM_INACTIVITY_CHECK); in seconds
 LASTFM_INACTIVITY_CHECK_SIGNAL_VALUE=30 # 30 seconds
@@ -141,6 +141,9 @@ re_replace_str=r'( - (\d*)( )*remaster$)|( - (\d*)( )*remastered( version)*( \d*
 
 # Default value for Spotify network-related timeouts in functions; in seconds
 FUNCTION_TIMEOUT=5 # 5 seconds
+
+# How many recent tracks we fetch after start and every time user gets online
+RECENT_TRACKS_NUMBER=10
 
 TOOL_ALIVE_COUNTER=TOOL_ALIVE_INTERVAL/LASTFM_CHECK_INTERVAL
 
@@ -498,21 +501,21 @@ def lastfm_get_recent_tracks(username,network,number):
     try:
         recent_tracks=network.get_user(username).get_recent_tracks(limit=number)
     except Exception as e:
-        print(f"* Error - {e}")
+        print(f"* lastfm_get_recent_tracks error - {e}")
         raise
     return recent_tracks
 
 # Function displaying the list of recently played Last.fm tracks
 def lastfm_list_tracks(username,user,network,number):
     try:
-        recent_tracks=lastfm_get_recent_tracks(username,network,number)
         new_track=user.get_now_playing()
+        recent_tracks=lastfm_get_recent_tracks(username,network,number)
     except Exception as e:
-        print(f"* Error - {e}")
-        raise
+        print(f"* Error: cannot display recent tracks for the user - {e}")
+        sys.exit(1)
     last_played=0
 
-    i=0
+    i=0; p=0
     duplicate_entries=False
     for previous, t, nxt in previous_and_next(reversed(recent_tracks)):
         i+=1
@@ -521,6 +524,7 @@ def lastfm_list_tracks(username,user,network,number):
         print(f"{i}\t{datetime.fromtimestamp(int(t.timestamp)).strftime("%d %b %Y, %H:%M:%S")}\t{calendar.day_abbr[(datetime.fromtimestamp(int(t.timestamp))).weekday()]}\t{t.track}")
         if previous:
             if previous.timestamp==t.timestamp:
+                p+=1
                 duplicate_entries=True
                 print("DUPLICATE ENTRY")
     print("---------------------------------------------------------------------------------------------------------")
@@ -528,7 +532,7 @@ def lastfm_list_tracks(username,user,network,number):
         print(f"*** User played last time {calculate_timespan(int(time.time()),last_played,show_seconds=True)} ago! ({get_date_from_ts(last_played)})")
 
     if duplicate_entries:
-        print("*** Duplicate entries found, possible PRIVATE MODE")
+        print(f"*** Duplicate entries ({p}) found, possible PRIVATE MODE")
 
     if new_track:
         artist=str(new_track.artist)
@@ -635,7 +639,7 @@ def spotify_search_song_trackid_duration(access_token,artist,track,album=""):
 
     return sp_track_uri, sp_track_duration
 
-def spotify_macos_play_song(sp_track_id,method=MACOS_PLAYING_METHOD):
+def spotify_macos_play_song(sp_track_id,method=SPOTIFY_MACOS_PLAYING_METHOD):
     if method=="apple-script":    # apple-script
         script=f'tell app "Spotify" to play track "spotify:track:{sp_track_id}"'
         proc=subprocess.Popen(['osascript', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
@@ -643,7 +647,7 @@ def spotify_macos_play_song(sp_track_id,method=MACOS_PLAYING_METHOD):
     else:                       # trigger-url - just trigger track URL in the client
         subprocess.call(('open', spotify_convert_uri_to_url(f"spotify:track:{sp_track_id}")))
 
-def spotify_macos_play_pause(action,method=MACOS_PLAYING_METHOD):
+def spotify_macos_play_pause(action,method=SPOTIFY_MACOS_PLAYING_METHOD):
     if method=="apple-script":    # apple-script
         if str(action).lower()=="pause":
             script='tell app "Spotify" to pause'
@@ -654,7 +658,7 @@ def spotify_macos_play_pause(action,method=MACOS_PLAYING_METHOD):
             proc=subprocess.Popen(['osascript', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
             stdout, stderr=proc.communicate(script)         
 
-def spotify_linux_play_song(sp_track_id,method=LINUX_PLAYING_METHOD):
+def spotify_linux_play_song(sp_track_id,method=SPOTIFY_LINUX_PLAYING_METHOD):
     if method=="dbus-send":     # dbus-send
         subprocess.call((f"dbus-send --type=method_call --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.OpenUri string:'spotify:track:{sp_track_id}'"), shell=True)
     elif method=="qdbus":       # qdbus
@@ -662,7 +666,7 @@ def spotify_linux_play_song(sp_track_id,method=LINUX_PLAYING_METHOD):
     else:                       # trigger-url - just trigger track URL in the client
         subprocess.call(('xdg-open', spotify_convert_uri_to_url(f"spotify:track:{sp_track_id}")), stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 
-def spotify_linux_play_pause(action,method=LINUX_PLAYING_METHOD):
+def spotify_linux_play_pause(action,method=SPOTIFY_LINUX_PLAYING_METHOD):
     if method=="dbus-send":     # dbus-send
         if str(action).lower()=="pause":
             subprocess.call((f"dbus-send --type=method_call --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.Pause"), shell=True)
@@ -674,7 +678,7 @@ def spotify_linux_play_pause(action,method=LINUX_PLAYING_METHOD):
         elif str(action).lower()=="play":
             subprocess.call((f"qdbus org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.Play"), shell=True) 
 
-def spotify_win_play_song(sp_track_id,method=WINDOWS_PLAYING_METHOD):
+def spotify_win_play_song(sp_track_id,method=SPOTIFY_WINDOWS_PLAYING_METHOD):
     WIN_SPOTIFY_APP_PATH=r'%APPDATA%\Spotify\Spotify.exe'
 
     if method=="start-uri":     # start-uri
@@ -750,7 +754,7 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
 
     try:
         new_track=user.get_now_playing()
-        recent_tracks=lastfm_get_recent_tracks(username,network,10)
+        recent_tracks=lastfm_get_recent_tracks(username,network,RECENT_TRACKS_NUMBER)
     except Exception as e:
         print(f"* Error - {e}")
         sys.exit(1)
@@ -886,7 +890,7 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
             else:                                   # Linux variants
                 spotify_linux_play_song(sp_track_id)
 
-    i=0
+    i=0; p=0
     duplicate_entries=False
     print("\nList of recently listened tracks:\n")
     for previous, t, nxt in previous_and_next(reversed(recent_tracks)):
@@ -894,11 +898,12 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
         print(f"{i}\t{datetime.fromtimestamp(int(t.timestamp)).strftime("%d %b %Y, %H:%M:%S")}\t{calendar.day_abbr[(datetime.fromtimestamp(int(t.timestamp))).weekday()]}\t{t.track}")
         if previous:
             if previous.timestamp==t.timestamp:
+                p+=1
                 duplicate_entries=True
                 print("DUPLICATE ENTRY")
 
     if duplicate_entries:
-        print("*** Duplicate entries found, possible PRIVATE MODE")
+        print(f"*** Duplicate entries ({p}) found, possible PRIVATE MODE")
 
     print(f"\nTracks/albums to monitor: {tracks}")
 
@@ -1161,17 +1166,19 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                         private_mode=""
                         private_mode_html=""
                         try:
-                            recent_tracks_while_offline=lastfm_get_recent_tracks(username,network,10)
+                            p=0
+                            recent_tracks_while_offline=lastfm_get_recent_tracks(username,network,RECENT_TRACKS_NUMBER)
                             for previous, t, nxt in previous_and_next(reversed(recent_tracks_while_offline)):
                                 if previous:
                                     if previous.timestamp==t.timestamp:
+                                        p+=1
                                         duplicate_entries=True
                         except Exception as e:
                             print(f"* Error - {e}")
                         if duplicate_entries:
-                            private_mode=f"\n\nDuplicate entries found, possible private mode ({get_range_of_dates_from_tss(lf_active_ts_last_old,lf_track_ts_start,short=True)})"
-                            private_mode_html=f"<br><br>Duplicate entries found, possible <b>private mode</b> (<b>{ get_range_of_dates_from_tss(lf_active_ts_last_old,lf_track_ts_start,short=True)}</b>)"                            
-                            print(f"\n*** Duplicate entries found, possible PRIVATE MODE ({get_range_of_dates_from_tss(lf_active_ts_last_old,lf_track_ts_start,short=True)})")
+                            private_mode=f"\n\nDuplicate entries ({p}) found, possible private mode ({get_range_of_dates_from_tss(lf_active_ts_last_old,lf_track_ts_start,short=True)})"
+                            private_mode_html=f"<br><br>Duplicate entries ({p}) found, possible <b>private mode</b> (<b>{ get_range_of_dates_from_tss(lf_active_ts_last_old,lf_track_ts_start,short=True)}</b>)"                            
+                            print(f"\n*** Duplicate entries ({p}) found, possible PRIVATE MODE ({get_range_of_dates_from_tss(lf_active_ts_last_old,lf_track_ts_start,short=True)})")
 
                         print(f"\n*** User got ACTIVE after being offline for {calculate_timespan(int(lf_track_ts_start),int(lf_active_ts_last))}{last_track_start_changed}")
                         print(f"*** Last activity:\t{get_date_from_ts(lf_active_ts_last)}")                        
@@ -1563,8 +1570,8 @@ if __name__ == "__main__":
         csv_exists=False
 
     if not args.disable_logging:
-        lf_logfile=f"{lf_logfile}_{args.LASTFM_USERNAME}.log"
-        sys.stdout=Logger(lf_logfile)
+        LF_LOGFILE=f"{LF_LOGFILE}_{args.LASTFM_USERNAME}.log"
+        sys.stdout=Logger(LF_LOGFILE)
 
     active_notification=args.active_notification
     inactive_notification=args.inactive_notification
