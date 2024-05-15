@@ -805,10 +805,12 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
         print(f"\nTrack:\t\t\t{artist} - {track}")
         print(f"Album:\t\t\t{album}")
 
-        if USE_TRACK_DURATION_FROM_SPOTIFY and SP_DC_COOKIE and SP_DC_COOKIE!="your_sp_dc_cookie_value":
+        if (USE_TRACK_DURATION_FROM_SPOTIFY or track_songs) and SP_DC_COOKIE and SP_DC_COOKIE!="your_sp_dc_cookie_value":
             accessToken=spotify_get_access_token(SP_DC_COOKIE)
             if accessToken:
                 sp_track_id, sp_track_duration=spotify_search_song_trackid_duration(accessToken,artist,track,album)
+                if not USE_TRACK_DURATION_FROM_SPOTIFY:
+                    sp_track_duration=0
 
         if sp_track_duration>0:
             track_duration=sp_track_duration
@@ -1086,10 +1088,12 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                     sp_track_duration=0
                     duration_mark="" 
 
-                    if USE_TRACK_DURATION_FROM_SPOTIFY and SP_DC_COOKIE and SP_DC_COOKIE!="your_sp_dc_cookie_value":
+                    if (USE_TRACK_DURATION_FROM_SPOTIFY or track_songs) and SP_DC_COOKIE and SP_DC_COOKIE!="your_sp_dc_cookie_value":
                         accessToken=spotify_get_access_token(SP_DC_COOKIE)
                         if accessToken:
                             sp_track_id, sp_track_duration=spotify_search_song_trackid_duration(accessToken,artist,track,album)
+                            if not USE_TRACK_DURATION_FROM_SPOTIFY:
+                                sp_track_duration=0                            
 
                     if sp_track_duration>0:
                         track_duration=sp_track_duration
