@@ -660,7 +660,7 @@ def spotify_linux_play_song(sp_track_id,method=LINUX_PLAYING_METHOD):
     elif method=="qdbus":       # qdbus
         subprocess.call((f"qdbus org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.OpenUri spotify:track:{sp_track_id}"), shell=True)        
     else:                       # trigger-url - just trigger track URL in the client
-        subprocess.call(('xdg-open', spotify_convert_uri_to_url(f"spotify:track:{sp_track_id}")))
+        subprocess.call(('xdg-open', spotify_convert_uri_to_url(f"spotify:track:{sp_track_id}")), stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 
 def spotify_linux_play_pause(action,method=LINUX_PLAYING_METHOD):
     if method=="dbus-send":     # dbus-send
