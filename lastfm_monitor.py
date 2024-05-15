@@ -545,13 +545,10 @@ def spotify_get_access_token(sp_dc):
     try:
         response=req.get(url, cookies=cookies, timeout=FUNCTION_TIMEOUT)
         response.raise_for_status()
+        return response.json()["accessToken"]
     except Exception as e:
         print(f"spotify_get_access_token error - {e}")
-        if hasattr(e, 'response'):
-            if hasattr(e.response, 'text'):
-                print (e.response.text)
-        raise
-    return response.json()["accessToken"]
+        return ""
 
 # Function converting Spotify URI (e.g. spotify:user:username) to URL (e.g. https://open.spotify.com/user/username)
 def spotify_convert_uri_to_url(uri):
@@ -618,14 +615,11 @@ def spotify_search_song_trackid_duration(access_token,artist,track,album=""):
             response.raise_for_status()
         except Exception as e:
             print(f"spotify_search_song_trackid_duration error - {e}")
-            if hasattr(e, 'response'):
-                if hasattr(e.response, 'text'):
-                    print (e.response.text)
-            raise
 
         json_response=response.json()
-        if json_response["tracks"].get("total") > 0:
-            sp_track_uri,sp_track_duration=spotify_search_process_track_items(json_response["tracks"]["items"],track)
+        if json_response.get("tracks"):
+            if json_response["tracks"].get("total") > 0:
+                sp_track_uri,sp_track_duration=spotify_search_process_track_items(json_response["tracks"]["items"],track)
 
     if not sp_track_uri:
         try:
@@ -633,14 +627,11 @@ def spotify_search_song_trackid_duration(access_token,artist,track,album=""):
             response.raise_for_status()
         except Exception as e:
             print(f"spotify_search_song_trackid_duration error - {e}")
-            if hasattr(e, 'response'):
-                if hasattr(e.response, 'text'):
-                    print (e.response.text)
-            raise        
 
         json_response=response.json()
-        if json_response["tracks"].get("total") > 0:
-            sp_track_uri,sp_track_duration=spotify_search_process_track_items(json_response["tracks"]["items"],track)
+        if json_response.get("tracks"):
+            if json_response["tracks"].get("total") > 0:
+                sp_track_uri,sp_track_duration=spotify_search_process_track_items(json_response["tracks"]["items"],track)
 
     return sp_track_uri, sp_track_duration
 
@@ -816,7 +807,8 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
 
         if USE_TRACK_DURATION_FROM_SPOTIFY and SP_DC_COOKIE and SP_DC_COOKIE!="your_sp_dc_cookie_value":
             accessToken=spotify_get_access_token(SP_DC_COOKIE)
-            sp_track_id, sp_track_duration=spotify_search_song_trackid_duration(accessToken,artist,track,album)
+            if accessToken:
+                sp_track_id, sp_track_duration=spotify_search_song_trackid_duration(accessToken,artist,track,album)
 
         if sp_track_duration>0:
             track_duration=sp_track_duration
@@ -1096,7 +1088,8 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
 
                     if USE_TRACK_DURATION_FROM_SPOTIFY and SP_DC_COOKIE and SP_DC_COOKIE!="your_sp_dc_cookie_value":
                         accessToken=spotify_get_access_token(SP_DC_COOKIE)
-                        sp_track_id, sp_track_duration=spotify_search_song_trackid_duration(accessToken,artist,track,album)
+                        if accessToken:
+                            sp_track_id, sp_track_duration=spotify_search_song_trackid_duration(accessToken,artist,track,album)
 
                     if sp_track_duration>0:
                         track_duration=sp_track_duration
@@ -1295,9 +1288,11 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                         played_for_time=(lf_active_ts_last)-lf_track_ts_start_after_resume
                         listened_percentage=(played_for_time) / (track_duration-1)
 
-                        if (played_for_time) < (track_duration-1):
+                        if (played_for_time) < (track_duration-LASTFM_ACTIVE_CHECK_INTERVAL-1):
                             played_for=f"{display_time(played_for_time)} (out of {display_time(track_duration)})"
-                            played_for_html=f"<b>{display_time(played_for_time)}</b> (out of {display_time(track_duration)})" 
+                            played_for_html=f"<b>{display_time(played_for_time)}</b> (out of {display_time(track_duration)})"
+                            played_for+=f" ({int(listened_percentage*100)}%)"
+                            played_for_html+=f" ({int(listened_percentage*100)}%)"    
                         else:
                             played_for=display_time(played_for_time)
                             played_for_html=f"<b>{display_time(played_for_time)}</b>"
