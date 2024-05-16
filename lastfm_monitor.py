@@ -23,8 +23,8 @@ VERSION=1.5
 # Create your Last.fm 'API key' and 'Shared secret' by going to: https://www.last.fm/api/account/create
 # Or get your existing one from: https://www.last.fm/api/accounts
 # Put the respective values below (or use -u and -w parameters)
-LASTFM_API_KEY="your_lastfm_api_key" # Last.fm 'API key'
-LASTFM_API_SECRET="your_lastfm_api_secret" # Last.fm 'Shared secret'
+LASTFM_API_KEY="your_lastfm_api_key" # Last.fm API key
+LASTFM_API_SECRET="your_lastfm_api_secret" # Last.fm Shared secret
 
 # This setting is optional and only needed if you want to get track duration from Spotify (-r option, more accurate than Last.fm) or 
 # if you want to use -g / --track_songs functionality, so we can find Spotify track ID and play it in your Spotify client
@@ -1491,7 +1491,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     if not args.LASTFM_USERNAME:
-        print("* Error: LASTFM_USERNAME argument needs to be defined !")
+        print("* Error: LASTFM_USERNAME argument is required !")
         sys.exit(1)        
 
     if args.lastfm_api_key:
@@ -1582,6 +1582,8 @@ if __name__ == "__main__":
     progress_indicator=args.progress_indicator
     track_songs=args.track_songs
     do_not_show_duration_marks=args.do_not_show_duration_marks
+    if not USE_TRACK_DURATION_FROM_SPOTIFY:
+        do_not_show_duration_marks=True
 
     print(f"* Last.fm timers:\t\t\t[check interval: {display_time(LASTFM_CHECK_INTERVAL)}] [active check interval: {display_time(LASTFM_ACTIVE_CHECK_INTERVAL)}]\n*\t\t\t\t\t[inactivity: {display_time(LASTFM_INACTIVITY_CHECK)}]")
     print(f"* Email notifications:\t\t\t[active = {active_notification}] [inactive = {inactive_notification}] [tracked = {track_notification}] [every song = {song_notification}]\n*\t\t\t\t\t[songs on loop = {song_on_loop_notification}] [offline entries = {offline_entries_notification}] [errors = {args.error_notification}]")
@@ -1596,7 +1598,7 @@ if __name__ == "__main__":
     else:
         print(f"* CSV logging enabled:\t\t\t{csv_enabled}\n")
 
-    # We define signal handlers only for Linux & MacOS since Windows has limited number of signals supported
+    # We define signal handlers only for Linux, Unix & MacOS since Windows has limited number of signals supported
     if platform.system() != 'Windows':
         signal.signal(signal.SIGUSR1, toggle_active_inactive_notifications_signal_handler)
         signal.signal(signal.SIGUSR2, toggle_song_notifications_signal_handler)
