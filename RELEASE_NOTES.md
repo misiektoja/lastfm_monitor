@@ -2,6 +2,26 @@
 
 This is a high-level summary of the most important changes. 
 
+# Changes in 1.5 (17 May 2024)
+
+**Features and Improvements**:
+
+- Full support for real-time playing of tracked songs (**-g**) in Spotify client in **Linux**
+- New way of playing tracked songs (**-g**) in Spotify client in **Windows**
+- Rewritten code for playing tracked songs (**-g**) in Spotify client in **macOS**
+- Improvements for running the code in Python under Windows
+- Better checking for wrong command line arguments
+- Showing listened percentage for last listened track
+- Duplicate entries are counted now and displayed in the console & emails (more entries indicate higher chance of private mode)
+
+**Bugfixes**:
+
+- Fixed bug when **track_songs** functionality (**-g**) was not working without **-r**
+- Improved exception handling while processing JSON files
+- Better handling of Spotify HTTP requests exceptions when getting track ID and duration
+- Better handling of exceptions when listing tracks
+- Fixed exception handling in spotify_search_song_trackid_duration()
+
 # Changes in 1.4 (11 May 2024)
 
 **Features and Improvements**:
