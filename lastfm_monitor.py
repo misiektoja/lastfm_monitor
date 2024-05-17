@@ -209,7 +209,7 @@ def signal_handler(sig, frame):
 def check_internet():
     url=CHECK_INTERNET_URL
     try:
-        _ = req.get(url, timeout=CHECK_INTERNET_TIMEOUT)
+        _=req.get(url, timeout=CHECK_INTERNET_TIMEOUT)
         print("OK")
         return True
     except Exception as e:
@@ -219,7 +219,7 @@ def check_internet():
 
 # Function to convert absolute value of seconds to human readable format
 def display_time(seconds, granularity=2):
-    intervals = (
+    intervals=(
         ('years', 31556952), # approximation
         ('months', 2629746), # approximation
         ('weeks', 604800),  # 60 * 60 * 24 * 7
@@ -319,8 +319,8 @@ def send_email(subject,body,body_html,use_ssl):
         if not (1 <= port <= 65535):
             raise ValueError
     except ValueError:
-            print("Error sending email - SMTP settings are incorrect (invalid port number in SMTP_PORT)")
-            return 1
+        print("Error sending email - SMTP settings are incorrect (invalid port number in SMTP_PORT)")
+        return 1
 
     if not email_re.search(str(SENDER_EMAIL)) or not email_re.search(str(RECEIVER_EMAIL)):
         print("Error sending email - SMTP settings are incorrect (invalid email in SENDER_EMAIL or RECEIVER_EMAIL)")
@@ -500,10 +500,9 @@ def get_spotify_apple_genius_search_urls(artist,track):
 def lastfm_get_recent_tracks(username,network,number):
     try:
         recent_tracks=network.get_user(username).get_recent_tracks(limit=number)
+        return recent_tracks
     except Exception as e:
-        print(f"* lastfm_get_recent_tracks error - {e}")
         raise
-    return recent_tracks
 
 # Function displaying the list of recently played Last.fm tracks
 def lastfm_list_tracks(username,user,network,number):
@@ -546,13 +545,14 @@ def lastfm_list_tracks(username,user,network,number):
 def spotify_get_access_token(sp_dc):
     url="https://open.spotify.com/get_access_token?reason=transport&productType=web_player"
     cookies={"sp_dc": sp_dc}
+    access_token=""
     try:
         response=req.get(url, cookies=cookies, timeout=FUNCTION_TIMEOUT)
         response.raise_for_status()
-        return response.json()["accessToken"]
+        access_token=response.json().get("accessToken","")
     except Exception as e:
         print(f"spotify_get_access_token error - {e}")
-        return ""
+    return access_token
 
 # Function converting Spotify URI (e.g. spotify:user:username) to URL (e.g. https://open.spotify.com/user/username)
 def spotify_convert_uri_to_url(uri):
@@ -581,22 +581,22 @@ def spotify_convert_uri_to_url(uri):
 
 # Function processing track items returned by Spotify search Web API
 def spotify_search_process_track_items(track_items,track):
-    sp_track_uri=None
+    sp_track_uri_id=None
     sp_track_duration=0
 
     for item in track_items:
         if str(item.get("name")).lower()==str(track).lower():
-            sp_track_uri=item.get("id")
+            sp_track_uri_id=item.get("id")
             sp_track_duration=int(item.get("duration_ms")/1000)
             break
-    if not sp_track_uri:
+    if not sp_track_uri_id:
         for item in track_items:            
             if str(track).lower() in str(item.get("name")).lower():
-                sp_track_uri=item.get("id")
+                sp_track_uri_id=item.get("id")
                 sp_track_duration=int(item.get("duration_ms")/1000)
                 break
 
-    return sp_track_uri, sp_track_duration
+    return sp_track_uri_id, sp_track_duration
 
 # Function returning Spotify track ID & duration for specific artist, track and optionally album
 def spotify_search_song_trackid_duration(access_token,artist,track,album=""):
@@ -610,7 +610,7 @@ def spotify_search_song_trackid_duration(access_token,artist,track,album=""):
 
     headers={"Authorization": "Bearer " + access_token}
 
-    sp_track_uri=None
+    sp_track_uri_id=None
     sp_track_duration=0
 
     if album:
@@ -623,9 +623,9 @@ def spotify_search_song_trackid_duration(access_token,artist,track,album=""):
         json_response=response.json()
         if json_response.get("tracks"):
             if json_response["tracks"].get("total") > 0:
-                sp_track_uri,sp_track_duration=spotify_search_process_track_items(json_response["tracks"]["items"],track)
+                sp_track_uri_id,sp_track_duration=spotify_search_process_track_items(json_response["tracks"]["items"],track)
 
-    if not sp_track_uri:
+    if not sp_track_uri_id:
         try:
             response=req.get(url2, headers=headers, timeout=FUNCTION_TIMEOUT)
             response.raise_for_status()
@@ -635,17 +635,17 @@ def spotify_search_song_trackid_duration(access_token,artist,track,album=""):
         json_response=response.json()
         if json_response.get("tracks"):
             if json_response["tracks"].get("total") > 0:
-                sp_track_uri,sp_track_duration=spotify_search_process_track_items(json_response["tracks"]["items"],track)
+                sp_track_uri_id,sp_track_duration=spotify_search_process_track_items(json_response["tracks"]["items"],track)
 
-    return sp_track_uri, sp_track_duration
+    return sp_track_uri_id, sp_track_duration
 
-def spotify_macos_play_song(sp_track_id,method=SPOTIFY_MACOS_PLAYING_METHOD):
+def spotify_macos_play_song(sp_track_uri_id,method=SPOTIFY_MACOS_PLAYING_METHOD):
     if method=="apple-script":    # apple-script
-        script=f'tell app "Spotify" to play track "spotify:track:{sp_track_id}"'
+        script=f'tell app "Spotify" to play track "spotify:track:{sp_track_uri_id}"'
         proc=subprocess.Popen(['osascript', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
         stdout, stderr=proc.communicate(script)
     else:                       # trigger-url - just trigger track URL in the client
-        subprocess.call(('open', spotify_convert_uri_to_url(f"spotify:track:{sp_track_id}")))
+        subprocess.call(('open', spotify_convert_uri_to_url(f"spotify:track:{sp_track_uri_id}")))
 
 def spotify_macos_play_pause(action,method=SPOTIFY_MACOS_PLAYING_METHOD):
     if method=="apple-script":    # apple-script
@@ -658,13 +658,13 @@ def spotify_macos_play_pause(action,method=SPOTIFY_MACOS_PLAYING_METHOD):
             proc=subprocess.Popen(['osascript', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
             stdout, stderr=proc.communicate(script)         
 
-def spotify_linux_play_song(sp_track_id,method=SPOTIFY_LINUX_PLAYING_METHOD):
+def spotify_linux_play_song(sp_track_uri_id,method=SPOTIFY_LINUX_PLAYING_METHOD):
     if method=="dbus-send":     # dbus-send
-        subprocess.call((f"dbus-send --type=method_call --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.OpenUri string:'spotify:track:{sp_track_id}'"), shell=True)
+        subprocess.call((f"dbus-send --type=method_call --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.OpenUri string:'spotify:track:{sp_track_uri_id}'"), shell=True)
     elif method=="qdbus":       # qdbus
-        subprocess.call((f"qdbus org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.OpenUri spotify:track:{sp_track_id}"), shell=True)        
+        subprocess.call((f"qdbus org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.OpenUri spotify:track:{sp_track_uri_id}"), shell=True)        
     else:                       # trigger-url - just trigger track URL in the client
-        subprocess.call(('xdg-open', spotify_convert_uri_to_url(f"spotify:track:{sp_track_id}")), stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        subprocess.call(('xdg-open', spotify_convert_uri_to_url(f"spotify:track:{sp_track_uri_id}")), stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 
 def spotify_linux_play_pause(action,method=SPOTIFY_LINUX_PLAYING_METHOD):
     if method=="dbus-send":     # dbus-send
@@ -678,16 +678,15 @@ def spotify_linux_play_pause(action,method=SPOTIFY_LINUX_PLAYING_METHOD):
         elif str(action).lower()=="play":
             subprocess.call((f"qdbus org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.Play"), shell=True) 
 
-def spotify_win_play_song(sp_track_id,method=SPOTIFY_WINDOWS_PLAYING_METHOD):
+def spotify_win_play_song(sp_track_uri_id,method=SPOTIFY_WINDOWS_PLAYING_METHOD):
     WIN_SPOTIFY_APP_PATH=r'%APPDATA%\Spotify\Spotify.exe'
 
     if method=="start-uri":     # start-uri
-        #subprocess.call(('start', f"spotify:track:{sp_track_id}"), shell=True)
-        subprocess.call((f"start spotify:track:{sp_track_id}"), shell=True)        
+        subprocess.call((f"start spotify:track:{sp_track_uri_id}"), shell=True)        
     elif method=="spotify-cmd": # spotify-cmd
-        subprocess.call((f"{WIN_SPOTIFY_APP_PATH} --uri=spotify:track:{sp_track_id}"), shell=True)
+        subprocess.call((f"{WIN_SPOTIFY_APP_PATH} --uri=spotify:track:{sp_track_uri_id}"), shell=True)
     else:                       # trigger-url - just trigger track URL in the client
-        os.startfile(spotify_convert_uri_to_url(f"spotify:track:{sp_track_id}"))
+        os.startfile(spotify_convert_uri_to_url(f"spotify:track:{sp_track_uri_id}"))
 
 # Main function monitoring activity of the specified Last.fm user
 def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file_name,csv_exists):
@@ -715,7 +714,7 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
     artist_old=""
     track_old=""
     song_on_loop=0
-    sp_track_id=None
+    sp_track_uri_id=None
     sp_track_duration=0
     duration_mark=""
     pauses_number=0
@@ -812,7 +811,7 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
         if (USE_TRACK_DURATION_FROM_SPOTIFY or track_songs) and SP_DC_COOKIE and SP_DC_COOKIE!="your_sp_dc_cookie_value":
             accessToken=spotify_get_access_token(SP_DC_COOKIE)
             if accessToken:
-                sp_track_id, sp_track_duration=spotify_search_song_trackid_duration(accessToken,artist,track,album)
+                sp_track_uri_id, sp_track_duration=spotify_search_song_trackid_duration(accessToken,artist,track,album)
                 if not USE_TRACK_DURATION_FROM_SPOTIFY:
                     sp_track_duration=0
 
@@ -882,13 +881,13 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
         lf_user_online=True
 
         # If tracking functionality is enabled then play the current song via Spotify client
-        if track_songs and sp_track_id:
+        if track_songs and sp_track_uri_id:
             if platform.system() == 'Darwin':       # macOS
-                spotify_macos_play_song(sp_track_id)
+                spotify_macos_play_song(sp_track_uri_id)
             elif platform.system() == 'Windows':    # Windows
-                spotify_win_play_song(sp_track_id)
+                spotify_win_play_song(sp_track_uri_id)
             else:                                   # Linux variants
-                spotify_linux_play_song(sp_track_id)
+                spotify_linux_play_song(sp_track_uri_id)
 
     i=0; p=0
     duplicate_entries=False
@@ -1089,14 +1088,14 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                     print(f"Track:\t\t\t{artist} - {track}")
                     print(f"Album:\t\t\t{album}")
 
-                    sp_track_id=None
+                    sp_track_uri_id=None
                     sp_track_duration=0
                     duration_mark="" 
 
                     if (USE_TRACK_DURATION_FROM_SPOTIFY or track_songs) and SP_DC_COOKIE and SP_DC_COOKIE!="your_sp_dc_cookie_value":
                         accessToken=spotify_get_access_token(SP_DC_COOKIE)
                         if accessToken:
-                            sp_track_id, sp_track_duration=spotify_search_song_trackid_duration(accessToken,artist,track,album)
+                            sp_track_uri_id, sp_track_duration=spotify_search_song_trackid_duration(accessToken,artist,track,album)
                             if not USE_TRACK_DURATION_FROM_SPOTIFY:
                                 sp_track_duration=0                            
 
@@ -1143,13 +1142,13 @@ def lastfm_monitor_user(user,network,username,tracks,error_notification,csv_file
                         duration_m_body_html=f"<br>Duration: {display_time(track_duration)}{duration_mark}"
 
                     # If tracking functionality is enabled then play the current song via Spotify client
-                    if track_songs and sp_track_id:
+                    if track_songs and sp_track_uri_id:
                         if platform.system() == 'Darwin':       # macOS
-                            spotify_macos_play_song(sp_track_id)
+                            spotify_macos_play_song(sp_track_uri_id)
                         elif platform.system() == 'Windows':    # Windows
-                            spotify_win_play_song(sp_track_id)
+                            spotify_win_play_song(sp_track_uri_id)
                         else:                                   # Linux variants
-                            spotify_linux_play_song(sp_track_id)
+                            spotify_linux_play_song(sp_track_uri_id)
 
                     # User was offline and got active
                     if (not lf_user_online and (lf_track_ts_start-lf_active_ts_last) > LASTFM_INACTIVITY_CHECK and lf_active_ts_last>0) or (not lf_user_online and lf_active_ts_last>0 and app_started_and_user_offline):
@@ -1475,12 +1474,12 @@ if __name__ == "__main__":
     parser.add_argument("-k", "--active_check_interval", help="Time between monitoring checks if user is active, in seconds", type=int)
     parser.add_argument("-o", "--offline_timer", help="Time required to mark inactive user as offline, in seconds", type=int)
     parser.add_argument("-p", "--progress_indicator", help="Show progress indicator while user is listening", action='store_true')
-    parser.add_argument("-g", "--track_songs", help="Automatically track listened songs by opening Spotify client", action='store_true')
+    parser.add_argument("-g", "--track_songs", help="Automatically track listened songs by playing it in Spotify client", action='store_true')
     parser.add_argument("-m", "--play_break_multiplier", help="If more than 0 it will show when user stops playing/resumes (while active), play break is assumed to be play_break_multiplier*active_check_interval", type=int)
     parser.add_argument("-r", "--fetch_duration_from_spotify", help="Try to get the track duration from Spotify if SP_DC_COOKIE (-z) is properly defined", action='store_true')
     parser.add_argument("-q", "--do_not_show_duration_marks", help="Do not display L* or S* marks indicating from where the track duration has been fetched (Last.fm or Spotify); it is showed only if fetching duration from Spotify (-r) is enabled", action='store_true')
     parser.add_argument("-b", "--csv_file", help="Write every listened track to CSV file", type=str, metavar="CSV_FILENAME")
-    parser.add_argument("-s", "--lastfm_tracks", help="Filename with Last.fm tracks/albums to monitor", type=str, metavar="FILENAME")
+    parser.add_argument("-s", "--lastfm_tracks", help="Filename with Last.fm tracks/albums to monitor", type=str, metavar="TRACKS_FILENAME")
     parser.add_argument("-l","--list_recent_tracks", help="List recently played tracks for the user", action='store_true')
     parser.add_argument("-n", "--number_of_recent_tracks", help="Number of tracks to display if used with -l", type=int)    
     parser.add_argument("-d", "--disable_logging", help="Disable logging to file 'lastfm_monitor_user.log' file", action='store_true')
