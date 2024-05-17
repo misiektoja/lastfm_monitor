@@ -5,7 +5,8 @@ lastfm_monitor is a Python script which allows for real-time monitoring of Last.
 ## Features
 
 - Real-time monitoring of songs listened by Last.fm users (including detection when user gets online & offline)
-- Showing when user pauses or resumes playback
+- Possibility to automatically play songs listened by tracked user in your local Spotify client
+- Showing when user pauses or resumes playback, possibility to display track progress indicator
 - Information about how long the user listened to a song, if shorter/longer than track duration, if song has been skipped
 - Email notifications for different events (user gets active/inactive, specific/all songs, songs on loop, new entries showed up while user was offline, errors)
 - Saving all listened songs with timestamps to the CSV file
@@ -33,9 +34,12 @@ The script requires Python 3.x.
 
 It uses [pylast](https://github.com/pylast/pylast) library, also requires requests, python-dateutil and urllib3.
 
-It has been tested succesfully on Linux (Raspberry Pi Bullseye & Bookworm based on Debian) and Mac OS (Ventura & Sonoma). 
+It has been tested succesfully on:
+- macOS (Ventura & Sonoma)
+- Linux (Raspberry Pi Bullseye & Bookworm based on Debian, Ubuntu 24)
+- Windows (10 & 11)
 
-Should work on any other Linux OS and Windows with Python.
+It should work on other versions of macOS, Linux, Unix and Windows as well.
 
 ## Installation
 
@@ -53,7 +57,7 @@ pip3 install -r requirements.txt
 
 Copy the *[lastfm_monitor.py](lastfm_monitor.py)* file to the desired location. 
 
-You might want to add executable rights if on Linux or MacOS:
+You might want to add executable rights if on Linux/Unix/macOS:
 
 ```sh
 chmod a+x lastfm_monitor.py
@@ -119,7 +123,7 @@ The tool will run infinitely and monitor the user until the script is interrupte
 
 You can monitor multiple Last.fm users by spawning multiple copies of the script. 
 
-It is suggested to use sth like **tmux** or **screen** to have the script running after you log out from the server.
+It is suggested to use sth like **tmux** or **screen** to have the script running after you log out from the server (unless you are running it on your desktop).
 
 The tool automatically saves its output to *lastfm_monitor_{username}.log* file (can be changed in the settings or disabled with **-d** parameter).
 
@@ -175,13 +179,13 @@ Then run the tool with **-t** and **-s** parameters:
 ./lastfm_monitor.py misiektoja -t -s ./lastfm_tracks_misiektoja
 ```
 
-If you want to get email notifications for every listened song (**-j** parameter):
+If you want to get email notifications for every listened song use **-j** parameter:
 
 ```sh
 ./lastfm_monitor.py misiektoja -j
 ```
 
-If you want to get email notifications when user listens to the same song on loop (**-x** parameter):
+If you want to get email notifications when user listens to the same song on loop use **-x** parameter:
 
 ```sh
 ./lastfm_monitor.py misiektoja -x
@@ -189,7 +193,7 @@ If you want to get email notifications when user listens to the same song on loo
 
 ### Saving listened songs to the CSV file
 
-If you want to save all the listened songs in the CSV file, use **-b** parameter with the name of the file (it will be automatically created if it does not exist):
+If you want to save all listened songs in the CSV file, use **-b** parameter with the name of the file (it will be automatically created if it does not exist):
 
 ```sh
 ./lastfm_monitor.py misiektoja -b lastfm_tracks_misiektoja.csv
@@ -197,19 +201,41 @@ If you want to save all the listened songs in the CSV file, use **-b** parameter
 
 ### Automatic playing of tracks listened by the user in Spotify client
 
-If you want the script to automatically track what the user listens and to play it in your Spotify client (**-g** parameter):
+If you want the script to automatically play the tracks listened by the user in your local Spotify client use **-g** parameter:
 
 ```sh
 ./lastfm_monitor.py misiektoja -g
 ```
 
-In order to use this functionality you need to have properly defined sp_dc cookie value as described [here](#spotify-sp_dc-cookie).
+Your Spotify client needs to be installed & started for this feature to work.
 
-Currently the script only supports playing the songs in Spotify client in Mac OS. There are conditionals in the code prepared for Linux and Windows, so feel free to test it and add proper commands.
+In order to use this functionality you also need to have properly defined sp_dc cookie value as described [here](#spotify-sp_dc-cookie).
+
+The script has full support for playing songs listened by the tracked user under **Linux** and **macOS**. It means it will automatically play the changed track, it will also automatically pause and resume playing following tracked user actions. It can also pause (or play indicated track) once user gets inactive (see **SP_USER_GOT_OFFLINE_TRACK_ID** variable).
+
+For **Windows** it works in semi-way, i.e. if you have Spotify client running and you are not listening to any song, then the first song will be played automatically, but for others it will only do search and indicate the changed track in Spotify client, but you need to press the play button manually. I have not found better way to handle it locally on Windows yet (without using remote Spotify Web API).
+
+You can change the method used for playing the songs under Linux, macOS and Windows by changing respective variables in *[lastfm_monitor.py](lastfm_monitor.py)* file. 
+
+For **macOS** change **SPOTIFY_MACOS_PLAYING_METHOD** variable to one of the following values:
+-  "**apple-script**" (recommended, **default**)
+-  "trigger-url"
+
+For **Linux** change **SPOTIFY_LINUX_PLAYING_METHOD** variable to one of the following values:
+- "**dbus-send**" (most common one, **default**)
+- "qdbus"
+- "trigger-url"
+
+For **Windows** change **SPOTIFY_WINDOWS_PLAYING_METHOD** variable to one of the following values:
+- "**start-uri**" (recommended, **default**)
+- "spotify-cmd"
+- "trigger-url"
+
+The recommended defaults should work for most people.
 
 ### Progress indicator
 
-If you want to see nice progress indicator which should show you estimated position of what user is currently listening (**-p** parameter):
+If you want to see nice progress indicator which should show you estimated position of what user is currently listening use **-p** parameter:
 
 ```sh
 ./lastfm_monitor.py misiektoja -p
@@ -255,7 +281,7 @@ If you want to change the time required to mark the user as inactive to 2 mins (
 ./lastfm_monitor.py misiektoja -o 120
 ```
 
-### Controlling the script via signals
+### Controlling the script via signals (only macOS/Linux/Unix)
 
 The tool has several signal handlers implemented which allow to change behaviour of the tool without a need to restart it with new parameters.
 
@@ -277,6 +303,8 @@ I personally use **pkill** tool, so for example to toggle showing of progress in
 ```sh
 pkill -f -HUP "python3 ./lastfm_monitor.py misiektoja"
 ```
+
+As Windows supports limited number of signals, this functionality is available only on Linux/Unix/macOS.
 
 ### Private mode detection in Spotify
 
@@ -300,9 +328,7 @@ You can combine all the parameters mentioned earlier in monitoring mode (listing
 
 ## Limitations
 
-The script has been tested with Last.fm account integrated with Spotify client, however it should work with other clients.
-
-Currently the ***track_songs*** functionality (**-g** parameter) only supports playing the songs in Spotify client in Mac OS. There are conditionals in the code prepared for Linux and Windows, so feel free to test it and add proper commands.
+The script has been tested with Last.fm account integrated with Spotify client, however it should work with other clients as well.
 
 ## Colouring log output with GRC
 
