@@ -617,25 +617,23 @@ def spotify_search_song_trackid_duration(access_token,artist,track,album=""):
         try:
             response=req.get(url1, headers=headers, timeout=FUNCTION_TIMEOUT)
             response.raise_for_status()
+            json_response=response.json()
+            if json_response.get("tracks"):
+                if json_response["tracks"].get("total") > 0:
+                    sp_track_uri_id,sp_track_duration=spotify_search_process_track_items(json_response["tracks"]["items"],track)
         except Exception as e:
-            print(f"spotify_search_song_trackid_duration error - {e}")
-
-        json_response=response.json()
-        if json_response.get("tracks"):
-            if json_response["tracks"].get("total") > 0:
-                sp_track_uri_id,sp_track_duration=spotify_search_process_track_items(json_response["tracks"]["items"],track)
+            pass
 
     if not sp_track_uri_id:
         try:
             response=req.get(url2, headers=headers, timeout=FUNCTION_TIMEOUT)
             response.raise_for_status()
+            json_response=response.json()
+            if json_response.get("tracks"):
+                if json_response["tracks"].get("total") > 0:
+                    sp_track_uri_id,sp_track_duration=spotify_search_process_track_items(json_response["tracks"]["items"],track)
         except Exception as e:
-            print(f"spotify_search_song_trackid_duration error - {e}")
-
-        json_response=response.json()
-        if json_response.get("tracks"):
-            if json_response["tracks"].get("total") > 0:
-                sp_track_uri_id,sp_track_duration=spotify_search_process_track_items(json_response["tracks"]["items"],track)
+            pass
 
     return sp_track_uri_id, sp_track_duration
 
