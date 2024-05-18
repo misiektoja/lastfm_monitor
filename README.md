@@ -4,7 +4,7 @@ lastfm_monitor is a Python script which allows for real-time monitoring of Last.
 
 ## Features
 
-- Real-time monitoring of songs listened by Last.fm users (including detection when user gets online & offline)
+- Real-time tracking of songs listened by Last.fm users (including detection when user gets online & offline)
 - Possibility to automatically play songs listened by tracked user in your local Spotify client
 - Showing when user pauses or resumes playback, possibility to display track progress indicator
 - Information about how long the user listened to a song, if shorter/longer than track duration, if song has been skipped
@@ -211,7 +211,7 @@ Your Spotify client needs to be installed & started for this feature to work.
 
 In order to use this functionality you also need to have properly defined sp_dc cookie value as described [here](#spotify-sp_dc-cookie).
 
-The script has full support for playing songs listened by the tracked user under **Linux** and **macOS**. It means it will automatically play the changed track, it will also automatically pause and resume playing following tracked user actions. It can also pause (or play indicated track) once user gets inactive (see **SP_USER_GOT_OFFLINE_TRACK_ID** variable).
+The script has full support for playing songs listened by the tracked user under **Linux** and **macOS**. It means it will automatically play the changed track, it will also automatically pause and resume playback following tracked user actions. It can also pause (or play indicated track) once user gets inactive (see **SP_USER_GOT_OFFLINE_TRACK_ID** variable).
 
 For **Windows** it works in semi-way, i.e. if you have Spotify client running and you are not listening to any song, then the first song will be played automatically, but for others it will only do search and indicate the changed track in Spotify client, but you need to press the play button manually. I have not found better way to handle it locally on Windows yet (without using remote Spotify Web API).
 
