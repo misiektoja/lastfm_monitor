@@ -2,7 +2,7 @@
 
 This is a high-level summary of the most important changes. 
 
-# Changes in 1.5 (17 May 2024)
+# Changes in 1.5 (18 May 2024)
 
 **Features and Improvements**:
 
@@ -13,6 +13,7 @@ This is a high-level summary of the most important changes.
 - Better checking for wrong command line arguments
 - Showing listened percentage for last listened track
 - Duplicate entries are counted now and displayed in the console & emails (more entries indicate higher chance of private mode)
+- pep8 style convention corrections
 
 **Bugfixes**:
 
