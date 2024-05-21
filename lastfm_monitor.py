@@ -399,23 +399,44 @@ def print_cur_ts(ts_str=""):
     print("---------------------------------------------------------------------------------------------------------")
 
 
-# Function to return the timestamp in human readable format (long version); eg. Sun, 21 Apr 2024, 15:08:45
+# Function to return the timestamp/datetime object in human readable format (long version); eg. Sun, 21 Apr 2024, 15:08:45
 def get_date_from_ts(ts):
-    return (f"{calendar.day_abbr[(datetime.fromtimestamp(ts)).weekday()]} {datetime.fromtimestamp(ts).strftime("%d %b %Y, %H:%M:%S")}")
+    if type(ts) is datetime:
+        ts_new = int(round(ts.timestamp()))
+    elif type(ts) is int:
+        ts_new = ts
+    else:
+        return ""
+
+    return (f"{calendar.day_abbr[(datetime.fromtimestamp(ts_new)).weekday()]} {datetime.fromtimestamp(ts_new).strftime("%d %b %Y, %H:%M:%S")}")
 
 
-# Function to return the timestamp in human readable format (short version); eg. Sun 21 Apr 15:08
+# Function to return the timestamp/datetime object in human readable format (short version); eg. Sun 21 Apr 15:08
 def get_short_date_from_ts(ts):
-    return (f"{calendar.day_abbr[(datetime.fromtimestamp(ts)).weekday()]} {datetime.fromtimestamp(ts).strftime("%d %b %H:%M")}")
+    if type(ts) is datetime:
+        ts_new = int(round(ts.timestamp()))
+    elif type(ts) is int:
+        ts_new = ts
+    else:
+        return ""
+
+    return (f"{calendar.day_abbr[(datetime.fromtimestamp(ts_new)).weekday()]} {datetime.fromtimestamp(ts_new).strftime("%d %b %H:%M")}")
 
 
-# Function to return the timestamp in human readable format (only hour, minutes and optionally seconds): eg. 15:08:12
+# Function to return the timestamp/datetime object in human readable format (only hour, minutes and optionally seconds): eg. 15:08:12
 def get_hour_min_from_ts(ts, show_seconds=False):
+    if type(ts) is datetime:
+        ts_new = int(round(ts.timestamp()))
+    elif type(ts) is int:
+        ts_new = ts
+    else:
+        return ""
+
     if show_seconds:
         out_strf = "%H:%M:%S"
     else:
         out_strf = "%H:%M"
-    return (str(datetime.fromtimestamp(ts).strftime(out_strf)))
+    return (str(datetime.fromtimestamp(ts_new).strftime(out_strf)))
 
 
 # Function to return the range between two timestamps; eg. Sun 21 Apr 14:09 - 14:15
@@ -1612,12 +1633,15 @@ if __name__ == "__main__":
 
     print(f"* Last.fm timers:\t\t\t[check interval: {display_time(LASTFM_CHECK_INTERVAL)}] [active check interval: {display_time(LASTFM_ACTIVE_CHECK_INTERVAL)}]\n*\t\t\t\t\t[inactivity: {display_time(LASTFM_INACTIVITY_CHECK)}]")
     print(f"* Email notifications:\t\t\t[active = {active_notification}] [inactive = {inactive_notification}] [tracked = {track_notification}] [every song = {song_notification}]\n*\t\t\t\t\t[songs on loop = {song_on_loop_notification}] [offline entries = {offline_entries_notification}] [errors = {args.error_notification}]")
-    print(f"* Output logging disabled:\t\t{args.disable_logging}")
     print(f"* Progress indicator enabled:\t\t{progress_indicator}")
     print(f"* Track listened songs:\t\t\t{track_songs}")
     print(f"* Get track duration from Spotify:\t{USE_TRACK_DURATION_FROM_SPOTIFY}")
     print(f"* Do not show duration marks (L*, S*):\t{do_not_show_duration_marks}")
     print(f"* Play break multiplier:\t\t{LASTFM_BREAK_CHECK_MULTIPLIER} ({display_time(LASTFM_BREAK_CHECK_MULTIPLIER * LASTFM_ACTIVE_CHECK_INTERVAL)})")
+    if not args.disable_logging:
+        print(f"* Output logging enabled:\t\t{not args.disable_logging} ({LF_LOGFILE})")
+    else:
+        print(f"* Output logging enabled:\t\t{not args.disable_logging}")
     if csv_enabled:
         print(f"* CSV logging enabled:\t\t\t{csv_enabled} ({args.csv_file})\n")
     else:
