@@ -125,7 +125,7 @@ You can monitor multiple Last.fm users by spawning multiple copies of the script
 
 It is suggested to use sth like **tmux** or **screen** to have the script running after you log out from the server (unless you are running it on your desktop).
 
-The tool automatically saves its output to *lastfm_monitor_{username}.log* log file (can be changed in the settings or disabled with **-d** parameter).
+The tool automatically saves its output to *lastfm_monitor_{username}.log* file (can be changed in the settings or disabled with **-d** parameter).
 
 The tool also saves the last activity information (artist, track, timestamp) to *lastfm_{username}_last_activity.json file*, so it can be reused in case the tool needs to be restarted.
 
