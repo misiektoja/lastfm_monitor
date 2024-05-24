@@ -131,6 +131,16 @@ LF_LOGFILE = "lastfm_monitor"
 # Value used by signal handlers increasing/decreasing the inactivity check (LASTFM_INACTIVITY_CHECK); in seconds
 LASTFM_INACTIVITY_CHECK_SIGNAL_VALUE = 30  # 30 seconds
 
+# How many 50x errors need to show up in the defined time to display error message in the console - it is to suppress sporadic issues with Last.fm API endpoint; adjust the parameters according to the LASTFM_CHECK_INTERVAL & LASTFM_ACTIVE_CHECK_INTERVAL timers
+# If more than 15 Last.fm API related issues in 2 mins - we will show the error message
+ERROR_500_NUMBER_LIMIT = 15
+ERROR_500_TIME_LIMIT = 120  # 2 min
+
+# How many network related errors need to show up in the defined time to display error message in the console - it is to suppress sporadic issues with internet connectivity; adjust the parameters according to the LASTFM_CHECK_INTERVAL & LASTFM_ACTIVE_CHECK_INTERVAL timers
+# If more than 15 network related issues in 2 mins - we will show the error message
+ERROR_NETWORK_ISSUES_NUMBER_LIMIT = 15
+ERROR_NETWORK_ISSUES_TIME_LIMIT = 120  # 2 min
+
 # -------------------------
 # CONFIGURATION SECTION END
 # -------------------------
@@ -787,6 +797,10 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
     sp_track_duration = 0
     duration_mark = ""
     pauses_number = 0
+    error_500_counter = 0
+    error_500_start_ts = 0
+    error_network_issue_counter = 0
+    error_network_issue_start_ts = 0
 
     try:
         if csv_file_name:
@@ -1482,18 +1496,63 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
             if last_track_start_ts > 0:
                 last_track_start_ts_old2 = last_track_start_ts
 
+            ERROR_500_ZERO_TIME_LIMIT = ERROR_500_TIME_LIMIT + LASTFM_CHECK_INTERVAL
+            if LASTFM_CHECK_INTERVAL * ERROR_500_NUMBER_LIMIT > ERROR_500_ZERO_TIME_LIMIT:
+                ERROR_500_ZERO_TIME_LIMIT = LASTFM_CHECK_INTERVAL * (ERROR_500_NUMBER_LIMIT + 1)
+
+            if error_500_start_ts and ((int(time.time()) - error_500_start_ts) >= ERROR_500_ZERO_TIME_LIMIT):
+                error_500_start_ts = 0
+                error_500_counter = 0
+
+            ERROR_NETWORK_ZERO_TIME_LIMIT = ERROR_NETWORK_ISSUES_TIME_LIMIT + LASTFM_CHECK_INTERVAL
+            if LASTFM_CHECK_INTERVAL * ERROR_NETWORK_ISSUES_NUMBER_LIMIT > ERROR_NETWORK_ZERO_TIME_LIMIT:
+                ERROR_NETWORK_ZERO_TIME_LIMIT = LASTFM_CHECK_INTERVAL * (ERROR_NETWORK_ISSUES_NUMBER_LIMIT + 1)
+
+            if error_network_issue_start_ts and ((int(time.time()) - error_network_issue_start_ts) >= ERROR_NETWORK_ZERO_TIME_LIMIT):
+                error_network_issue_start_ts = 0
+                error_network_issue_counter = 0
+
         except Exception as e:
-            print(f"Error - {e}")
-            if 'Invalid API key' in str(e) or 'API Key Suspended' in str(e):
-                print("* API key might not be valid anymore!")
-                if error_notification and not email_sent:
-                    m_subject = f"lastfm_monitor: API key error! (user: {username})"
-                    m_body = f"API key might not be valid anymore: {e}{get_cur_ts("\n\nTimestamp: ")}"
-                    m_body_html = f"<html><head></head><body>API key might not be valid anymore: {escape(e)}{get_cur_ts("<br><br>Timestamp: ")}</body></html>"
-                    print(f"Sending email notification to {RECEIVER_EMAIL}")
-                    send_email(m_subject, m_body, m_body_html, SMTP_SSL)
-                    email_sent = True
-            print_cur_ts("Timestamp:\t\t")
+
+            if 'HTTP code 500' in str(e) or 'HTTP code 504' in str(e) or 'HTTP code 503' in str(e) or 'HTTP code 502' in str(e):
+                if not error_500_start_ts:
+                    error_500_start_ts = int(time.time())
+                    error_500_counter = 1
+                else:
+                    error_500_counter += 1
+
+            if 'timed out' in str(e) or 'name resolution' in str(e) or 'family not supported' in str(e) or str(e) == '':
+                if not error_network_issue_start_ts:
+                    error_network_issue_start_ts = int(time.time())
+                    error_network_issue_counter = 1
+                else:
+                    error_network_issue_counter += 1
+
+            if error_500_start_ts and (error_500_counter >= ERROR_500_NUMBER_LIMIT and (int(time.time()) - error_500_start_ts) >= ERROR_500_TIME_LIMIT):
+                print(f"Error 50x ({error_500_counter}x times in the last {display_time((int(time.time()) - error_500_start_ts))}) - '{e}'")
+                print_cur_ts("Timestamp:\t\t")
+                error_500_start_ts = 0
+                error_500_counter = 0
+
+            elif error_network_issue_start_ts and (error_network_issue_counter >= ERROR_NETWORK_ISSUES_NUMBER_LIMIT and (int(time.time()) - error_network_issue_start_ts) >= ERROR_NETWORK_ISSUES_TIME_LIMIT):
+                print(f"Error with network ({error_network_issue_counter}x times in the last {display_time((int(time.time()) - error_network_issue_start_ts))}) - '{e}'")
+                print_cur_ts("Timestamp:\t\t")
+                error_network_issue_start_ts = 0
+                error_network_issue_counter = 0
+
+            elif not error_500_start_ts and not error_network_issue_start_ts:
+                print(f"Error - '{e}'")
+
+                if 'Invalid API key' in str(e) or 'API Key Suspended' in str(e):
+                    print("* API key might not be valid anymore!")
+                    if error_notification and not email_sent:
+                        m_subject = f"lastfm_monitor: API key error! (user: {username})"
+                        m_body = f"API key might not be valid anymore: {e}{get_cur_ts("\n\nTimestamp: ")}"
+                        m_body_html = f"<html><head></head><body>API key might not be valid anymore: {escape(e)}{get_cur_ts("<br><br>Timestamp: ")}</body></html>"
+                        print(f"Sending email notification to {RECEIVER_EMAIL}")
+                        send_email(m_subject, m_body, m_body_html, SMTP_SSL)
+                        email_sent = True
+                print_cur_ts("Timestamp:\t\t")
 
         if lf_user_online:
             time.sleep(LASTFM_ACTIVE_CHECK_INTERVAL)
