@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v1.6
+v1.7
 
 Script implementing real-time monitoring of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -14,7 +14,7 @@ requests
 urllib3
 """
 
-VERSION = 1.6
+VERSION = 1.7
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -481,15 +481,17 @@ def get_range_of_dates_from_tss(ts1, ts2, between_sep=" - ", short=False):
     return (str(out_str))
 
 
-# Signal handler for SIGUSR1 allowing to switch active/inactive email notifications
+# Signal handler for SIGUSR1 allowing to switch active/inactive/offline entries email notifications
 def toggle_active_inactive_notifications_signal_handler(sig, frame):
     global active_notification
     global inactive_notification
+    global offline_entries_notification
     active_notification = not active_notification
     inactive_notification = not inactive_notification
+    offline_entries_notification = not offline_entries_notification
     sig_name = signal.Signals(sig).name
     print(f"* Signal {sig_name} received")
-    print(f"* Email notifications: [active = {active_notification}] [inactive = {inactive_notification}]")
+    print(f"* Email notifications: [active = {active_notification}] [inactive = {inactive_notification}] [offline entries = {offline_entries_notification}]")
     print_cur_ts("Timestamp:\t\t")
 
 
