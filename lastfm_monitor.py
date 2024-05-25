@@ -525,6 +525,16 @@ def toggle_track_notifications_signal_handler(sig, frame):
     print_cur_ts("Timestamp:\t\t")
 
 
+# Signal handler for SIGPIPE allowing to switch songs on loop email notifications
+def toggle_songs_on_loop_notifications_signal_handler(sig, frame):
+    global song_on_loop_notification
+    song_on_loop_notification = not song_on_loop_notification
+    sig_name = signal.Signals(sig).name
+    print(f"* Signal {sig_name} received")
+    print(f"* Email notifications: [songs on loop = {song_on_loop_notification}]")
+    print_cur_ts("Timestamp:\t\t")
+
+
 # Signal handler for SIGTRAP allowing to increase inactivity check interval by LASTFM_INACTIVITY_CHECK_SIGNAL_VALUE seconds
 def increase_inactivity_check_signal_handler(sig, frame):
     global LASTFM_INACTIVITY_CHECK
@@ -1728,6 +1738,7 @@ if __name__ == "__main__":
         signal.signal(signal.SIGUSR2, toggle_song_notifications_signal_handler)
         signal.signal(signal.SIGHUP, toggle_progress_indicator_signal_handler)
         signal.signal(signal.SIGCONT, toggle_track_notifications_signal_handler)
+        signal.signal(signal.SIGPIPE, toggle_songs_on_loop_notifications_signal_handler)        
         signal.signal(signal.SIGTRAP, increase_inactivity_check_signal_handler)
         signal.signal(signal.SIGABRT, decrease_inactivity_check_signal_handler)
 
