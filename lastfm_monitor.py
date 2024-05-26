@@ -1526,14 +1526,16 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
 
         except Exception as e:
 
-            if 'HTTP code 500' in str(e) or 'HTTP code 504' in str(e) or 'HTTP code 503' in str(e) or 'HTTP code 502' in str(e):
+            str_matches = ["http code 500", "http code 504", "http code 503", "http code 502"]
+            if any(x in str(e).lower() for x in str_matches):
                 if not error_500_start_ts:
                     error_500_start_ts = int(time.time())
                     error_500_counter = 1
                 else:
                     error_500_counter += 1
 
-            if 'timed out' in str(e) or 'name resolution' in str(e) or 'family not supported' in str(e) or str(e) == '':
+            str_matches = ["timed out", "timeout", "name resolution", "failed to resolve", "family not supported", "429 client", "aborted"]
+            if any(x in str(e).lower() for x in str_matches) or str(e) == '':
                 if not error_network_issue_start_ts:
                     error_network_issue_start_ts = int(time.time())
                     error_network_issue_counter = 1
