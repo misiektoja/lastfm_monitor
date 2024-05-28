@@ -1562,7 +1562,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                     if error_notification and not email_sent:
                         m_subject = f"lastfm_monitor: API key error! (user: {username})"
                         m_body = f"API key might not be valid anymore: {e}{get_cur_ts("\n\nTimestamp: ")}"
-                        m_body_html = f"<html><head></head><body>API key might not be valid anymore: {escape(e)}{get_cur_ts("<br><br>Timestamp: ")}</body></html>"
+                        m_body_html = f"<html><head></head><body>API key might not be valid anymore: {escape(str(e))}{get_cur_ts("<br><br>Timestamp: ")}</body></html>"
                         print(f"Sending email notification to {RECEIVER_EMAIL}")
                         send_email(m_subject, m_body, m_body_html, SMTP_SSL)
                         email_sent = True
@@ -1740,7 +1740,7 @@ if __name__ == "__main__":
         signal.signal(signal.SIGUSR2, toggle_song_notifications_signal_handler)
         signal.signal(signal.SIGHUP, toggle_progress_indicator_signal_handler)
         signal.signal(signal.SIGCONT, toggle_track_notifications_signal_handler)
-        signal.signal(signal.SIGPIPE, toggle_songs_on_loop_notifications_signal_handler)        
+        signal.signal(signal.SIGPIPE, toggle_songs_on_loop_notifications_signal_handler)
         signal.signal(signal.SIGTRAP, increase_inactivity_check_signal_handler)
         signal.signal(signal.SIGABRT, decrease_inactivity_check_signal_handler)
 
