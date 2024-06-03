@@ -34,7 +34,7 @@ The script requires Python 3.x.
 
 It uses [pylast](https://github.com/pylast/pylast) library, also requires requests, python-dateutil and urllib3.
 
-It has been tested succesfully on:
+It has been tested successfully on:
 - macOS (Ventura & Sonoma)
 - Linux (Raspberry Pi Bullseye & Bookworm based on Debian, Ubuntu 24)
 - Windows (10 & 11)
@@ -265,7 +265,7 @@ You can disable showing the track duration marks (L*, S*) via **-q** parameter:
 ./lastfm_monitor.py misiektoja -r -q
 ```
 
-Duration marks are not shown if the functionality to get track durations from Spotify is disabled.
+Duration marks are not shown if the functionality to get track duration from Spotify is disabled.
 
 ### Check intervals and offline timer 
 
@@ -283,7 +283,7 @@ If you want to change the time required to mark the user as inactive to 2 mins (
 
 ### Controlling the script via signals (only macOS/Linux/Unix)
 
-The tool has several signal handlers implemented which allow to change behaviour of the tool without a need to restart it with new parameters.
+The tool has several signal handlers implemented which allow to change behavior of the tool without a need to restart it with new parameters.
 
 List of supported signals:
 
@@ -330,9 +330,9 @@ You can combine all the parameters mentioned earlier in monitoring mode (listing
 
 The script has been tested with Last.fm account integrated with Spotify client, however it should work with other clients as well.
 
-## Colouring log output with GRC
+## Coloring log output with GRC
 
-If you use [GRC](https://github.com/garabik/grc) and want to have the output properly coloured you can use the configuration file available [here](grc/conf.monitor_logs)
+If you use [GRC](https://github.com/garabik/grc) and want to have the tool's log output properly colored you can use the configuration file available [here](grc/conf.monitor_logs)
 
 Change your grc configuration (typically *.grc/grc.conf*) and add this part:
 
@@ -342,7 +342,7 @@ Change your grc configuration (typically *.grc/grc.conf*) and add this part:
 conf.monitor_logs
 ```
 
-Now copy the *conf.monitor_logs* to your .grc directory and lastfm_monitor log files should be nicely coloured.
+Now copy the *conf.monitor_logs* to your *.grc* directory and lastfm_monitor log files should be nicely colored when using *grc* tool.
 
 ## License
 
