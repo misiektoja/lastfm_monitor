@@ -10,7 +10,7 @@ This is a high-level summary of the most important changes.
 - New feature allowing to suppress repeating API or network related errors (check **ERROR_500_NUMBER_LIMIT**, **ERROR_500_TIME_LIMIT**, **ERROR_NETWORK_ISSUES_NUMBER_LIMIT** and **ERROR_NETWORK_ISSUES_TIME_LIMIT** variables)
 - Rewritten get_date_from_ts(), get_short_date_from_ts(), get_hour_min_from_ts() and get_range_of_dates_from_tss() functions to automatically detect if time object is timestamp or datetime
 
-**Bugfixes**:
+**Bug fixes**:
 
 - Fixed issues with sporadic broken links in HTML emails (vars with special characters are now escaped properly)
 - One very important space removed in the subject of active email notification
@@ -28,7 +28,7 @@ This is a high-level summary of the most important changes.
 - Duplicate entries are counted now and displayed in the console & emails (more entries indicate higher chance of private mode)
 - pep8 style convention corrections
 
-**Bugfixes**:
+**Bug fixes**:
 
 - Fixed bug when **track_songs** functionality (**-g**) was not working without **-r**
 - Improved exception handling while processing JSON files
@@ -40,13 +40,13 @@ This is a high-level summary of the most important changes.
 
 **Features and Improvements**:
 
-- New feature allowing to fetch track duration from Spotify, instead of Last.fm which very often reports wrong duration (or none at all); if you enable **USE_TRACK_DURATION_FROM_SPOTIFY** to **True** in *[lastfm_monitor.py](lastfm_monitor.py)* file (or use **-r** / **--fetch_duration_from_spotify** parameter) and have SP_DC_COOKIE set in the script (or via new -z / --spotify_dc_cookie parameter) then the tool will try to get the track duration from Spotify; you will be able to tell if the track duration comes from Spotify as it has S* suffix at the end (e.g. 3 minutes, 42 seconds S*), while those coming from Last.fm have L* (e.g. 2 minutes, 13 seconds L*); you can disable showing the track duration marks (L*, S*) via **-q** / **--do_not_show_duration_marks** parameter; duration marks are not shown if the functionality to get track durations from Spotify is disabled
-- Function to search for Spotify track ID of the currently listened song (-g / --track_songs functionality) has been rewritten to also return track duration and to better detect proper song; previously sometimes wrong results were returned as we relied on the best single guess of Spotify; in this version we narrowed down the filters (specific artist, track, album) + we perform deterministic case insensitive search for the best fitting track out of the 5 search results, first by doing exact track name comparison and if it fails also substring one; once it fails we perform the search again without album name, so we do 4 different attempts to find the proper track
-- Possbility to define SP_DC_COOKIE via command line argument (**-z** / **--spotify_dc_cookie**)
+- New feature allowing to fetch track duration from Spotify, instead of Last.fm which very often reports wrong duration (or none at all); if you enable **USE_TRACK_DURATION_FROM_SPOTIFY** to **True** in *[lastfm_monitor.py](lastfm_monitor.py)* file (or use **-r** / **--fetch_duration_from_spotify** parameter) and have SP_DC_COOKIE set in the script (or via new -z / --spotify_dc_cookie parameter) then the tool will try to get the track duration from Spotify; you will be able to tell if the track duration comes from Spotify as it has S* suffix at the end (e.g. 3 minutes, 42 seconds S*), while those coming from Last.fm have L* (e.g. 2 minutes, 13 seconds L*); you can disable showing the track duration marks (L*, S*) via **-q** / **--do_not_show_duration_marks** parameter; duration marks are not shown if the functionality to get track duration from Spotify is disabled
+- Function to search for Spotify track ID of the currently listened song (-g / --track_songs functionality) has been rewritten to also return track duration and to better detect proper song; previously sometimes wrong results were returned as we relied on the best single guess of Spotify; in this version we narrowed down the filters (specific artist, track, album) + we perform deterministic case insensitive search for the best fitting track out of the 5 search results, first by doing exact track name comparison and if it fails also sub-string one; once it fails we perform the search again without album name, so we do 4 different attempts to find the proper track
+- Possibility to define SP_DC_COOKIE via command line argument (**-z** / **--spotify_dc_cookie**)
 - The tool now counts and displays number of times the user paused music in the session, it is also included in email notifications
 - Fine-tuned different parameters and thresholds for detecting skipped songs and those played longer than its track duration
 
-**Bugfixes**:
+**Bug fixes**:
 
 - Spotify track ID was not returned for track names containing single apostrophe characters
 
@@ -54,8 +54,8 @@ This is a high-level summary of the most important changes.
 
 **Features and Improvements**:
 
-- Possbility to define LASTFM_API_KEY via command line argument (-u / --lastfm_api_key)
-- Possbility to define LASTFM_API_SECRET via command line argument (-w / --lastfm_shared_secret)
+- Possibility to define LASTFM_API_KEY via command line argument (-u / --lastfm_api_key)
+- Possibility to define LASTFM_API_SECRET via command line argument (-w / --lastfm_shared_secret)
 - The artist and track are included in notification emails when informing how long the previous track was played
 - Email sending function send_email() has been rewritten to detect invalid SMTP settings
 - Strings have been converted to f-strings for better code visibility
@@ -63,7 +63,7 @@ This is a high-level summary of the most important changes.
 - Better calculations for how long the user played the previous track
 - Corrected HTML formatting for some notification emails
 
-**Bugfixes**:
+**Bug fixes**:
 
 - If user played only one track its "played for" time was always greater by LASTFM_ACTIVE_CHECK_INTERVAL than overall playing time
 
@@ -76,7 +76,7 @@ This is a high-level summary of the most important changes.
 - More accurate calculations of how long the user played the song
 - Code related to string concatenation has been cleaned up
 
-**Bugfixes**:
+**Bug fixes**:
 
 - Fix for missing last track duration in inactive email notification
 - Fix for displaying wrong "played for" information in loop song email notifications
@@ -85,7 +85,7 @@ This is a high-level summary of the most important changes.
 
 **Features and Improvements**:
 
-- Better way of handling situations where historical Last.fm entries are not in sync and behind few songs; it happens very rarely, but it results in intepreting the current song as skipped and played on loop
+- Better way of handling situations where historical Last.fm entries are not in sync and behind few songs; it happens very rarely, but it results in interpreting the current song as skipped and played on loop
 - Detection of wrongly set SP_DC_COOKIE variable (empty or default value) - it will prevent track_songs functionality (-g) from kicking in
 
 # Changes in 1.0 (22 Apr 2024)
@@ -100,6 +100,6 @@ This is a high-level summary of the most important changes.
 - Support for basic statistics for user's playing session (how many listened and skipped songs)
 - Additional search/replace strings to sanitize tracks for Genius URLs
 
-**Bugfixes**:
+**Bug fixes**:
 
 - Fix for "Object of type Track is not JSON serializable" error in some cases
