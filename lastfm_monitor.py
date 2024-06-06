@@ -268,6 +268,9 @@ def calculate_timespan(timestamp1, timestamp2, show_weeks=True, show_hours=True,
 
     if type(timestamp1) is int:
         dt1 = datetime.fromtimestamp(int(ts1))
+    elif type(timestamp1) is float:
+        ts1 = int(round(ts1))
+        dt1 = datetime.fromtimestamp(ts1)
     elif type(timestamp1) is datetime:
         dt1 = timestamp1
         ts1 = int(round(dt1.timestamp()))
@@ -276,6 +279,9 @@ def calculate_timespan(timestamp1, timestamp2, show_weeks=True, show_hours=True,
 
     if type(timestamp2) is int:
         dt2 = datetime.fromtimestamp(int(ts2))
+    elif type(timestamp2) is float:
+        ts2 = int(round(ts2))
+        dt2 = datetime.fromtimestamp(ts2)
     elif type(timestamp2) is datetime:
         dt2 = timestamp2
         ts2 = int(round(dt2.timestamp()))
@@ -415,22 +421,41 @@ def get_date_from_ts(ts):
         ts_new = int(round(ts.timestamp()))
     elif type(ts) is int:
         ts_new = ts
+    elif type(ts) is float:
+        ts_new = int(round(ts))
     else:
         return ""
 
     return (f"{calendar.day_abbr[(datetime.fromtimestamp(ts_new)).weekday()]} {datetime.fromtimestamp(ts_new).strftime("%d %b %Y, %H:%M:%S")}")
 
 
-# Function to return the timestamp/datetime object in human readable format (short version); eg. Sun 21 Apr 15:08
-def get_short_date_from_ts(ts):
+# Function to return the timestamp/datetime object in human readable format (short version); eg.
+# Sun 21 Apr 15:08
+# Sun 21 Apr 24, 15:08 (if show_year == True and current year is different)
+# Sun 21 Apr (if show_hour == False)
+def get_short_date_from_ts(ts, show_year=False, show_hour=True):
     if type(ts) is datetime:
         ts_new = int(round(ts.timestamp()))
     elif type(ts) is int:
         ts_new = ts
+    elif type(ts) is float:
+        ts_new = int(round(ts))
     else:
         return ""
 
-    return (f"{calendar.day_abbr[(datetime.fromtimestamp(ts_new)).weekday()]} {datetime.fromtimestamp(ts_new).strftime("%d %b %H:%M")}")
+    if show_hour:
+        hour_strftime = " %H:%M"
+    else:
+        hour_strftime = ""
+
+    if show_year and int(datetime.fromtimestamp(ts_new).strftime("%Y")) != int(datetime.now().strftime("%Y")):
+        if show_hour:
+            hour_prefix = ","
+        else:
+            hour_prefix = ""
+        return (f"{calendar.day_abbr[(datetime.fromtimestamp(ts_new)).weekday()]} {datetime.fromtimestamp(ts_new).strftime(f"%d %b %y{hour_prefix}{hour_strftime}")}")
+    else:
+        return (f"{calendar.day_abbr[(datetime.fromtimestamp(ts_new)).weekday()]} {datetime.fromtimestamp(ts_new).strftime(f"%d %b{hour_strftime}")}")
 
 
 # Function to return the timestamp/datetime object in human readable format (only hour, minutes and optionally seconds): eg. 15:08:12
@@ -439,6 +464,8 @@ def get_hour_min_from_ts(ts, show_seconds=False):
         ts_new = int(round(ts.timestamp()))
     elif type(ts) is int:
         ts_new = ts
+    elif type(ts) is float:
+        ts_new = int(round(ts))
     else:
         return ""
 
@@ -455,6 +482,8 @@ def get_range_of_dates_from_tss(ts1, ts2, between_sep=" - ", short=False):
         ts1_new = int(round(ts1.timestamp()))
     elif type(ts1) is int:
         ts1_new = ts1
+    elif type(ts1) is float:
+        ts1_new = int(round(ts1))
     else:
         return ""
 
@@ -462,6 +491,8 @@ def get_range_of_dates_from_tss(ts1, ts2, between_sep=" - ", short=False):
         ts2_new = int(round(ts2.timestamp()))
     elif type(ts2) is int:
         ts2_new = ts2
+    elif type(ts2) is float:
+        ts2_new = int(round(ts2))
     else:
         return ""
 
@@ -1276,7 +1307,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
 
                         print(f"\n*** User got ACTIVE after being offline for {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))}{last_track_start_changed}")
                         print(f"*** Last activity:\t{get_date_from_ts(lf_active_ts_last)}")
-                        # We signal that the currectly played song is the same as previous one before user got inactive, so might be continuation of previous track
+                        # We signal that the currently played song is the same as previous one before user got inactive, so might be continuation of previous track
                         if artist_old == artist and track_old == track:
                             signal_previous_the_same = True
                         else:
@@ -1616,7 +1647,7 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--lastfm_tracks", help="Filename with Last.fm tracks/albums to monitor", type=str, metavar="TRACKS_FILENAME")
     parser.add_argument("-l", "--list_recent_tracks", help="List recently played tracks for the user", action='store_true')
     parser.add_argument("-n", "--number_of_recent_tracks", help="Number of tracks to display if used with -l", type=int)
-    parser.add_argument("-d", "--disable_logging", help="Disable logging to file 'lastfm_monitor_user.log' file", action='store_true')
+    parser.add_argument("-d", "--disable_logging", help="Disable output logging to file 'lastfm_monitor_user.log' file", action='store_true')
     args = parser.parse_args()
 
     if len(sys.argv) == 1:
