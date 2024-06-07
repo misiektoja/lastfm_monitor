@@ -1282,7 +1282,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                         last_track_start_changed = ""
                         last_track_start_changed_html = ""
                         lf_active_ts_last_old = lf_active_ts_last
-                        if last_track_start_ts > (lf_active_ts_last + 60):
+                        if last_track_start_ts > (lf_active_ts_last + 60) and (int(time.time()) - last_track_start_ts > 240):
                             last_track_start_changed = f"\n(last track start changed from {get_short_date_from_ts(lf_active_ts_last)} to {get_short_date_from_ts(last_track_start_ts)} - offline mode ?)"
                             last_track_start_changed_html = f"<br>(last track start changed from <b>{get_short_date_from_ts(lf_active_ts_last)}</b> to <b>{get_short_date_from_ts(last_track_start_ts)}</b> - offline mode ?)"
                             lf_active_ts_last = last_track_start_ts
