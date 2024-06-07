@@ -2,6 +2,20 @@
 
 This is a high-level summary of the most important changes. 
 
+# Changes in 1.7 (07 Jun 2024)
+
+**Features and Improvements**:
+
+- **NEW:** Added new signal handler for SIGPIPE allowing to switch songs on loop email notifications
+- **IMPROVE:** Better handling of situations when new offline entries show up just before user gets online
+- **IMPROVE:** Switching offline entries notifications included in SIGUSR1 signal handler
+- **IMPROVE:** Better way of checking for error strings (without case sensitivity) + some additional ones added to the list
+- **NEW:** Support for float type of timestamps added in date/time related functions + get_short_date_from_ts() rewritten to display year if show_year == True and current year is different, also can omit displaying hour and minutes if show_hours == False
+
+**Bug fixes**:
+
+- **BUGFIX:** Escaping of exception error string fixed
+
 # Changes in 1.6 (24 May 2024)
 
 **Features and Improvements**:
