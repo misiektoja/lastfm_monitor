@@ -1,6 +1,6 @@
 # lastfm_monitor
 
-lastfm_monitor is a Python script which allows for real-time monitoring of Last.fm users music activity. 
+lastfm_monitor is a Python tool which allows for real-time monitoring of Last.fm users music activity. 
 
 ## Features
 
@@ -72,6 +72,11 @@ Edit the *[lastfm_monitor.py](lastfm_monitor.py)* file and change any desired co
 Mandatory activity is to create your Last.fm **API key** and **Shared secret** by going to [https://www.last.fm/api/account/create](https://www.last.fm/api/account/create) (or get your existing one from [https://www.last.fm/api/accounts](https://www.last.fm/api/accounts))
 
 Then change **LASTFM_API_KEY** and **LASTFM_API_SECRET** variables to respective values (or use **-u** and **-w** parameters).
+
+### User privacy settings
+
+In order to monitor Last.fm user activity, proper privacy settings need to be enabled on the monitored user account, i.e. in Last.fm *'Settings'* -> *'Privacy'*, the *'Hide recent listening information'* setting should be disabled. Otherwise you will get this error message returned by pyLast library: *'Login: User required to be logged in'*.
+
 
 ### Spotify sp_dc cookie
 
