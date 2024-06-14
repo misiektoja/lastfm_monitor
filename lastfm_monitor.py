@@ -330,7 +330,7 @@ def calculate_timespan(timestamp1, timestamp2, show_weeks=True, show_hours=True,
 
 
 # Function to send email notification
-def send_email(subject, body, body_html, use_ssl):
+def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
     fqdn_re = re.compile(r'(?=^.{4,253}$)(^((?!-)[a-zA-Z0-9-]{1,63}(?<!-)\.)+[a-zA-Z]{2,63}\.?$)')
     email_re = re.compile(r'[^@]+@[^@]+\.[^@]+')
 
@@ -368,10 +368,10 @@ def send_email(subject, body, body_html, use_ssl):
     try:
         if use_ssl:
             ssl_context = ssl.create_default_context()
-            smtpObj = smtplib.SMTP(SMTP_HOST, SMTP_PORT)
+            smtpObj = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=smtp_timeout)
             smtpObj.starttls(context=ssl_context)
         else:
-            smtpObj = smtplib.SMTP(SMTP_HOST, SMTP_PORT)
+            smtpObj = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=smtp_timeout)
         smtpObj.login(SMTP_USER, SMTP_PASSWORD)
         email_msg = MIMEMultipart('alternative')
         email_msg["From"] = SENDER_EMAIL
@@ -1651,11 +1651,25 @@ if __name__ == "__main__":
     parser.add_argument("-l", "--list_recent_tracks", help="List recently played tracks for the user", action='store_true')
     parser.add_argument("-n", "--number_of_recent_tracks", help="Number of tracks to display if used with -l", type=int)
     parser.add_argument("-d", "--disable_logging", help="Disable output logging to file 'lastfm_monitor_user.log' file", action='store_true')
+    parser.add_argument("-y", "--send_test_email_notification", help="Send test email notification to verify SMTP settings defined in the script", action='store_true')
     args = parser.parse_args()
 
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
         sys.exit(1)
+
+    sys.stdout.write("* Checking internet connectivity ... ")
+    sys.stdout.flush()
+    check_internet()
+    print("")
+
+    if args.send_test_email_notification:
+        print("* Sending test email notification ...\n")
+        if send_email("lastfm_monitor: test email", "This is test email - your SMTP settings seems to be correct !", "", SMTP_SSL, smtp_timeout=5) == 0:
+                print("* Email sent successfully !")
+        else:
+            sys.exit(1)
+        sys.exit(0)
 
     if not args.LASTFM_USERNAME:
         print("* Error: LASTFM_USERNAME argument is required !")
@@ -1693,11 +1707,6 @@ if __name__ == "__main__":
 
     if args.play_break_multiplier:
         LASTFM_BREAK_CHECK_MULTIPLIER = args.play_break_multiplier
-
-    sys.stdout.write("* Checking internet connectivity ... ")
-    sys.stdout.flush()
-    check_internet()
-    print("")
 
     network = pylast.LastFMNetwork(LASTFM_API_KEY, LASTFM_API_SECRET)
     user = network.get_user(args.LASTFM_USERNAME)
