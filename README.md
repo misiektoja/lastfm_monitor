@@ -30,13 +30,16 @@ I'm not a dev, project done as a hobby. Code is ugly and as-is, but it works (at
 
 ## Requirements
 
-The script requires Python 3.x.
+The tool requires Python 3.8 or higher.
 
-It uses [pylast](https://github.com/pylast/pylast) library, also requires requests, python-dateutil and urllib3.
+It uses [pyLast](https://github.com/pylast/pylast) library, also requires requests, python-dateutil and urllib3.
 
 It has been tested successfully on:
 - macOS (Ventura & Sonoma)
-- Linux (Raspberry Pi Bullseye & Bookworm based on Debian, Ubuntu 24)
+- Linux:
+   - Raspberry Pi Bullseye & Bookworm
+   - Ubuntu 24
+   - Kali Linux 2024
 - Windows (10 & 11)
 
 It should work on other versions of macOS, Linux, Unix and Windows as well.
@@ -77,7 +80,6 @@ Then change **LASTFM_API_KEY** and **LASTFM_API_SECRET** variables to respective
 
 In order to monitor Last.fm user activity, proper privacy settings need to be enabled on the monitored user account, i.e. in Last.fm *'Settings'* -> *'Privacy'*, the *'Hide recent listening information'* setting should be disabled. Otherwise you will get this error message returned by pyLast library: *'Login: User required to be logged in'*.
 
-
 ### Spotify sp_dc cookie
 
 If you want to get track duration from Spotify (**-r** parameter) or you want to use ***track_songs*** functionality (**-g** parameter), so the script automatically plays the track listened by the user in your Spotify client, then you need to log in to Spotify web client [https://open.spotify.com/](https://open.spotify.com/) in your web browser and copy the value of sp_dc cookie to **SP_DC_COOKIE** variable (or use **-z** parameter). 
@@ -88,7 +90,13 @@ Newly generated Spotify's sp_dc cookie should be valid for 1 year. You will be i
 
 ### SMTP settings
 
-If you want to use email notifications functionality you need to change the SMTP settings (host, port, user, password, sender, recipient). If you leave the default settings then no notifications will be sent.
+If you want to use email notifications functionality you need to change the SMTP settings (host, port, user, password, sender, recipient) in the *[lastfm_monitor.py](lastfm_monitor.py)* file. If you leave the default settings then no notifications will be sent.
+
+You can verify if your SMTP settings are correct by using **-y** parameter (the tool will try to send a test email notification):
+
+```sh
+./lastfm_monitor.py -y
+```
 
 ### Other settings
 
