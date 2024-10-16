@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v1.8
+v1.9
 
 Tool implementing real-time tracking of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -14,7 +14,7 @@ requests
 urllib3
 """
 
-VERSION = 1.8
+VERSION = 1.9
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -531,7 +531,7 @@ def toggle_active_inactive_notifications_signal_handler(sig, frame):
     sig_name = signal.Signals(sig).name
     print(f"* Signal {sig_name} received")
     print(f"* Email notifications: [active = {active_notification}] [inactive = {inactive_notification}] [offline entries = {offline_entries_notification}]")
-    print_cur_ts("Timestamp:\t\t")
+    print_cur_ts("Timestamp:\t\t\t")
 
 
 # Signal handler for SIGUSR2 allowing to switch every song email notifications
@@ -541,7 +541,7 @@ def toggle_song_notifications_signal_handler(sig, frame):
     sig_name = signal.Signals(sig).name
     print(f"* Signal {sig_name} received")
     print(f"* Email notifications: [every song = {song_notification}]")
-    print_cur_ts("Timestamp:\t\t")
+    print_cur_ts("Timestamp:\t\t\t")
 
 
 # Signal handler for SIGHUP allowing to switch progress indicator in the output
@@ -551,7 +551,7 @@ def toggle_progress_indicator_signal_handler(sig, frame):
     sig_name = signal.Signals(sig).name
     print(f"* Signal {sig_name} received")
     print(f"* Progress indicator enabled: {progress_indicator}")
-    print_cur_ts("Timestamp:\t\t")
+    print_cur_ts("Timestamp:\t\t\t")
 
 
 # Signal handler for SIGCONT allowing to switch tracked songs email notifications
@@ -561,7 +561,7 @@ def toggle_track_notifications_signal_handler(sig, frame):
     sig_name = signal.Signals(sig).name
     print(f"* Signal {sig_name} received")
     print(f"* Email notifications: [tracked = {track_notification}]")
-    print_cur_ts("Timestamp:\t\t")
+    print_cur_ts("Timestamp:\t\t\t")
 
 
 # Signal handler for SIGPIPE allowing to switch songs on loop email notifications
@@ -571,7 +571,7 @@ def toggle_songs_on_loop_notifications_signal_handler(sig, frame):
     sig_name = signal.Signals(sig).name
     print(f"* Signal {sig_name} received")
     print(f"* Email notifications: [songs on loop = {song_on_loop_notification}]")
-    print_cur_ts("Timestamp:\t\t")
+    print_cur_ts("Timestamp:\t\t\t")
 
 
 # Signal handler for SIGTRAP allowing to increase inactivity check interval by LASTFM_INACTIVITY_CHECK_SIGNAL_VALUE seconds
@@ -581,7 +581,7 @@ def increase_inactivity_check_signal_handler(sig, frame):
     sig_name = signal.Signals(sig).name
     print(f"* Signal {sig_name} received")
     print(f"* Last.fm timers: [inactivity: {display_time(LASTFM_INACTIVITY_CHECK)}]")
-    print_cur_ts("Timestamp:\t\t")
+    print_cur_ts("Timestamp:\t\t\t")
 
 
 # Signal handler for SIGABRT allowing to decrease inactivity check interval by LASTFM_INACTIVITY_CHECK_SIGNAL_VALUE seconds
@@ -592,7 +592,7 @@ def decrease_inactivity_check_signal_handler(sig, frame):
     sig_name = signal.Signals(sig).name
     print(f"* Signal {sig_name} received")
     print(f"* Last.fm timers: [inactivity: {display_time(LASTFM_INACTIVITY_CHECK)}]")
-    print_cur_ts("Timestamp:\t\t")
+    print_cur_ts("Timestamp:\t\t\t")
 
 
 # Function to access the previous and next elements of the list
@@ -613,7 +613,8 @@ def get_spotify_apple_genius_search_urls(artist, track):
     spotify_search_url = f"https://open.spotify.com/search/{spotify_search_string}?si=1"
     apple_search_url = f"https://music.apple.com/pl/search?term={apple_search_string}"
     genius_search_url = f"https://genius.com/search?q={urllib.parse.quote_plus(genius_search_string)}"
-    return spotify_search_url, apple_search_url, genius_search_url
+    youtube_music_search_url = f"https://music.youtube.com/search?q={spotify_search_string}"
+    return spotify_search_url, apple_search_url, genius_search_url, youtube_music_search_url
 
 
 # Function returning the list of recently played Last.fm tracks
@@ -660,8 +661,8 @@ def lastfm_list_tracks(username, user, network, number):
         track = str(new_track.title)
         album = str(new_track.info['album'])
         print("*** User is currently ACTIVE !")
-        print(f"\nTrack:\t{artist} - {track}")
-        print(f"Album:\t{album}")
+        print(f"\nTrack:\t\t{artist} - {track}")
+        print(f"Album:\t\t{album}")
 
 
 # Function getting Spotify access token based on provided sp_dc cookie value
@@ -913,14 +914,15 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
         artist_old = str(last_activity_artist)
         track_old = str(last_activity_track)
 
-        print(f"* Last activity:\t{last_activity_ts_weekday} {last_activity_dt}")
-        print(f"* Last track:\t\t{last_activity_artist} - {last_activity_track}")
+        print(f"* Last activity:\t\t{last_activity_ts_weekday} {last_activity_dt}")
+        print(f"* Last track:\t\t\t{last_activity_artist} - {last_activity_track}")
 
-        spotify_search_url, apple_search_url, genius_search_url = get_spotify_apple_genius_search_urls(str(last_activity_artist), str(last_activity_track))
+        spotify_search_url, apple_search_url, genius_search_url, youtube_music_search_url = get_spotify_apple_genius_search_urls(str(last_activity_artist), str(last_activity_track))
 
-        print(f"\n* Spotify search URL:\t{spotify_search_url}")
-        print(f"* Apple search URL:\t{apple_search_url}")
-        print(f"* Genius lyrics URL:\t{genius_search_url}\n")
+        print(f"\n* Spotify search URL:\t\t{spotify_search_url}")
+        print(f"* Apple search URL:\t\t{apple_search_url}")
+        print(f"* YouTube Music search URL:\t{youtube_music_search_url}")
+        print(f"* Genius lyrics URL:\t\t{genius_search_url}\n")
 
         print(f"*** User is OFFLINE for {calculate_timespan(int(time.time()), lf_active_ts_last, show_seconds=False)} !")
 
@@ -938,8 +940,8 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
         album = str(new_track.info['album'])
         artist_old = artist
         track_old = track
-        print(f"\nTrack:\t\t\t{artist} - {track}")
-        print(f"Album:\t\t\t{album}")
+        print(f"\nTrack:\t\t\t\t{artist} - {track}")
+        print(f"Album:\t\t\t\t{album}")
 
         if (USE_TRACK_DURATION_FROM_SPOTIFY or track_songs) and SP_DC_COOKIE and SP_DC_COOKIE != "your_sp_dc_cookie_value":
             accessToken = spotify_get_access_token(SP_DC_COOKIE)
@@ -965,13 +967,14 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                 pass
 
         if track_duration > 0:
-            print(f"Duration:\t\t{display_time(track_duration)}{duration_mark}")
+            print(f"Duration:\t\t\t{display_time(track_duration)}{duration_mark}")
 
-        spotify_search_url, apple_search_url, genius_search_url = get_spotify_apple_genius_search_urls(str(artist), str(track))
+        spotify_search_url, apple_search_url, genius_search_url, youtube_music_search_url = get_spotify_apple_genius_search_urls(str(artist), str(track))
 
-        print(f"\nSpotify search URL:\t{spotify_search_url}")
-        print(f"Apple search URL:\t{apple_search_url}")
-        print(f"Genius lyrics URL:\t{genius_search_url}")
+        print(f"\nSpotify search URL:\t\t{spotify_search_url}")
+        print(f"Apple search URL:\t\t{apple_search_url}")
+        print(f"YouTube Music search URL:\t{youtube_music_search_url}")
+        print(f"Genius lyrics URL:\t\t{genius_search_url}")
 
         print("\n*** User is currently ACTIVE !")
 
@@ -1002,8 +1005,8 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
             duration_m_body_html = f"<br>Duration: {display_time(track_duration)}{duration_mark}"
 
         m_subject = f"Last.fm user {username} is active: '{artist} - {track}'"
-        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple search URL: {apple_search_url}\nGenius lyrics URL: {genius_search_url}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple search URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a><br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
+        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple search URL: {apple_search_url}\nYouTube Music search URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple search URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music search URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a><br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
         if active_notification:
             print(f"Sending email notification to {RECEIVER_EMAIL}")
@@ -1040,7 +1043,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
 
     print(f"\nTracks/albums to monitor: {tracks}")
 
-    print_cur_ts("\nTimestamp:\t\t")
+    print_cur_ts("\nTimestamp:\t\t\t")
 
     email_sent = False
 
@@ -1088,7 +1091,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                         print(f"Sending email notification to {RECEIVER_EMAIL}")
                         send_email(m_subject, m_body, "", SMTP_SSL)
 
-                    print_cur_ts("\nTimestamp:\t\t")
+                    print_cur_ts("\nTimestamp:\t\t\t")
 
             # User is online (plays music at the moment)
             if new_track is not None:
@@ -1099,7 +1102,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                     lf_track_ts_start_after_resume += (playing_resumed_ts - playing_paused_ts)
                     paused_counter += (int(playing_resumed_ts) - int(playing_paused_ts))
                     print(f"User RESUMED playing after {calculate_timespan(int(playing_resumed_ts), int(playing_paused_ts))}")
-                    print_cur_ts("\nTimestamp:\t\t")
+                    print_cur_ts("\nTimestamp:\t\t\t")
 
                     # If tracking functionality is enabled then RESUME the current song via Spotify client
                     if track_songs:
@@ -1205,7 +1208,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                     if progress_indicator:
                         print("---------------------------------------------------------------------------------------------------------")
 
-                    print(f"Last.fm user:\t\t{username}\n")
+                    print(f"Last.fm user:\t\t\t{username}\n")
 
                     listened_songs += 1
 
@@ -1219,8 +1222,8 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                     lf_track_ts_start_after_resume = lf_track_ts_start
                     last_track_start_ts_old = last_track_start_ts
 
-                    print(f"Track:\t\t\t{artist} - {track}")
-                    print(f"Album:\t\t\t{album}")
+                    print(f"Track:\t\t\t\t{artist} - {track}")
+                    print(f"Album:\t\t\t\t{album}")
 
                     sp_track_uri_id = None
                     sp_track_duration = 0
@@ -1250,13 +1253,14 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                             pass
 
                     if track_duration > 0:
-                        print(f"Duration:\t\t{display_time(track_duration)}{duration_mark}")
+                        print(f"Duration:\t\t\t{display_time(track_duration)}{duration_mark}")
 
-                    spotify_search_url, apple_search_url, genius_search_url = get_spotify_apple_genius_search_urls(str(artist), str(track))
+                    spotify_search_url, apple_search_url, genius_search_url, youtube_music_search_url = get_spotify_apple_genius_search_urls(str(artist), str(track))
 
-                    print(f"\nSpotify search URL:\t{spotify_search_url}")
-                    print(f"Apple search URL:\t{apple_search_url}")
-                    print(f"Genius lyrics URL:\t{genius_search_url}")
+                    print(f"\nSpotify search URL:\t\t{spotify_search_url}")
+                    print(f"Apple search URL:\t\t{apple_search_url}")
+                    print(f"YouTube Music search URL:\t{youtube_music_search_url}")
+                    print(f"Genius lyrics URL:\t\t{genius_search_url}")
 
                     last_activity_to_save = []
                     last_activity_to_save.append(lf_track_ts_start)
@@ -1314,7 +1318,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                             print(f"\n*** Duplicate entries ({p}) found, possible PRIVATE MODE ({get_range_of_dates_from_tss(lf_active_ts_last_old, lf_track_ts_start, short=True)})")
 
                         print(f"\n*** User got ACTIVE after being offline for {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))}{last_track_start_changed}")
-                        print(f"*** Last activity:\t{get_date_from_ts(lf_active_ts_last)}")
+                        print(f"*** Last activity:\t\t{get_date_from_ts(lf_active_ts_last)}")
                         # We signal that the currently played song is the same as previous one before user got inactive, so might be continuation of previous track
                         if artist_old == artist and track_old == track:
                             signal_previous_the_same = True
@@ -1328,8 +1332,8 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                         lf_active_ts_start = lf_track_ts_start
                         playing_resumed_ts = lf_track_ts_start
                         m_subject = f"Last.fm user {username} is active: '{artist} - {track}' (after {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last), show_seconds=False)} - {get_short_date_from_ts(lf_active_ts_last)})"
-                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple search URL: {apple_search_url}\nGenius lyrics URL: {genius_search_url}{played_for_m_body}\n\nFriend got active after being offline for {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))}{last_track_start_changed}{private_mode}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple search URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a>{played_for_m_body_html}<br><br>Friend got active after being offline for <b>{calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))}</b>{last_track_start_changed_html}{private_mode_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple search URL: {apple_search_url}\nYouTube Music search URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}{played_for_m_body}\n\nFriend got active after being offline for {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))}{last_track_start_changed}{private_mode}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple search URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music search URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a>{played_for_m_body_html}<br><br>Friend got active after being offline for <b>{calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))}</b>{last_track_start_changed_html}{private_mode_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
                         if active_notification:
                             print(f"Sending email notification to {RECEIVER_EMAIL}")
@@ -1338,8 +1342,8 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
 
                     if (track_notification or song_notification) and not email_sent:
                         m_subject = f"Last.fm user {username}: '{artist} - {track}'"
-                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple search URL: {apple_search_url}\nGenius lyrics URL: {genius_search_url}{played_for_m_body}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple search URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a>{played_for_m_body_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple search URL: {apple_search_url}\nYouTube Music search URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}{played_for_m_body}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple search URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music search URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a>{played_for_m_body_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
 
                     if track.upper() in map(str.upper, tracks) or album.upper() in map(str.upper, tracks):
                         print("\n*** Track/album matched with the list!")
@@ -1361,8 +1365,8 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
 
                     if song_on_loop == SONG_ON_LOOP_VALUE and song_on_loop_notification:
                             m_subject = f"Last.fm user {username} plays song on loop: '{artist} - {track}'"
-                            m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple search URL: {apple_search_url}\nGenius lyrics URL: {genius_search_url}{played_for_m_body}\n\nUser plays song on LOOP ({song_on_loop} times){get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple search URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a>{played_for_m_body_html}<br><br>User plays song on LOOP (<b>{song_on_loop}</b> times){get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                            m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple search URL: {apple_search_url}\nYouTube Music search URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}{played_for_m_body}\n\nUser plays song on LOOP ({song_on_loop} times){get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple search URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music search URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a>{played_for_m_body_html}<br><br>User plays song on LOOP (<b>{song_on_loop}</b> times){get_cur_ts('<br><br>Timestamp: ')}</body></html>"
                             print(f"Sending email notification to {RECEIVER_EMAIL}")
                             send_email(m_subject, m_body, m_body_html, SMTP_SSL)
 
@@ -1378,7 +1382,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                     except Exception as e:
                         print(f"* Cannot write CSV entry - {e}")
 
-                    print_cur_ts("\nTimestamp:\t\t")
+                    print_cur_ts("\nTimestamp:\t\t\t")
                 # Track has not changed, user is online and continues playing
                 else:
                     lf_active_ts_last = int(time.time())
@@ -1404,8 +1408,8 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                     if progress_indicator:
                         print("---------------------------------------------------------------------------------------------------------")
                     print(f"User PAUSED playing after {calculate_timespan(int(playing_resumed_ts), int(playing_paused_ts))} (inactivity timer: {display_time(LASTFM_BREAK_CHECK_MULTIPLIER*LASTFM_ACTIVE_CHECK_INTERVAL)})")
-                    print(f"Last activity:\t\t{get_date_from_ts(lf_active_ts_last)}")
-                    print_cur_ts("\nTimestamp:\t\t")
+                    print(f"Last activity:\t\t\t{get_date_from_ts(lf_active_ts_last)}")
+                    print_cur_ts("\nTimestamp:\t\t\t")
                     # If tracking functionality is enabled then PAUSE the current song via Spotify client
                     if track_songs:
                         if platform.system() == 'Darwin':       # macOS
@@ -1489,7 +1493,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
 
                     print(f"{listened_songs_text}\n")
 
-                    print(f"*** Last activity:\t{get_date_from_ts(lf_active_ts_last)} (inactive timer: {display_time(LASTFM_INACTIVITY_CHECK)})")
+                    print(f"*** Last activity:\t\t{get_date_from_ts(lf_active_ts_last)} (inactive timer: {display_time(LASTFM_INACTIVITY_CHECK)})")
                     # If tracking functionality is enabled then either pause the current song via Spotify client or play the indicated SP_USER_GOT_OFFLINE_TRACK_ID "finishing" song
                     if track_songs:
                         if SP_USER_GOT_OFFLINE_TRACK_ID:
@@ -1524,8 +1528,8 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                         print(f"* Cannot save last status to '{lastfm_last_activity_file}' file - {e}")
                     if inactive_notification:
                         m_subject = f"Last.fm user {username} is inactive: '{artist} - {track}' (after {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start), show_seconds=False)}: {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True)})"
-                        m_body = f"Last played: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple search URL: {apple_search_url}\nGenius lyrics URL: {genius_search_url}\n\nUser got inactive after listening to music for {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}\nUser played music from {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep=' to ')}{paused_mbody}{listened_songs_mbody}{played_for_m_body}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}\nInactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple search URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a><br><br>User got inactive after listening to music for <b>{calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}</b><br>User played music from <b>{get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep='</b> to <b>')}</b>{paused_mbody_html}{listened_songs_mbody_html}{played_for_m_body_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b><br>Inactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                        m_body = f"Last played: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple search URL: {apple_search_url}\nYouTube Music search URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}\n\nUser got inactive after listening to music for {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}\nUser played music from {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep=' to ')}{paused_mbody}{listened_songs_mbody}{played_for_m_body}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}\nInactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple search URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music search URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a><br><br>User got inactive after listening to music for <b>{calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}</b><br>User played music from <b>{get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep='</b> to <b>')}</b>{paused_mbody_html}{listened_songs_mbody_html}{played_for_m_body_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b><br>Inactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
                         print(f"Sending email notification to {RECEIVER_EMAIL}")
                         send_email(m_subject, m_body, m_body_html, SMTP_SSL)
@@ -1537,7 +1541,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                     looped_songs = 0
                     skipped_songs = 0
                     pauses_number = 0
-                    print_cur_ts("\nTimestamp:\t\t")
+                    print_cur_ts("\nTimestamp:\t\t\t")
 
                 if alive_counter >= TOOL_ALIVE_COUNTER:
                     print_cur_ts("Alive check, timestamp: ")
@@ -1583,13 +1587,13 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
 
             if error_500_start_ts and (error_500_counter >= ERROR_500_NUMBER_LIMIT and (int(time.time()) - error_500_start_ts) >= ERROR_500_TIME_LIMIT):
                 print(f"Error 50x ({error_500_counter}x times in the last {display_time((int(time.time()) - error_500_start_ts))}) - '{e}'")
-                print_cur_ts("Timestamp:\t\t")
+                print_cur_ts("Timestamp:\t\t\t")
                 error_500_start_ts = 0
                 error_500_counter = 0
 
             elif error_network_issue_start_ts and (error_network_issue_counter >= ERROR_NETWORK_ISSUES_NUMBER_LIMIT and (int(time.time()) - error_network_issue_start_ts) >= ERROR_NETWORK_ISSUES_TIME_LIMIT):
                 print(f"Error with network ({error_network_issue_counter}x times in the last {display_time((int(time.time()) - error_network_issue_start_ts))}) - '{e}'")
-                print_cur_ts("Timestamp:\t\t")
+                print_cur_ts("Timestamp:\t\t\t")
                 error_network_issue_start_ts = 0
                 error_network_issue_counter = 0
 
@@ -1605,7 +1609,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                         print(f"Sending email notification to {RECEIVER_EMAIL}")
                         send_email(m_subject, m_body, m_body_html, SMTP_SSL)
                         email_sent = True
-                print_cur_ts("Timestamp:\t\t")
+                print_cur_ts("Timestamp:\t\t\t")
 
         if lf_user_online:
             time.sleep(LASTFM_ACTIVE_CHECK_INTERVAL)
