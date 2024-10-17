@@ -1069,7 +1069,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                         recent_tracks_while_offline = lastfm_get_recent_tracks(username, network, 100)
                         for previous, t, nxt in previous_and_next(reversed(recent_tracks_while_offline)):
                             if int(t.timestamp) > int(last_track_start_ts_old2):
-                                if 0 <= (lf_track_ts_start - int(t.timestamp)) <= 60:
+                                if 0 <= (lf_track_ts_start + LASTFM_ACTIVE_CHECK_INTERVAL - int(t.timestamp)) <= 60:
                                     continue
                                 print(f'{datetime.fromtimestamp(int(t.timestamp)).strftime("%d %b %Y, %H:%M:%S")}\t{calendar.day_abbr[(datetime.fromtimestamp(int(t.timestamp))).weekday()]}\t{t.track}')
                                 added_entries_list += f'{datetime.fromtimestamp(int(t.timestamp)).strftime("%d %b %Y, %H:%M:%S")}, {calendar.day_abbr[(datetime.fromtimestamp(int(t.timestamp))).weekday()]}: {t.track}\n'
