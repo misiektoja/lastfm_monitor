@@ -2,6 +2,16 @@
 
 This is a high-level summary of the most important changes. 
 
+# Changes in 1.9 (03 Nov 2024)
+
+**Features and Improvements**:
+
+- **NEW:** Support for YouTube Music search URLs
+
+**Bug fixes**:
+
+- **BUGFIX:** Fixed small bug with occasionally wrongly reported new offline entries
+
 # Changes in 1.8 (15 Jun 2024)
 
 **Features and Improvements**:
