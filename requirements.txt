@@ -1,3 +1,4 @@
 pylast
+spotipy
 python_dateutil
 Requests
