@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v1.9
+v2.0
 
-Tool implementing real-time tracking of Last.fm users music activity:
+Tool implementing real-time tracking of Last.fm users' music activity:
 https://github.com/misiektoja/lastfm_monitor/
 
 Python pip3 requirements:
 
 pylast
+spotipy
 python-dateutil
 requests
 urllib3
 """
 
-VERSION = 1.9
+VERSION = 2.0
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -27,14 +28,18 @@ LASTFM_API_KEY = "your_lastfm_api_key"  # Last.fm API key
 LASTFM_API_SECRET = "your_lastfm_api_secret"  # Last.fm Shared secret
 
 # This setting is optional and only needed if you want to get track duration from Spotify (-r option, more accurate than Last.fm) or
-# if you want to use -g / --track_songs functionality, so we can find Spotify track ID and play it in your Spotify client
+# if you want to use -g option (track songs functionality), so we can find Spotify track ID and play it in your Spotify client
 #
-# Log in to Spotify web client (https://open.spotify.com/) and put the value of sp_dc cookie below (or use -z parameter)
-# Newly generated Spotify's sp_dc cookie should be valid for 1 year
-# You can use Cookie-Editor by cgagnier to get it easily (available for all major web browsers): https://cookie-editor.com/
-SP_DC_COOKIE = "your_sp_dc_cookie_value"
+# Log in to Spotify Developer dashboard (https://developer.spotify.com/dashboard) and create a new app
+# For the 'Redirect URL', you can use 'http://127.0.0.1:1234' (what we put here does not really matter as we are not using
+# Authorization Code Flow, but Client Credentials Flow)
+# Select 'Web API' for the API used
+# Put the value of 'Client ID' and 'Client secret' below (or use -z parameter)
+# The tool takes care of refreshing the access token so it should remain valid indefinitely
+SP_CLIENT_ID = "your_spotify_app_client_id"  # Spotify Client ID
+SP_CLIENT_SECRET = "your_spotify_app_client_secret"  # Spotify Client Secret
 
-# SMTP settings for sending email notifications, you can leave it as it is below and no notifications will be sent
+# SMTP settings for sending email notifications, you can leave it as is below and no notifications will be sent
 SMTP_HOST = "your_smtp_server_ssl"
 SMTP_PORT = 587
 SMTP_USER = "your_smtp_user"
@@ -57,7 +62,7 @@ LASTFM_CHECK_INTERVAL = 10  # 10 seconds
 # You can also use -k parameter
 LASTFM_ACTIVE_CHECK_INTERVAL = 3  # 3 seconds
 
-# After which time do we consider user as inactive (after last activity); in seconds
+# After what time period do we consider a user inactive (after their last activity); in seconds
 # You can also use -o parameter
 LASTFM_INACTIVITY_CHECK = 180  # 3 mins
 
@@ -87,10 +92,11 @@ SPOTIFY_WINDOWS_PLAYING_METHOD = "start-uri"
 # How many consecutive plays of the same song is considered as being on loop
 SONG_ON_LOOP_VALUE = 3
 
-# When do we consider the song as being skipped; this parameter is used if track duration is NOT available from Last.fm; in seconds
+# When do we consider the song as being skipped; this parameter is used if track duration is NOT available from Last.fm/Spotify
+# in seconds
 SKIPPED_SONG_THRESHOLD1 = 35  # song is treated as skipped if played for <=35 seconds
 
-# When do we consider the song as being skipped; this parameter is used if track duration is available from Last.fm; fraction
+# When do we consider the song as being skipped; this parameter is used if track duration is available from Last.fm/Spotify; fraction
 SKIPPED_SONG_THRESHOLD2 = 0.55  # song is treated as skipped if played for <=55% of track duration
 
 # When do we consider the song as being played for longer than track duration; it will happen either if the play time is longer than 130% of track duration of if more than 30 seconds; fraction and seconds
@@ -99,19 +105,21 @@ LONGER_SONG_THRESHOLD2 = 30  # song is treated as being played longer than track
 
 # Set the value of the variable below to True if you want to get the track duration from Spotify
 # It is recommended since Last.fm very often does not have it or has inaccurate info
-# We will try to get track duration from Spotify only if you have defined proper SP_DC_COOKIE value earlier (or via -z parameter)
+# We will try to get track duration from Spotify only if you have defined proper SP_CLIENT_ID & SP_CLIENT_SECRET values earlier
+# (or via -z parameter)
 # You can also use -r parameter
 USE_TRACK_DURATION_FROM_SPOTIFY = False
 
 # Type Spotify ID of the "finishing" track to play when user gets offline, only needed for track_songs functionality;
 # leave empty to simply pause
-#SP_USER_GOT_OFFLINE_TRACK_ID = "5wCjNjnugSUqGDBrmQhn0e"
+# SP_USER_GOT_OFFLINE_TRACK_ID = "5wCjNjnugSUqGDBrmQhn0e"
 SP_USER_GOT_OFFLINE_TRACK_ID = ""
 
 # Delay after which the above track gets paused, type 0 to play infinitely until user pauses manually; in seconds
 SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE = 5  # 5 seconds
 
-# If the value is more than 0 it will show when user stops playing/resumes (while active), play break is assumed to be LASTFM_BREAK_CHECK_MULTIPLIER*LASTFM_ACTIVE_CHECK_INTERVAL;
+# If the value is greater than 0, it will show when the user stops playing or resumes while active.
+# The play break is assumed to be LASTFM_BREAK_CHECK_MULTIPLIER*LASTFM_ACTIVE_CHECK_INTERVAL
 # So if LASTFM_BREAK_CHECK_MULTIPLIER = 4 and LASTFM_ACTIVE_CHECK_INTERVAL = 3, then music pause will be reported after 4*3=12 seconds of inactivity
 # You can also use -m parameter
 LASTFM_BREAK_CHECK_MULTIPLIER = 4
@@ -155,6 +163,12 @@ FUNCTION_TIMEOUT = 5  # 5 seconds
 # How many recent tracks we fetch after start and every time user gets online
 RECENT_TRACKS_NUMBER = 10
 
+# Variables for caching functionality of the Spotify access token to avoid unnecessary refreshing
+SP_CACHED_TOKEN = None
+SP_TOKEN_ISSUED_AT = 0  # Store when token was received
+SP_TOKEN_EXPIRATION_TIME = 3600  # 1 hour validity
+SP_TOKEN_REFRESH_BUFFER = 300  # Refresh 5 minutes before expiration
+
 TOOL_ALIVE_COUNTER = TOOL_ALIVE_INTERVAL / LASTFM_CHECK_INTERVAL
 
 stdout_bck = None
@@ -176,8 +190,8 @@ nl_ch = "\n"
 
 import sys
 
-if sys.version_info < (3, 8):
-    print("* Error: Python version 3.8 or higher required !")
+if sys.version_info < (3, 9):
+    print("* Error: Python version 3.9 or higher required !")
     sys.exit(1)
 
 import time
@@ -198,12 +212,15 @@ import argparse
 import csv
 import pylast
 import urllib
+from urllib.parse import quote_plus, quote
 import subprocess
 import platform
 import re
 import ipaddress
 from itertools import tee, islice, chain
 from html import escape
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
 
 
 # Logger class to output messages to stdout and log file
@@ -381,7 +398,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         email_msg = MIMEMultipart('alternative')
         email_msg["From"] = SENDER_EMAIL
         email_msg["To"] = RECEIVER_EMAIL
-        email_msg["Subject"] = Header(subject, 'utf-8')
+        email_msg["Subject"] = str(Header(subject, 'utf-8'))
 
         if body:
             part1 = MIMEText(body, 'plain')
@@ -605,14 +622,14 @@ def previous_and_next(some_iterable):
 
 # Function preparing Spotify, Apple & Genius search URLs for specified track
 def get_spotify_apple_genius_search_urls(artist, track):
-    spotify_search_string = urllib.parse.quote_plus(f"{artist} {track}")
+    spotify_search_string = quote_plus(f"{artist} {track}")
     genius_search_string = f"{artist} {track}"
     if re.search(re_search_str, genius_search_string, re.IGNORECASE):
         genius_search_string = re.sub(re_replace_str, '', genius_search_string, flags=re.IGNORECASE)
-    apple_search_string = urllib.parse.quote(f"{artist} {track}")
+    apple_search_string = quote(f"{artist} {track}")
     spotify_search_url = f"https://open.spotify.com/search/{spotify_search_string}?si=1"
     apple_search_url = f"https://music.apple.com/pl/search?term={apple_search_string}"
-    genius_search_url = f"https://genius.com/search?q={urllib.parse.quote_plus(genius_search_string)}"
+    genius_search_url = f"https://genius.com/search?q={quote_plus(genius_search_string)}"
     youtube_music_search_url = f"https://music.youtube.com/search?q={spotify_search_string}"
     return spotify_search_url, apple_search_url, genius_search_url, youtube_music_search_url
 
@@ -665,18 +682,18 @@ def lastfm_list_tracks(username, user, network, number):
         print(f"Album:\t\t{album}")
 
 
-# Function getting Spotify access token based on provided sp_dc cookie value
-def spotify_get_access_token(sp_dc):
-    url = "https://open.spotify.com/get_access_token?reason=transport&productType=web_player"
-    cookies = {"sp_dc": sp_dc}
-    access_token = ""
-    try:
-        response = req.get(url, cookies=cookies, timeout=FUNCTION_TIMEOUT)
-        response.raise_for_status()
-        access_token = response.json().get("accessToken", "")
-    except Exception as e:
-        print(f"spotify_get_access_token error - {e}")
-    return access_token
+# Function getting Spotify access token based on provided sp_client_id & sp_client_secret values
+def spotify_get_access_token(sp_client_id, sp_client_secret):
+    global SP_CACHED_TOKEN, SP_TOKEN_ISSUED_AT
+    auth_manager = SpotifyClientCredentials(client_id=sp_client_id, client_secret=sp_client_secret)
+
+    if SP_CACHED_TOKEN and time.time() < (SP_TOKEN_ISSUED_AT + SP_TOKEN_EXPIRATION_TIME - SP_TOKEN_REFRESH_BUFFER):
+        return SP_CACHED_TOKEN
+
+    SP_CACHED_TOKEN = auth_manager.get_access_token(as_dict=False)
+    SP_TOKEN_ISSUED_AT = time.time()
+
+    return SP_CACHED_TOKEN
 
 
 # Function converting Spotify URI (e.g. spotify:user:username) to URL (e.g. https://open.spotify.com/user/username)
@@ -732,8 +749,8 @@ def spotify_search_song_trackid_duration(access_token, artist, track, album=""):
     track_sanitized = re.sub(re_chars_to_remove, '', track, flags=re.IGNORECASE)
     album_sanitized = re.sub(re_chars_to_remove, '', album, flags=re.IGNORECASE)
 
-    url1 = f'https://api.spotify.com/v1/search?q={urllib.parse.quote_plus(f"artist:{artist_sanitized} track:{track_sanitized} album:{album_sanitized}")}&type=track&limit=5'
-    url2 = f'https://api.spotify.com/v1/search?q={urllib.parse.quote_plus(f"artist:{artist_sanitized} track:{track_sanitized}")}&type=track&limit=5'
+    url1 = f'https://api.spotify.com/v1/search?q={quote_plus(f"artist:{artist_sanitized} track:{track_sanitized} album:{album_sanitized}")}&type=track&limit=5'
+    url2 = f'https://api.spotify.com/v1/search?q={quote_plus(f"artist:{artist_sanitized} track:{track_sanitized}")}&type=track&limit=5'
 
     headers = {"Authorization": "Bearer " + access_token}
 
@@ -943,8 +960,8 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
         print(f"\nTrack:\t\t\t\t{artist} - {track}")
         print(f"Album:\t\t\t\t{album}")
 
-        if (USE_TRACK_DURATION_FROM_SPOTIFY or track_songs) and SP_DC_COOKIE and SP_DC_COOKIE != "your_sp_dc_cookie_value":
-            accessToken = spotify_get_access_token(SP_DC_COOKIE)
+        if (USE_TRACK_DURATION_FROM_SPOTIFY or track_songs) and SP_CLIENT_ID and SP_CLIENT_SECRET and SP_CLIENT_ID != "your_spotify_app_client_id" and SP_CLIENT_SECRET != "your_spotify_app_client_secret":
+            accessToken = spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET)
             if accessToken:
                 sp_track_uri_id, sp_track_duration = spotify_search_song_trackid_duration(accessToken, artist, track, album)
                 if not USE_TRACK_DURATION_FROM_SPOTIFY:
@@ -1152,23 +1169,23 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                             played_for_html = f"<b>{display_time(played_for_time)}</b> (out of {display_time(track_duration)})"
                             if listened_percentage <= SKIPPED_SONG_THRESHOLD2:
                                 if signal_previous_the_same:
-                                    played_for += f" - CONT ({int(listened_percentage*100)}%)"
-                                    played_for_html += f" - <b>CONT</b> ({int(listened_percentage*100)}%)"
+                                    played_for += f" - CONT ({int(listened_percentage * 100)}%)"
+                                    played_for_html += f" - <b>CONT</b> ({int(listened_percentage * 100)}%)"
                                     signal_previous_the_same = False
                                 else:
-                                    played_for += f" - SKIPPED ({int(listened_percentage*100)}%)"
-                                    played_for_html += f" - <b>SKIPPED</b> ({int(listened_percentage*100)}%)"
+                                    played_for += f" - SKIPPED ({int(listened_percentage * 100)}%)"
+                                    played_for_html += f" - <b>SKIPPED</b> ({int(listened_percentage * 100)}%)"
                                     skipped_songs += 1
                             else:
-                                played_for += f" ({int(listened_percentage*100)}%)"
-                                played_for_html += f" ({int(listened_percentage*100)}%)"
+                                played_for += f" ({int(listened_percentage * 100)}%)"
+                                played_for_html += f" ({int(listened_percentage * 100)}%)"
                             played_for_display = True
                         else:
                             played_for = display_time(played_for_time)
                             played_for_html = played_for
                             if listened_percentage >= LONGER_SONG_THRESHOLD1 or (played_for_time - track_duration >= LONGER_SONG_THRESHOLD2):
-                                played_for += f" - LONGER than track duration (+ {display_time(played_for_time-track_duration)}, {int(listened_percentage*100)}%)"
-                                played_for_html += f" - <b>LONGER</b> than track duration (+ {display_time(played_for_time - track_duration)}, {int(listened_percentage*100)}%)"
+                                played_for += f" - LONGER than track duration (+ {display_time(played_for_time - track_duration)}, {int(listened_percentage * 100)}%)"
+                                played_for_html += f" - <b>LONGER</b> than track duration (+ {display_time(played_for_time - track_duration)}, {int(listened_percentage * 100)}%)"
                                 played_for_display = True
 
                         if played_for_display:
@@ -1182,7 +1199,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                     # Handling how long user played the previous track, if skipped it etc. - in case track duration is NOT available
                     elif track_duration <= 0 and lf_track_ts_start_after_resume > 0 and lf_user_online:
                         played_for = display_time(lf_current_ts - lf_track_ts_start_after_resume)
-                        played_for_html = f"<b>{display_time(lf_current_ts-lf_track_ts_start_after_resume)}</b>"
+                        played_for_html = f"<b>{display_time(lf_current_ts - lf_track_ts_start_after_resume)}</b>"
                         if ((lf_current_ts - lf_track_ts_start_after_resume) <= SKIPPED_SONG_THRESHOLD1):
                             if signal_previous_the_same:
                                 played_for_m_body = f"\n\nUser CONT the previous track ({artist_old} - {track_old}) for: {played_for}"
@@ -1229,8 +1246,8 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                     sp_track_duration = 0
                     duration_mark = ""
 
-                    if (USE_TRACK_DURATION_FROM_SPOTIFY or track_songs) and SP_DC_COOKIE and SP_DC_COOKIE != "your_sp_dc_cookie_value":
-                        accessToken = spotify_get_access_token(SP_DC_COOKIE)
+                    if (USE_TRACK_DURATION_FROM_SPOTIFY or track_songs) and SP_CLIENT_ID and SP_CLIENT_SECRET and SP_CLIENT_ID != "your_spotify_app_client_id" and SP_CLIENT_SECRET != "your_spotify_app_client_secret":
+                        accessToken = spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET)
                         if accessToken:
                             sp_track_uri_id, sp_track_duration = spotify_search_song_trackid_duration(accessToken, artist, track, album)
                             if not USE_TRACK_DURATION_FROM_SPOTIFY:
@@ -1314,7 +1331,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                             print(f"* Error - {e}")
                         if duplicate_entries:
                             private_mode = f"\n\nDuplicate entries ({p}) found, possible private mode ({get_range_of_dates_from_tss(lf_active_ts_last_old, lf_track_ts_start, short=True)})"
-                            private_mode_html = f"<br><br>Duplicate entries ({p}) found, possible <b>private mode</b> (<b>{ get_range_of_dates_from_tss(lf_active_ts_last_old, lf_track_ts_start, short=True)}</b>)"
+                            private_mode_html = f"<br><br>Duplicate entries ({p}) found, possible <b>private mode</b> (<b>{get_range_of_dates_from_tss(lf_active_ts_last_old, lf_track_ts_start, short=True)}</b>)"
                             print(f"\n*** Duplicate entries ({p}) found, possible PRIVATE MODE ({get_range_of_dates_from_tss(lf_active_ts_last_old, lf_track_ts_start, short=True)})")
 
                         print(f"\n*** User got ACTIVE after being offline for {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))}{last_track_start_changed}")
@@ -1364,11 +1381,11 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                         print("---------------------------------------------------------------------------------------------------------")
 
                     if song_on_loop == SONG_ON_LOOP_VALUE and song_on_loop_notification:
-                            m_subject = f"Last.fm user {username} plays song on loop: '{artist} - {track}'"
-                            m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple search URL: {apple_search_url}\nYouTube Music search URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}{played_for_m_body}\n\nUser plays song on LOOP ({song_on_loop} times){get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple search URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music search URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a>{played_for_m_body_html}<br><br>User plays song on LOOP (<b>{song_on_loop}</b> times){get_cur_ts('<br><br>Timestamp: ')}</body></html>"
-                            print(f"Sending email notification to {RECEIVER_EMAIL}")
-                            send_email(m_subject, m_body, m_body_html, SMTP_SSL)
+                        m_subject = f"Last.fm user {username} plays song on loop: '{artist} - {track}'"
+                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple search URL: {apple_search_url}\nYouTube Music search URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}{played_for_m_body}\n\nUser plays song on LOOP ({song_on_loop} times){get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple search URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music search URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a>{played_for_m_body_html}<br><br>User plays song on LOOP (<b>{song_on_loop}</b> times){get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                        print(f"Sending email notification to {RECEIVER_EMAIL}")
+                        send_email(m_subject, m_body, m_body_html, SMTP_SSL)
 
                     lf_user_online = True
                     lf_active_ts_last = int(time.time())
@@ -1407,7 +1424,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                     pauses_number += 1
                     if progress_indicator:
                         print("---------------------------------------------------------------------------------------------------------")
-                    print(f"User PAUSED playing after {calculate_timespan(int(playing_resumed_ts), int(playing_paused_ts))} (inactivity timer: {display_time(LASTFM_BREAK_CHECK_MULTIPLIER*LASTFM_ACTIVE_CHECK_INTERVAL)})")
+                    print(f"User PAUSED playing after {calculate_timespan(int(playing_resumed_ts), int(playing_paused_ts))} (inactivity timer: {display_time(LASTFM_BREAK_CHECK_MULTIPLIER * LASTFM_ACTIVE_CHECK_INTERVAL)})")
                     print(f"Last activity:\t\t\t{get_date_from_ts(lf_active_ts_last)}")
                     print_cur_ts("\nTimestamp:\t\t\t")
                     # If tracking functionality is enabled then PAUSE the current song via Spotify client
@@ -1434,8 +1451,8 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                         if (played_for_time) < (track_duration - LASTFM_ACTIVE_CHECK_INTERVAL - 1):
                             played_for = f"{display_time(played_for_time)} (out of {display_time(track_duration)})"
                             played_for_html = f"<b>{display_time(played_for_time)}</b> (out of {display_time(track_duration)})"
-                            played_for += f" ({int(listened_percentage*100)}%)"
-                            played_for_html += f" ({int(listened_percentage*100)}%)"
+                            played_for += f" ({int(listened_percentage * 100)}%)"
+                            played_for_html += f" ({int(listened_percentage * 100)}%)"
                         else:
                             played_for = display_time(played_for_time)
                             played_for_html = f"<b>{display_time(played_for_time)}</b>"
@@ -1478,10 +1495,10 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                     listened_songs_mbody_html = f"<br><br>User played <b>{listened_songs}</b> songs"
 
                     if skipped_songs > 0:
-                        skipped_songs_text = f", skipped {skipped_songs} songs ({int((skipped_songs/listened_songs)*100)}%)"
+                        skipped_songs_text = f", skipped {skipped_songs} songs ({int((skipped_songs / listened_songs) * 100)}%)"
                         listened_songs_text += skipped_songs_text
                         listened_songs_mbody += skipped_songs_text
-                        listened_songs_mbody_html += f", skipped <b>{skipped_songs}</b> songs (<b>{int((skipped_songs/listened_songs)*100)}%</b>)"
+                        listened_songs_mbody_html += f", skipped <b>{skipped_songs}</b> songs (<b>{int((skipped_songs / listened_songs) * 100)}%</b>)"
 
                     if looped_songs > 0:
                         looped_songs_text = f"\n*** User played {looped_songs} songs on loop"
@@ -1639,7 +1656,7 @@ if __name__ == "__main__":
     parser.add_argument("LASTFM_USERNAME", nargs="?", help="Last.fm username", type=str)
     parser.add_argument("-u", "--lastfm_api_key", help="Last.fm API key to override the value defined within the script (LASTFM_API_KEY)", type=str)
     parser.add_argument("-w", "--lastfm_shared_secret", help="Last.fm shared secret to override the value defined within the script (LASTFM_API_SECRET)", type=str)
-    parser.add_argument("-z", "--spotify_dc_cookie", help="Spotify sp_dc cookie to override the value defined within the script (SP_DC_COOKIE)", type=str)
+    parser.add_argument("-z", "--spotify_client_id_and_secret", help="Spotify client id and secret to override the value defined within the script (SP_CLIENT_ID and SP_CLIENT_SECRET); specify it in the following format: SP_CLIENT_ID:SP_CLIENT_SECRET (both values separated by colon)", type=str)
     parser.add_argument("-a", "--active_notification", help="Send email notification once user gets active", action='store_true')
     parser.add_argument("-i", "--inactive_notification", help="Send email notification once user gets inactive", action='store_true')
     parser.add_argument("-t", "--track_notification", help="Send email notification once monitored track/album is found", action='store_true')
@@ -1653,7 +1670,7 @@ if __name__ == "__main__":
     parser.add_argument("-p", "--progress_indicator", help="Show progress indicator while user is listening", action='store_true')
     parser.add_argument("-g", "--track_songs", help="Automatically track listened songs by playing it in Spotify client", action='store_true')
     parser.add_argument("-m", "--play_break_multiplier", help="If more than 0 it will show when user stops playing/resumes (while active), play break is assumed to be play_break_multiplier*active_check_interval", type=int)
-    parser.add_argument("-r", "--fetch_duration_from_spotify", help="Try to get the track duration from Spotify if SP_DC_COOKIE (-z) is properly defined", action='store_true')
+    parser.add_argument("-r", "--fetch_duration_from_spotify", help="Try to get the track duration from Spotify if SP_CLIENT_ID & SP_CLIENT_SECRET (-z) values are properly defined", action='store_true')
     parser.add_argument("-q", "--do_not_show_duration_marks", help="Do not display L* or S* marks indicating from where the track duration has been fetched (Last.fm or Spotify); it is showed only if fetching duration from Spotify (-r) is enabled", action='store_true')
     parser.add_argument("-b", "--csv_file", help="Write every listened track to CSV file", type=str, metavar="CSV_FILENAME")
     parser.add_argument("-s", "--lastfm_tracks", help="Filename with Last.fm tracks/albums to monitor", type=str, metavar="TRACKS_FILENAME")
@@ -1675,7 +1692,7 @@ if __name__ == "__main__":
     if args.send_test_email_notification:
         print("* Sending test email notification ...\n")
         if send_email("lastfm_monitor: test email", "This is test email - your SMTP settings seems to be correct !", "", SMTP_SSL, smtp_timeout=5) == 0:
-                print("* Email sent successfully !")
+            print("* Email sent successfully !")
         else:
             sys.exit(1)
         sys.exit(0)
@@ -1698,8 +1715,12 @@ if __name__ == "__main__":
         print("* Error: LASTFM_API_SECRET (-w / --lastfm_shared_secret) value is empty or incorrect")
         sys.exit(1)
 
-    if args.spotify_dc_cookie:
-        SP_DC_COOKIE = args.spotify_dc_cookie
+    if args.spotify_client_id_and_secret:
+        try:
+            SP_CLIENT_ID, SP_CLIENT_SECRET = args.spotify_client_id_and_secret.split(":")
+        except ValueError:
+            print("* Error: SPOTIFY_CLIENT_ID_AND_SECRET (-z / --spotify_client_id_and_secret) has invalid format - use SP_CLIENT_ID:SP_CLIENT_SECRET")
+            sys.exit(1)
 
     if args.fetch_duration_from_spotify:
         USE_TRACK_DURATION_FROM_SPOTIFY = args.fetch_duration_from_spotify
