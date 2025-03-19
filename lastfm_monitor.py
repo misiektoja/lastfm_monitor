@@ -15,7 +15,7 @@ requests
 urllib3
 """
 
-VERSION = 2.0
+VERSION = "2.0"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -165,9 +165,6 @@ RECENT_TRACKS_NUMBER = 10
 
 # Variables for caching functionality of the Spotify access token to avoid unnecessary refreshing
 SP_CACHED_TOKEN = None
-SP_TOKEN_ISSUED_AT = 0  # Store when token was received
-SP_TOKEN_EXPIRATION_TIME = 3600  # 1 hour validity
-SP_TOKEN_REFRESH_BUFFER = 300  # Refresh 5 minutes before expiration
 
 TOOL_ALIVE_COUNTER = TOOL_ALIVE_INTERVAL / LASTFM_CHECK_INTERVAL
 
@@ -357,7 +354,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
     email_re = re.compile(r'[^@]+@[^@]+\.[^@]+')
 
     try:
-        is_ip = ipaddress.ip_address(str(SMTP_HOST))
+        ipaddress.ip_address(str(SMTP_HOST))
     except ValueError:
         if not fqdn_re.search(str(SMTP_HOST)):
             print("Error sending email - SMTP settings are incorrect (invalid IP address/FQDN in SMTP_HOST)")
@@ -425,7 +422,7 @@ def write_csv_entry(csv_file_name, timestamp, artist, track, album):
         csvwriter = csv.DictWriter(csv_file, fieldnames=csvfieldnames, quoting=csv.QUOTE_NONNUMERIC)
         csvwriter.writerow({'Date': timestamp, 'Artist': artist, 'Track': track, 'Album': album})
         csv_file.close()
-    except Exception as e:
+    except Exception:
         raise
 
 
@@ -639,7 +636,7 @@ def lastfm_get_recent_tracks(username, network, number):
     try:
         recent_tracks = network.get_user(username).get_recent_tracks(limit=number)
         return recent_tracks
-    except Exception as e:
+    except Exception:
         raise
 
 
@@ -682,16 +679,24 @@ def lastfm_list_tracks(username, user, network, number):
         print(f"Album:\t\t{album}")
 
 
+# Function sending a lightweight request to check token validity since Spotipy deprecates as_dict=True and there is no
+# get_cached_token() method implemented yet for client credentials auth flow
+def check_token_validity(token):
+    url = "https://api.spotify.com/v1/recommendations/available-genre-seeds"
+    headers = {"Authorization": f"Bearer {token}"}
+    response = req.get(url, headers=headers)
+    return response.status_code != 401
+
+
 # Function getting Spotify access token based on provided sp_client_id & sp_client_secret values
 def spotify_get_access_token(sp_client_id, sp_client_secret):
-    global SP_CACHED_TOKEN, SP_TOKEN_ISSUED_AT
-    auth_manager = SpotifyClientCredentials(client_id=sp_client_id, client_secret=sp_client_secret)
+    global SP_CACHED_TOKEN
 
-    if SP_CACHED_TOKEN and time.time() < (SP_TOKEN_ISSUED_AT + SP_TOKEN_EXPIRATION_TIME - SP_TOKEN_REFRESH_BUFFER):
+    if SP_CACHED_TOKEN and check_token_validity(SP_CACHED_TOKEN):
         return SP_CACHED_TOKEN
 
+    auth_manager = SpotifyClientCredentials(client_id=sp_client_id, client_secret=sp_client_secret)
     SP_CACHED_TOKEN = auth_manager.get_access_token(as_dict=False)
-    SP_TOKEN_ISSUED_AT = time.time()
 
     return SP_CACHED_TOKEN
 
@@ -765,7 +770,7 @@ def spotify_search_song_trackid_duration(access_token, artist, track, album=""):
             if json_response.get("tracks"):
                 if json_response["tracks"].get("total") > 0:
                     sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], track)
-        except Exception as e:
+        except Exception:
             pass
 
     if not sp_track_uri_id:
@@ -776,7 +781,7 @@ def spotify_search_song_trackid_duration(access_token, artist, track, album=""):
             if json_response.get("tracks"):
                 if json_response["tracks"].get("total") > 0:
                     sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], track)
-        except Exception as e:
+        except Exception:
             pass
 
     return sp_track_uri_id, sp_track_duration
@@ -1635,6 +1640,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
 
         new_track = None
 
+
 if __name__ == "__main__":
 
     stdout_bck = sys.stdout
@@ -1647,7 +1653,7 @@ if __name__ == "__main__":
             os.system('cls')
         else:
             os.system('clear')
-    except:
+    except Exception:
         print("* Cannot clear the screen contents")
 
     print(f"Last.fm Monitoring Tool v{VERSION}\n")
