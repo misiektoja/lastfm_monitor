@@ -1794,11 +1794,22 @@ if __name__ == "__main__":
     progress_indicator = args.progress_indicator
     track_songs = args.track_songs
     do_not_show_duration_marks = args.do_not_show_duration_marks
+    error_notification = args.error_notification
+
     if not USE_TRACK_DURATION_FROM_SPOTIFY:
         do_not_show_duration_marks = True
 
+    if SMTP_HOST == "your_smtp_server_ssl" or SMTP_HOST == "your_smtp_server_plaintext":
+        active_notification = False
+        inactive_notification = False
+        song_notification = False
+        track_notification = False
+        offline_entries_notification = False
+        song_on_loop_notification = False
+        error_notification = False
+
     print(f"* Last.fm timers:\t\t\t[check interval: {display_time(LASTFM_CHECK_INTERVAL)}] [active check interval: {display_time(LASTFM_ACTIVE_CHECK_INTERVAL)}]\n*\t\t\t\t\t[inactivity: {display_time(LASTFM_INACTIVITY_CHECK)}]")
-    print(f"* Email notifications:\t\t\t[active = {active_notification}] [inactive = {inactive_notification}] [tracked = {track_notification}] [every song = {song_notification}]\n*\t\t\t\t\t[songs on loop = {song_on_loop_notification}] [offline entries = {offline_entries_notification}] [errors = {args.error_notification}]")
+    print(f"* Email notifications:\t\t\t[active = {active_notification}] [inactive = {inactive_notification}] [tracked = {track_notification}] [every song = {song_notification}]\n*\t\t\t\t\t[songs on loop = {song_on_loop_notification}] [offline entries = {offline_entries_notification}] [errors = {error_notification}]")
     print(f"* Progress indicator enabled:\t\t{progress_indicator}")
     print(f"* Track listened songs:\t\t\t{track_songs}")
     print(f"* Get track duration from Spotify:\t{USE_TRACK_DURATION_FROM_SPOTIFY}")
@@ -1827,7 +1838,7 @@ if __name__ == "__main__":
     print(out)
     print("-" * len(out))
 
-    lastfm_monitor_user(user, network, args.LASTFM_USERNAME, lf_tracks, args.error_notification, args.csv_file, csv_exists)
+    lastfm_monitor_user(user, network, args.LASTFM_USERNAME, lf_tracks, error_notification, args.csv_file, csv_exists)
 
     sys.stdout = stdout_bck
     sys.exit(0)
