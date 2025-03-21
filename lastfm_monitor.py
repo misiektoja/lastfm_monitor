@@ -682,10 +682,16 @@ def lastfm_list_tracks(username, user, network, number):
 # Function sending a lightweight request to check token validity since Spotipy deprecates as_dict=True and there is no
 # get_cached_token() method implemented yet for client credentials auth flow
 def check_token_validity(token):
-    url = "https://api.spotify.com/v1/recommendations/available-genre-seeds"
+    url = "https://api.spotify.com/v1/me"
     headers = {"Authorization": f"Bearer {token}"}
-    response = req.get(url, headers=headers)
-    return response.status_code != 401
+
+    try:
+        response = req.get(url, headers=headers, timeout=FUNCTION_TIMEOUT)
+        valid = response.status_code == 200
+    except Exception:
+        valid = False
+
+    return valid
 
 
 # Function getting Spotify access token based on provided sp_client_id & sp_client_secret values
