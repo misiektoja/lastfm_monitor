@@ -9,7 +9,7 @@ https://github.com/misiektoja/lastfm_monitor/
 Python pip3 requirements:
 
 pylast
-spotipy
+spotipy (optional, only for Spotify-related features)
 python-dateutil
 requests
 urllib3
@@ -216,8 +216,6 @@ import re
 import ipaddress
 from itertools import tee, islice, chain
 from html import escape
-import spotipy
-from spotipy.oauth2 import SpotifyClientCredentials
 
 
 # Logger class to output messages to stdout and log file
@@ -697,6 +695,12 @@ def check_token_validity(token):
 # Function getting Spotify access token based on provided sp_client_id & sp_client_secret values
 def spotify_get_access_token(sp_client_id, sp_client_secret):
     global SP_CACHED_TOKEN
+
+    try:
+        from spotipy.oauth2 import SpotifyClientCredentials
+    except ImportError:
+        print("* Warning: the 'spotipy' package is required for Spotify-related features, install it with `pip install spotipy`")
+        return None
 
     if SP_CACHED_TOKEN and check_token_validity(SP_CACHED_TOKEN):
         return SP_CACHED_TOKEN
