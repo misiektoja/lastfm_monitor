@@ -2,6 +2,16 @@
 
 This is a high-level summary of the most important changes. 
 
+# Changes in 2.0 (21 Mar 2025)
+
+**Features and Improvements**:
+
+- **NEW:** Added support for the Spotify Web API (client credentials flow) to address recent changes in the Spotify Web Player token endpoint; it requires the spotipy pip module (optional, only for Spotify-related features)
+- **NEW:** Caching mechanism to avoid unnecessary Spotify token refreshes
+- **IMPROVE:** Email notification flags are now automatically disabled if the SMTP configuration is invalid
+- **IMPROVE:** Exception handling in few places
+- **IMPROVE:** Code cleanup & linting fixes
+
 # Changes in 1.9 (03 Nov 2024)
 
 **Features and Improvements**:
