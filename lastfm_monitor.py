@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.0
+v2.0.1
 
 Tool implementing real-time tracking of Last.fm users' music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -15,7 +15,7 @@ requests
 urllib3
 """
 
-VERSION = "2.0"
+VERSION = "2.0.1"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -680,16 +680,14 @@ def lastfm_list_tracks(username, user, network, number):
 # Function sending a lightweight request to check token validity since Spotipy deprecates as_dict=True and there is no
 # get_cached_token() method implemented yet for client credentials auth flow
 def check_token_validity(token):
-    url = "https://api.spotify.com/v1/me"
+    url = "https://api.spotify.com/v1/browse/categories"
     headers = {"Authorization": f"Bearer {token}"}
+    params = {"limit": 1, "fields": "categories.items(id)"}
 
     try:
-        response = req.get(url, headers=headers, timeout=FUNCTION_TIMEOUT)
-        valid = response.status_code == 200
+        return req.get(url, headers=headers, params=params, timeout=FUNCTION_TIMEOUT).status_code == 200
     except Exception:
-        valid = False
-
-    return valid
+        return False
 
 
 # Function getting Spotify access token based on provided sp_client_id & sp_client_secret values
