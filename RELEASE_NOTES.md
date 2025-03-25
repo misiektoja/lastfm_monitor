@@ -2,6 +2,12 @@
 
 This is a high-level summary of the most important changes. 
 
+# Changes in 2.0.1 (25 Mar 2025)
+
+**Bug fixes**:
+
+- **BUGFIX:** Fixes the issue with using the incorrect Spotify API endpoint for validation (it consistently returned a 401 error since the client credentials flow does not provide access to it)
+
 # Changes in 2.0 (21 Mar 2025)
 
 **Features and Improvements**:
