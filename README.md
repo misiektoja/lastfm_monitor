@@ -79,7 +79,7 @@ Edit the *[lastfm_monitor.py](lastfm_monitor.py)* file and change any desired co
 
 Mandatory activity is to create your Last.fm **API key** and **Shared secret** by going to [https://www.last.fm/api/account/create](https://www.last.fm/api/account/create) (or get your existing one from [https://www.last.fm/api/accounts](https://www.last.fm/api/accounts))
 
-Then change **LASTFM_API_KEY** and **LASTFM_API_SECRET** variables to respective values (or use **-u** and **-w** parameters).
+Then change `LASTFM_API_KEY` and `LASTFM_API_SECRET` variables to respective values (or use **-u** and **-w** parameters).
 
 ### User privacy settings
 
@@ -91,7 +91,7 @@ If you want to obtain the [track duration from Spotify](#getting-track-duration-
 
 For the *'Redirect URL'*, you can use http://127.0.0.1:1234 (what we put here does not really matter as we are not using Authorization Code Flow, but Client Credentials Flow).
 
-Select *'Web API'* for the API used and after it gets created put the value of *'Client ID'* and *'Client secret'* to **SP_CLIENT_ID** and **SP_CLIENT_SECRET** variables respectively.
+Select *'Web API'* for the API used and after it gets created put the value of *'Client ID'* and *'Client secret'* to `SP_CLIENT_ID` and `SP_CLIENT_SECRET` variables respectively.
 
 You can also use **-z** parameter - specify it in the following format here: SP_CLIENT_ID:SP_CLIENT_SECRET, i.e. both values separated by colon.
 
@@ -135,12 +135,12 @@ To monitor specific user activity, simply enter the Last.fm username as a parame
 ./lastfm_monitor.py lastfm_username
 ```
 
-If you have not changed **LASTFM_API_KEY** & **LASTFM_API_SECRET** variables in the *[lastfm_monitor.py](lastfm_monitor.py)* file, you can use **-u** and **-w** parameters:
+If you have not changed `LASTFM_API_KEY` & `LASTFM_API_SECRET` variables in the *[lastfm_monitor.py](lastfm_monitor.py)* file, you can use **-u** and **-w** parameters:
 
 ```sh
 ./lastfm_monitor.py lastfm_username -u "your_lastfm_api_key" -w "your_lastfm_api_secret"
 ```
-In case you plan to use to the feature to obtain the [track duration from Spotify](#getting-track-duration-from-spotify) (**-r** parameter) or use the [track_songs functionality](#automatic-playback-of-tracks-listened-to-by-the-user-in-the-spotify-client) (**-g** parameter), then if you have not defined values of **SP_CLIENT_ID** and **SP_CLIENT_SECRET** variables you can use **-z** parameter - specify it in the following format here: SP_CLIENT_ID:SP_CLIENT_SECRET, i.e. both values separated by colon:
+In case you plan to use to the feature to obtain the [track duration from Spotify](#getting-track-duration-from-spotify) (**-r** parameter) or use the [track_songs functionality](#automatic-playback-of-tracks-listened-to-by-the-user-in-the-spotify-client) (**-g** parameter), then if you have not defined values of `SP_CLIENT_ID` and `SP_CLIENT_SECRET` variables you can use **-z** parameter - specify it in the following format here: SP_CLIENT_ID:SP_CLIENT_SECRET, i.e. both values separated by colon:
 
 ```sh
 ./lastfm_monitor.py lastfm_username -z "your_spotify_app_client_id:your_spotify_app_client_secret"
@@ -152,7 +152,7 @@ You can monitor multiple Last.fm users by running multiple copies of the script.
 
 It is recommended to use something like **tmux** or **screen** to keep the script running after you log out from the server (unless you are running it on your desktop).
 
-The tool automatically saves its output to *lastfm_monitor_{username}.log* file (can be changed in the settings via **LF_LOGFILE** variable or disabled completely with **-d** parameter).
+The tool automatically saves its output to *lastfm_monitor_{username}.log* file (can be changed in the settings via `LF_LOGFILE` variable or disabled completely with **-d** parameter).
 
 The tool also saves the last activity information (artist, track, timestamp) to *lastfm_{username}_last_activity.json file*, so it can be reused in case the tool needs to be restarted.
 
@@ -240,22 +240,22 @@ Your Spotify client needs to be installed & started for this feature to work.
 
 In order to use this functionality you need to have Spotipy installed as described [here](#requirements) and properly defined Spotify client ID and secret values as described [here](#spotify-client-id-and-secret-optional).
 
-The tool offers complete support for playing songs listened to by the tracked user under **Linux** and **macOS**. This means it will automatically play the changed track. It will also automatically pause and resume playback following the tracked user's actions. Additionally, it can pause or play an indicated track once the user becomes inactive (see the **SP_USER_GOT_OFFLINE_TRACK_ID** variable).
+The tool offers complete support for playing songs listened to by the tracked user under **Linux** and **macOS**. This means it will automatically play the changed track. It will also automatically pause and resume playback following the tracked user's actions. Additionally, it can pause or play an indicated track once the user becomes inactive (see the `SP_USER_GOT_OFFLINE_TRACK_ID` variable).
 
 For **Windows**, it works in a semi-automatic way. If you have the Spotify client running and are not listening to any song, the first song will be played automatically, but for others it will only search and indicate the changed track in the Spotify client, requiring you to press the play button manually. I have not yet found a better way to handle this locally on Windows without using the remote Spotify Web API.
 
 You can change the method used for playing the songs under Linux, macOS and Windows by modifying the respective variables in the *[lastfm_monitor.py](lastfm_monitor.py)* file.
 
-For **macOS** change **SPOTIFY_MACOS_PLAYING_METHOD** variable to one of the following values:
+For **macOS** change `SPOTIFY_MACOS_PLAYING_METHOD` variable to one of the following values:
 -  "**apple-script**" (recommended, **default**)
 -  "trigger-url"
 
-For **Linux** change **SPOTIFY_LINUX_PLAYING_METHOD** variable to one of the following values:
+For **Linux** change `SPOTIFY_LINUX_PLAYING_METHOD` variable to one of the following values:
 - "**dbus-send**" (most common one, **default**)
 - "qdbus"
 - "trigger-url"
 
-For **Windows** change **SPOTIFY_WINDOWS_PLAYING_METHOD** variable to one of the following values:
+For **Windows** change `SPOTIFY_WINDOWS_PLAYING_METHOD` variable to one of the following values:
 - "**start-uri**" (recommended, **default**)
 - "spotify-cmd"
 - "trigger-url"
@@ -278,7 +278,7 @@ For this functionality to work correctly, it is suggested to set the active chec
 
 ### Getting track duration from Spotify
 
-If you want the tool to fetch track duration from Spotify instead of Last.fm, which very often reports the wrong duration (or none at all), then enable **USE_TRACK_DURATION_FROM_SPOTIFY** to **True** in the *[lastfm_monitor.py](lastfm_monitor.py)* file or use the **-r** parameter:
+If you want the tool to fetch track duration from Spotify instead of Last.fm, which very often reports the wrong duration (or none at all), then enable `USE_TRACK_DURATION_FROM_SPOTIFY` to **True** in the *[lastfm_monitor.py](lastfm_monitor.py)* file or use the **-r** parameter:
 
 ```sh
 ./lastfm_monitor.py lastfm_username -r
@@ -358,7 +358,7 @@ You can combine all the parameters mentioned earlier in monitoring mode (listing
 
 ## Limitations
 
-The tool has been tested with a Last.fm account integrated with the Spotify client. However, it should work with other clients as well.
+The tool has been tested with a Last.fm account integrated with scrobbling from the Spotify client. However it should work with other clients as well.
 
 ## Coloring log output with GRC
 
