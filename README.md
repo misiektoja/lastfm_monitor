@@ -202,6 +202,8 @@ Something Changed
 I Will Be There
 ```
 
+You can comment out specific lines with # if needed.
+
 Then run the tool with **-t** and **-s** parameters:
 
 ```sh
