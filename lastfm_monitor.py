@@ -669,13 +669,25 @@ def lastfm_get_recent_tracks(username, network, number):
 
 
 # Displays the list of recently played Last.fm tracks
-def lastfm_list_tracks(username, user, network, number):
+def lastfm_list_tracks(username, user, network, number, csv_file_name):
+
+    list_operation = "* Listing & saving" if csv_file_name else "* Listing"
+
+    print(f"{list_operation} {tracks_n} tracks recently listened by {args.username} ...\n")
+
     try:
         new_track = user.get_now_playing()
         recent_tracks = lastfm_get_recent_tracks(username, network, number)
     except Exception as e:
         print(f"* Error, cannot display recent tracks for the user: {e}")
         sys.exit(1)
+
+    try:
+        if csv_file_name:
+            init_csv_file(csv_file_name)
+    except Exception as e:
+        print(f"* Error: {e}")
+
     last_played = 0
 
     i = 0
@@ -686,6 +698,11 @@ def lastfm_list_tracks(username, user, network, number):
         if i == len(recent_tracks):
             last_played = int(t.timestamp)
         print(f'{i}\t{datetime.fromtimestamp(int(t.timestamp)).strftime("%d %b %Y, %H:%M:%S")}\t{calendar.day_abbr[(datetime.fromtimestamp(int(t.timestamp))).weekday()]}\t{t.track}')
+        try:
+            if csv_file_name:
+                write_csv_entry(csv_file_name, datetime.fromtimestamp(int(t.timestamp)), str(t.track.artist), str(t.track.title), str(t.album))
+        except Exception as e:
+            print(f"* Error: {e}")
         if previous:
             if previous.timestamp == t.timestamp:
                 p += 1
@@ -1865,7 +1882,7 @@ if __name__ == "__main__":
         "-d", "--disable-logging",
         dest="disable_logging",
         action="store_true",
-        help="Disable logging to lastfm_monitor_user.log"
+        help="Disable logging to lastfm_monitor_<user>.log"
     )
 
     args = parser.parse_args()
@@ -1933,8 +1950,11 @@ if __name__ == "__main__":
             tracks_n = args.recent_count
         else:
             tracks_n = 30
-        print(f"* Listing {tracks_n} tracks recently listened by {args.username}:\n")
-        lastfm_list_tracks(args.username, user, network, tracks_n)
+        try:
+            lastfm_list_tracks(args.username, user, network, tracks_n, args.csv_file)
+        except Exception as e:
+            print(f"* Error: {e}")
+            sys.exit(1)
         sys.exit(0)
 
     if args.monitor_list:
