@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.0.1
+v2.1
 
 Tool implementing real-time tracking of Last.fm users' music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -15,65 +15,65 @@ requests
 urllib3
 """
 
-VERSION = "2.0.1"
+VERSION = "2.1"
 
 # ---------------------------
 # CONFIGURATION SECTION START
 # ---------------------------
 
-# Create your Last.fm 'API key' and 'Shared secret' by going to: https://www.last.fm/api/account/create
-# Or get your existing one from: https://www.last.fm/api/accounts
-# Put the respective values below (or use -u and -w parameters)
+# Create your Last.fm API key and shared secret at:
+# https://www.last.fm/api/account/create
+# Or retrieve an existing one from:
+# https://www.last.fm/api/accounts
+# Provide the values below or use the -u and -w parameters
 LASTFM_API_KEY = "your_lastfm_api_key"  # Last.fm API key
 LASTFM_API_SECRET = "your_lastfm_api_secret"  # Last.fm Shared secret
 
-# This setting is optional and only needed if you want to get track duration from Spotify (-r option, more accurate than Last.fm) or
-# if you want to use -g option (track songs functionality), so we can find Spotify track ID and play it in your Spotify client
+# This section is optional and only needed if you want to:
+#   - Get track duration from Spotify (via -r), which is more accurate than Last.fm
+#   - Use the -g option (track songs functionality), which requires Spotify track IDs
 #
-# Log in to Spotify Developer dashboard (https://developer.spotify.com/dashboard) and create a new app
-# For the 'Redirect URL', you can use 'http://127.0.0.1:1234' (what we put here does not really matter as we are not using
-# Authorization Code Flow, but Client Credentials Flow)
-# Select 'Web API' for the API used
-# Put the value of 'Client ID' and 'Client secret' below (or use -z parameter)
-# The tool takes care of refreshing the access token so it should remain valid indefinitely
+# To get credentials:
+#   1. Log in to Spotify Developer dashboard: https://developer.spotify.com/dashboard
+#   2. Create a new app
+#   3. For 'Redirect URL', you can use 'http://127.0.0.1:1234' (not actually used here)
+#   4. Select 'Web API' as the intended API
+#   5. Copy the 'Client ID' and 'Client Secret' below or provide via -z
+#
+# The tool automatically refreshes the access token, so it remains valid indefinitely
 SP_CLIENT_ID = "your_spotify_app_client_id"  # Spotify Client ID
 SP_CLIENT_SECRET = "your_spotify_app_client_secret"  # Spotify Client Secret
 
-# SMTP settings for sending email notifications, you can leave it as is below and no notifications will be sent
+# SMTP settings for sending email notifications
+# If left as-is, no notifications will be sent
 SMTP_HOST = "your_smtp_server_ssl"
 SMTP_PORT = 587
 SMTP_USER = "your_smtp_user"
 SMTP_PASSWORD = "your_smtp_password"
 SMTP_SSL = True
 SENDER_EMAIL = "your_sender_email"
-# SMTP_HOST = "your_smtp_server_plaintext"
-# SMTP_PORT = 25
-# SMTP_USER = "your_smtp_user"
-# SMTP_PASSWORD = "your_smtp_password"
-# SMTP_SSL = False
-# SENDER_EMAIL = "your_sender_email"
 RECEIVER_EMAIL = "your_receiver_email"
 
-# How often do we perform checks for user activity when considered offline (not playing music right now); in seconds
-# You can also use -c parameter
+# How often to check for user activity when the user is considered offline (not playing music); in seconds
+# Can also be set using the -c parameter
 LASTFM_CHECK_INTERVAL = 10  # 10 seconds
 
-# How often do we perform checks for user activity when online (playing music right now); in seconds
-# You can also use -k parameter
+# How often to check for user activity when the user is online (currently playing); in seconds
+# Can also be set using the -k parameter
 LASTFM_ACTIVE_CHECK_INTERVAL = 3  # 3 seconds
 
-# After what time period do we consider a user inactive (after their last activity); in seconds
-# You can also use -o parameter
+# Time after which a user is considered inactive, based on the last activity; in seconds
+# Can also be set using the -o parameter
 LASTFM_INACTIVITY_CHECK = 180  # 3 mins
 
-# What method should we use to play the song listened by the tracked user in local Spotify client under macOS
+# Method used to play the song listened by the tracked user in local Spotify client under macOS
 # (i.e. when -g / --track_songs functionality is enabled)
 # Methods:
 #       "apple-script" (recommended)
 #       "trigger-url"
 SPOTIFY_MACOS_PLAYING_METHOD = "apple-script"
 
-# What method should we use to play the song listened by the tracked user in local Spotify client under Linux OS
+# Method used to play the song listened by the tracked user in local Spotify client under Linux OS
 # (i.e. when -g / --track_songs functionality is enabled)
 # Methods:
 #       "dbus-send" (most common one)
@@ -81,7 +81,7 @@ SPOTIFY_MACOS_PLAYING_METHOD = "apple-script"
 #       "trigger-url"
 SPOTIFY_LINUX_PLAYING_METHOD = "dbus-send"
 
-# What method should we use to play the song listened by the tracked user in local Spotify client under Windows OS
+# Method used to play the song listened by the tracked user in local Spotify client under Windows OS
 # (if -g / --track_songs functionality is enabled)
 # Methods:
 #       "start-uri" (recommended)
@@ -89,65 +89,70 @@ SPOTIFY_LINUX_PLAYING_METHOD = "dbus-send"
 #       "trigger-url"
 SPOTIFY_WINDOWS_PLAYING_METHOD = "start-uri"
 
-# How many consecutive plays of the same song is considered as being on loop
+# Number of consecutive plays of the same song considered to be on loop
 SONG_ON_LOOP_VALUE = 3
 
-# When do we consider the song as being skipped; this parameter is used if track duration is NOT available from Last.fm/Spotify
-# in seconds
-SKIPPED_SONG_THRESHOLD1 = 35  # song is treated as skipped if played for <=35 seconds
+# Threshold for treating a song as skipped, when track duration is unknown (not available from Last.fm/Spotify); in seconds
+SKIPPED_SONG_THRESHOLD1 = 35  # considered skipped if played for <= 35 seconds
 
-# When do we consider the song as being skipped; this parameter is used if track duration is available from Last.fm/Spotify; fraction
-SKIPPED_SONG_THRESHOLD2 = 0.55  # song is treated as skipped if played for <=55% of track duration
+# Threshold for treating a song as skipped, when track duration is known; fraction
+SKIPPED_SONG_THRESHOLD2 = 0.55  # considered skipped if played for <= 55% of its duration
 
-# When do we consider the song as being played for longer than track duration; it will happen either if the play time is longer than 130% of track duration of if more than 30 seconds; fraction and seconds
-LONGER_SONG_THRESHOLD1 = 1.30  # song is treated as being played longer than track duration if played longer than >= 130% of track duration
-LONGER_SONG_THRESHOLD2 = 30  # song is treated as being played longer than track duration if played longer than >= 30 seconds of track duration
+# Thresholds for treating a song as "played longer than track duration":
+# Either if played for >= 130% of duration (fraction) or 30+ seconds beyond expected length
+LONGER_SONG_THRESHOLD1 = 1.30  # 130% of track duration
+LONGER_SONG_THRESHOLD2 = 30  # 30 seconds beyond track duration
 
-# Set the value of the variable below to True if you want to get the track duration from Spotify
-# It is recommended since Last.fm very often does not have it or has inaccurate info
-# We will try to get track duration from Spotify only if you have defined proper SP_CLIENT_ID & SP_CLIENT_SECRET values earlier
-# (or via -z parameter)
-# You can also use -r parameter
+# Set to True to retrieve track duration from Spotify instead of Last.fm
+# Recommended, as Last.fm often lacks this info or reports inaccurate values
+# Only works if SP_CLIENT_ID and SP_CLIENT_SECRET are defined (or provided via -z).
+# Can also be set with the -r parameter
 USE_TRACK_DURATION_FROM_SPOTIFY = False
 
-# Type Spotify ID of the "finishing" track to play when user gets offline, only needed for track_songs functionality;
-# leave empty to simply pause
+# Spotify track ID to play when the user goes offline (used with track_songs feature)
+# Leave empty to simply pause
 # SP_USER_GOT_OFFLINE_TRACK_ID = "5wCjNjnugSUqGDBrmQhn0e"
 SP_USER_GOT_OFFLINE_TRACK_ID = ""
 
-# Delay after which the above track gets paused, type 0 to play infinitely until user pauses manually; in seconds
+# Delay before pausing the above track after the user goes offline; in seconds
+# Set to 0 to keep playing indefinitely until manually paused
 SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE = 5  # 5 seconds
 
-# If the value is greater than 0, it will show when the user stops playing or resumes while active.
-# The play break is assumed to be LASTFM_BREAK_CHECK_MULTIPLIER*LASTFM_ACTIVE_CHECK_INTERVAL
-# So if LASTFM_BREAK_CHECK_MULTIPLIER = 4 and LASTFM_ACTIVE_CHECK_INTERVAL = 3, then music pause will be reported after 4*3=12 seconds of inactivity
-# You can also use -m parameter
+# Multiplier for detecting short breaks in playback
+# The pause is detected after: LASTFM_BREAK_CHECK_MULTIPLIER * LASTFM_ACTIVE_CHECK_INTERVAL seconds of inactivity
+# Can be disabled by setting it to 0
+# Can also be set using the -m parameter
 LASTFM_BREAK_CHECK_MULTIPLIER = 4
 
-# How often do we perform alive check by printing "alive check" message in the output; in seconds
+# How often to print an "alive check" message to the output; in seconds
 TOOL_ALIVE_INTERVAL = 21600  # 6 hours
 
-# URL we check in the beginning to make sure we have internet connectivity
-CHECK_INTERNET_URL = 'http://www.google.com/'
+# URL used to verify internet connectivity at startup
+CHECK_INTERNET_URL = 'https://ws.audioscrobbler.com/'
 
-# Default value for initial checking of internet connectivity; in seconds
+# Timeout used when checking initial internet connectivity; in seconds
 CHECK_INTERNET_TIMEOUT = 5
 
-# The name of the .log file; the tool by default will output its messages to lastfm_monitor_username.log file
+# Base name of the log file. The tool will save its output to lastfm_monitor_<username>.log file
 LF_LOGFILE = "lastfm_monitor"
 
-# Value used by signal handlers increasing/decreasing the inactivity check (LASTFM_INACTIVITY_CHECK); in seconds
+# Value added/subtracted via signal handlers to adjust inactivity timeout (LASTFM_INACTIVITY_CHECK); in seconds
 LASTFM_INACTIVITY_CHECK_SIGNAL_VALUE = 30  # 30 seconds
 
-# How many 50x errors need to show up in the defined time to display error message in the console - it is to suppress sporadic issues with Last.fm API endpoint; adjust the parameters according to the LASTFM_CHECK_INTERVAL & LASTFM_ACTIVE_CHECK_INTERVAL timers
-# If more than 15 Last.fm API related issues in 2 mins - we will show the error message
+# Threshold for displaying Last.fm 50x errors - it is to suppress sporadic issues with Last.fm API endpoint
+# Adjust the parameters according to the LASTFM_CHECK_INTERVAL and LASTFM_ACTIVE_CHECK_INTERVAL timers
+# If more than 15 Last.fm API related errors in 2 minutes, show an alert
 ERROR_500_NUMBER_LIMIT = 15
 ERROR_500_TIME_LIMIT = 120  # 2 min
 
-# How many network related errors need to show up in the defined time to display error message in the console - it is to suppress sporadic issues with internet connectivity; adjust the parameters according to the LASTFM_CHECK_INTERVAL & LASTFM_ACTIVE_CHECK_INTERVAL timers
-# If more than 15 network related issues in 2 mins - we will show the error message
+# Threshold for displaying network errors - it is to suppress sporadic issues with internet connectivity
+# Adjust the parameters according to the LASTFM_CHECK_INTERVAL and LASTFM_ACTIVE_CHECK_INTERVAL timers
+# If more than 15 network related errors in 2 minutes, show an alert
 ERROR_NETWORK_ISSUES_NUMBER_LIMIT = 15
 ERROR_NETWORK_ISSUES_TIME_LIMIT = 120  # 2 min
+
+# Whether to clear the terminal screen after starting the tool
+CLEAR_SCREEN = True
 
 # -------------------------
 # CONFIGURATION SECTION END
@@ -165,6 +170,9 @@ RECENT_TRACKS_NUMBER = 10
 
 # Variables for caching functionality of the Spotify access token to avoid unnecessary refreshing
 SP_CACHED_TOKEN = None
+
+# Width of horizontal line (─)
+HORIZONTAL_LINE = 105
 
 TOOL_ALIVE_COUNTER = TOOL_ALIVE_INTERVAL / LASTFM_CHECK_INTERVAL
 
@@ -208,7 +216,6 @@ from email.mime.text import MIMEText
 import argparse
 import csv
 import pylast
-import urllib
 from urllib.parse import quote_plus, quote
 import subprocess
 import platform
@@ -241,19 +248,30 @@ def signal_handler(sig, frame):
     sys.exit(0)
 
 
-# Function to check internet connectivity
-def check_internet():
-    url = CHECK_INTERNET_URL
+# Checks internet connectivity
+def check_internet(url=CHECK_INTERNET_URL, timeout=CHECK_INTERNET_TIMEOUT):
     try:
-        _ = req.get(url, timeout=CHECK_INTERNET_TIMEOUT)
-        print("OK")
+        _ = req.get(url, timeout=timeout)
         return True
-    except Exception as e:
-        print(f"No connectivity, please check your network - {e}")
-        sys.exit(1)
+    except req.RequestException as e:
+        print(f"* No connectivity, please check your network:\n\n{e}")
+        return False
 
 
-# Function to convert absolute value of seconds to human readable format
+# Clears the terminal screen
+def clear_screen(enabled=True):
+    if not enabled:
+        return
+    try:
+        if platform.system() == 'Windows':
+            os.system('cls')
+        else:
+            os.system('clear')
+    except Exception:
+        print("* Cannot clear the screen contents")
+
+
+# Converts absolute value of seconds to human readable format
 def display_time(seconds, granularity=2):
     intervals = (
         ('years', 31556952),  # approximation
@@ -279,7 +297,7 @@ def display_time(seconds, granularity=2):
         return '0 seconds'
 
 
-# Function to calculate time span between two timestamps in seconds
+# Calculates time span between two timestamps, accepts timestamp integers, floats and datetime objects
 def calculate_timespan(timestamp1, timestamp2, show_weeks=True, show_hours=True, show_minutes=True, show_seconds=True, granularity=3):
     result = []
     intervals = ['years', 'months', 'weeks', 'days', 'hours', 'minutes', 'seconds']
@@ -346,7 +364,7 @@ def calculate_timespan(timestamp1, timestamp2, show_weeks=True, show_hours=True,
         return '0 seconds'
 
 
-# Function to send email notification
+# Sends email notification
 def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
     fqdn_re = re.compile(r'(?=^.{4,253}$)(^((?!-)[a-zA-Z0-9-]{1,63}(?<!-)\.)+[a-zA-Z]{2,63}\.?$)')
     email_re = re.compile(r'[^@]+@[^@]+\.[^@]+')
@@ -408,34 +426,46 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         smtpObj.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, email_msg.as_string())
         smtpObj.quit()
     except Exception as e:
-        print(f"Error sending email - {e}")
+        print(f"Error sending email: {e}")
         return 1
     return 0
 
 
-# Function to write CSV entry
+# Initializes the CSV file
+def init_csv_file(csv_file_name):
+    try:
+        if not os.path.isfile(csv_file_name) or os.path.getsize(csv_file_name) == 0:
+            with open(csv_file_name, 'a', newline='', buffering=1, encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=csvfieldnames, quoting=csv.QUOTE_NONNUMERIC)
+                writer.writeheader()
+    except Exception as e:
+        raise RuntimeError(f"Could not initialize CSV file '{csv_file_name}': {e}")
+
+
+# Writes CSV entry
 def write_csv_entry(csv_file_name, timestamp, artist, track, album):
     try:
-        csv_file = open(csv_file_name, 'a', newline='', buffering=1, encoding="utf-8")
-        csvwriter = csv.DictWriter(csv_file, fieldnames=csvfieldnames, quoting=csv.QUOTE_NONNUMERIC)
-        csvwriter.writerow({'Date': timestamp, 'Artist': artist, 'Track': track, 'Album': album})
-        csv_file.close()
+
+        with open(csv_file_name, 'a', newline='', buffering=1, encoding="utf-8") as csv_file:
+            csvwriter = csv.DictWriter(csv_file, fieldnames=csvfieldnames, quoting=csv.QUOTE_NONNUMERIC)
+            csvwriter.writerow({'Date': timestamp, 'Artist': artist, 'Track': track, 'Album': album})
+
     except Exception:
-        raise
+        raise RuntimeError(f"Failed to write to CSV file '{csv_file_name}': {e}")
 
 
-# Function to return the timestamp in human readable format; eg. Sun, 21 Apr 2024, 15:08:45
+# Returns the current date/time in human readable format; eg. Sun 21 Apr 2024, 15:08:45
 def get_cur_ts(ts_str=""):
     return (f'{ts_str}{calendar.day_abbr[(datetime.fromtimestamp(int(time.time()))).weekday()]}, {datetime.fromtimestamp(int(time.time())).strftime("%d %b %Y, %H:%M:%S")}')
 
 
-# Function to print the current timestamp in human readable format; eg. Sun, 21 Apr 2024, 15:08:45
+# Prints the current date/time in human readable format with separator; eg. Sun 21 Apr 2024, 15:08:45
 def print_cur_ts(ts_str=""):
     print(get_cur_ts(str(ts_str)))
-    print("---------------------------------------------------------------------------------------------------------")
+    print("─" * HORIZONTAL_LINE)
 
 
-# Function to return the timestamp/datetime object in human readable format (long version); eg. Sun, 21 Apr 2024, 15:08:45
+# Returns the timestamp/datetime object in human readable format (long version); eg. Sun 21 Apr 2024, 15:08:45
 def get_date_from_ts(ts):
     if type(ts) is datetime:
         ts_new = int(round(ts.timestamp()))
@@ -449,7 +479,7 @@ def get_date_from_ts(ts):
     return (f'{calendar.day_abbr[(datetime.fromtimestamp(ts_new)).weekday()]} {datetime.fromtimestamp(ts_new).strftime("%d %b %Y, %H:%M:%S")}')
 
 
-# Function to return the timestamp/datetime object in human readable format (short version); eg.
+# Returns the timestamp/datetime object in human readable format (short version); eg.
 # Sun 21 Apr 15:08
 # Sun 21 Apr 24, 15:08 (if show_year == True and current year is different)
 # Sun 21 Apr (if show_hour == False)
@@ -478,7 +508,7 @@ def get_short_date_from_ts(ts, show_year=False, show_hour=True):
         return (f'{calendar.day_abbr[(datetime.fromtimestamp(ts_new)).weekday()]} {datetime.fromtimestamp(ts_new).strftime(f"%d %b{hour_strftime}")}')
 
 
-# Function to return the timestamp/datetime object in human readable format (only hour, minutes and optionally seconds): eg. 15:08:12
+# Returns the timestamp/datetime object in human readable format (only hour, minutes and optionally seconds): eg. 15:08:12
 def get_hour_min_from_ts(ts, show_seconds=False):
     if type(ts) is datetime:
         ts_new = int(round(ts.timestamp()))
@@ -496,7 +526,7 @@ def get_hour_min_from_ts(ts, show_seconds=False):
     return (str(datetime.fromtimestamp(ts_new).strftime(out_strf)))
 
 
-# Function to return the range between two timestamps/datetime objects; eg. Sun 21 Apr 14:09 - 14:15
+# Returns the range between two timestamps/datetime objects; eg. Sun 21 Apr 14:09 - 14:15
 def get_range_of_dates_from_tss(ts1, ts2, between_sep=" - ", short=False):
     if type(ts1) is datetime:
         ts1_new = int(round(ts1.timestamp()))
@@ -607,7 +637,7 @@ def decrease_inactivity_check_signal_handler(sig, frame):
     print_cur_ts("Timestamp:\t\t\t")
 
 
-# Function to access the previous and next elements of the list
+# Accesses the previous and next elements of the list
 def previous_and_next(some_iterable):
     prevs, items, nexts = tee(some_iterable, 3)
     prevs = chain([None], prevs)
@@ -615,7 +645,7 @@ def previous_and_next(some_iterable):
     return zip(prevs, items, nexts)
 
 
-# Function preparing Spotify, Apple & Genius search URLs for specified track
+# Prepares Spotify, Apple & Genius search URLs for specified track
 def get_spotify_apple_genius_search_urls(artist, track):
     spotify_search_string = quote_plus(f"{artist} {track}")
     genius_search_string = f"{artist} {track}"
@@ -629,7 +659,7 @@ def get_spotify_apple_genius_search_urls(artist, track):
     return spotify_search_url, apple_search_url, genius_search_url, youtube_music_search_url
 
 
-# Function returning the list of recently played Last.fm tracks
+# Returns the list of recently played Last.fm tracks
 def lastfm_get_recent_tracks(username, network, number):
     try:
         recent_tracks = network.get_user(username).get_recent_tracks(limit=number)
@@ -638,13 +668,13 @@ def lastfm_get_recent_tracks(username, network, number):
         raise
 
 
-# Function displaying the list of recently played Last.fm tracks
+# Displays the list of recently played Last.fm tracks
 def lastfm_list_tracks(username, user, network, number):
     try:
         new_track = user.get_now_playing()
         recent_tracks = lastfm_get_recent_tracks(username, network, number)
     except Exception as e:
-        print(f"* Error: cannot display recent tracks for the user - {e}")
+        print(f"* Error, cannot display recent tracks for the user: {e}")
         sys.exit(1)
     last_played = 0
 
@@ -661,7 +691,7 @@ def lastfm_list_tracks(username, user, network, number):
                 p += 1
                 duplicate_entries = True
                 print("DUPLICATE ENTRY")
-    print("---------------------------------------------------------------------------------------------------------")
+    print("─" * HORIZONTAL_LINE)
     if last_played > 0 and not new_track:
         print(f"*** User played last time {calculate_timespan(int(time.time()), last_played, show_seconds=True)} ago! ({get_date_from_ts(last_played)})")
 
@@ -677,7 +707,7 @@ def lastfm_list_tracks(username, user, network, number):
         print(f"Album:\t\t{album}")
 
 
-# Function sending a lightweight request to check token validity since Spotipy deprecates as_dict=True and there is no
+# Sends a lightweight request to check token validity since Spotipy deprecates as_dict=True and there is no
 # get_cached_token() method implemented yet for client credentials auth flow
 def check_token_validity(token):
     url = "https://api.spotify.com/v1/browse/categories"
@@ -690,14 +720,14 @@ def check_token_validity(token):
         return False
 
 
-# Function getting Spotify access token based on provided sp_client_id & sp_client_secret values
+# Gets Spotify access token based on provided sp_client_id & sp_client_secret values
 def spotify_get_access_token(sp_client_id, sp_client_secret):
     global SP_CACHED_TOKEN
 
     try:
         from spotipy.oauth2 import SpotifyClientCredentials
     except ImportError:
-        print("* Warning: the 'spotipy' package is required for Spotify-related features, install it with `pip install spotipy`")
+        print("* Warning, the 'spotipy' package is required for Spotify-related features, install it with `pip install spotipy`")
         return None
 
     if SP_CACHED_TOKEN and check_token_validity(SP_CACHED_TOKEN):
@@ -709,7 +739,7 @@ def spotify_get_access_token(sp_client_id, sp_client_secret):
     return SP_CACHED_TOKEN
 
 
-# Function converting Spotify URI (e.g. spotify:user:username) to URL (e.g. https://open.spotify.com/user/username)
+# Converts Spotify URI (e.g. spotify:user:username) to URL (e.g. https://open.spotify.com/user/username)
 def spotify_convert_uri_to_url(uri):
     # add si parameter so link opens in native Spotify app after clicking
     si = "?si=1"
@@ -735,7 +765,7 @@ def spotify_convert_uri_to_url(uri):
     return url
 
 
-# Function processing track items returned by Spotify search Web API
+# Processes track items returned by Spotify search Web API
 def spotify_search_process_track_items(track_items, track):
     sp_track_uri_id = None
     sp_track_duration = 0
@@ -755,7 +785,7 @@ def spotify_search_process_track_items(track_items, track):
     return sp_track_uri_id, sp_track_duration
 
 
-# Function returning Spotify track ID & duration for specific artist, track and optionally album
+# Returns Spotify track ID & duration for specific artist, track and optionally album
 def spotify_search_song_trackid_duration(access_token, artist, track, album=""):
     re_chars_to_remove = r'([\'])'
     artist_sanitized = re.sub(re_chars_to_remove, '', artist, flags=re.IGNORECASE)
@@ -849,8 +879,8 @@ def spotify_win_play_song(sp_track_uri_id, method=SPOTIFY_WINDOWS_PLAYING_METHOD
         os.startfile(spotify_convert_uri_to_url(f"spotify:track:{sp_track_uri_id}"))
 
 
-# Main function monitoring activity of the specified Last.fm user
-def lastfm_monitor_user(user, network, username, tracks, error_notification, csv_file_name, csv_exists):
+# Main function that monitors activity of the specified Last.fm user
+def lastfm_monitor_user(user, network, username, tracks, error_notification, csv_file_name):
 
     lf_active_ts_start = 0
     lf_active_ts_last = 0
@@ -886,13 +916,9 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
 
     try:
         if csv_file_name:
-            csv_file = open(csv_file_name, 'a', newline='', buffering=1, encoding="utf-8")
-            csvwriter = csv.DictWriter(csv_file, fieldnames=csvfieldnames, quoting=csv.QUOTE_NONNUMERIC)
-            if not csv_exists:
-                csvwriter.writeheader()
-            csv_file.close()
+            init_csv_file(csv_file_name)
     except Exception as e:
-        print(f"* Error - {e}")
+        print(f"* Error: {e}")
 
     lastfm_last_activity_file = f"lastfm_{username}_last_activity.json"
     last_activity_read = []
@@ -905,7 +931,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
             with open(lastfm_last_activity_file, 'r', encoding="utf-8") as f:
                 last_activity_read = json.load(f)
         except Exception as e:
-            print(f"* Cannot load last status from '{lastfm_last_activity_file}' file - {e}")
+            print(f"* Cannot load last status from '{lastfm_last_activity_file}' file: {e}")
         if last_activity_read:
             last_activity_ts = last_activity_read[0]
             last_activity_artist = last_activity_read[1]
@@ -919,7 +945,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
         new_track = user.get_now_playing()
         recent_tracks = lastfm_get_recent_tracks(username, network, RECENT_TRACKS_NUMBER)
     except Exception as e:
-        print(f"* Error - {e}")
+        print(f"* Error: {e}")
         sys.exit(1)
 
     last_track_start_ts_old2 = int(recent_tracks[0].timestamp)
@@ -1020,13 +1046,13 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
             with open(lastfm_last_activity_file, 'w', encoding="utf-8") as f:
                 json.dump(last_activity_to_save, f, indent=2)
         except Exception as e:
-            print(f"* Cannot save last status to '{lastfm_last_activity_file}' file - {e}")
+            print(f"* Cannot save last status to '{lastfm_last_activity_file}' file: {e}")
 
         try:
             if csv_file_name:
                 write_csv_entry(csv_file_name, datetime.fromtimestamp(int(lf_track_ts_start)), artist, track, album)
         except Exception as e:
-            print(f"* Cannot write CSV entry - {e}")
+            print(f"* Error: {e}")
 
         duration_m_body = ""
         duration_m_body_html = ""
@@ -1077,6 +1103,8 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
 
     email_sent = False
 
+    tracks_upper = {t.upper() for t in tracks}
+
     # Main loop
     while True:
         try:
@@ -1111,7 +1139,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                                 if csv_file_name:
                                     write_csv_entry(csv_file_name, datetime.fromtimestamp(int(t.timestamp)), str(t.track.artist), str(t.track.title), str(t.album))
                     except Exception as e:
-                        print(f"* Error - {e}")
+                        print(f"* Error: {e}")
 
                     if i > 0 and offline_entries_notification:
                         if added_entries_list:
@@ -1205,10 +1233,10 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                             played_for_m_body = f"\n\nUser played the previous track ({artist_old} - {track_old}) for: {played_for}"
                             played_for_m_body_html = f"<br><br>User played the previous track (<b>{escape(artist_old)} - {escape(track_old)}</b>) for: {played_for_html}"
                             if progress_indicator:
-                                print("---------------------------------------------------------------------------------------------------------")
+                                print("─" * HORIZONTAL_LINE)
                             print(f"User played the previous track for: {played_for}")
                             if not progress_indicator:
-                                print("---------------------------------------------------------------------------------------------------------")
+                                print("─" * HORIZONTAL_LINE)
                     # Handling how long user played the previous track, if skipped it etc. - in case track duration is NOT available
                     elif track_duration <= 0 and lf_track_ts_start_after_resume > 0 and lf_user_online:
                         played_for = display_time(lf_current_ts - lf_track_ts_start_after_resume)
@@ -1230,13 +1258,13 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                             played_for_str = f"User played the previous track for: {played_for}"
 
                         if progress_indicator:
-                            print("---------------------------------------------------------------------------------------------------------")
+                            print("─" * HORIZONTAL_LINE)
                         print(played_for_str)
                         if not progress_indicator:
-                            print("---------------------------------------------------------------------------------------------------------")
+                            print("─" * HORIZONTAL_LINE)
 
                     if progress_indicator:
-                        print("---------------------------------------------------------------------------------------------------------")
+                        print("─" * HORIZONTAL_LINE)
 
                     print(f"Last.fm user:\t\t\t{username}\n")
 
@@ -1301,7 +1329,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                         with open(lastfm_last_activity_file, 'w', encoding="utf-8") as f:
                             json.dump(last_activity_to_save, f, indent=2)
                     except Exception as e:
-                        print(f"* Cannot save last status to '{lastfm_last_activity_file}' file - {e}")
+                        print(f"* Cannot save last status to '{lastfm_last_activity_file}' file: {e}")
 
                     duration_m_body = ""
                     duration_m_body_html = ""
@@ -1341,7 +1369,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                                         p += 1
                                         duplicate_entries = True
                         except Exception as e:
-                            print(f"* Error - {e}")
+                            print(f"* Error: {e}")
                         if duplicate_entries:
                             private_mode = f"\n\nDuplicate entries ({p}) found, possible private mode ({get_range_of_dates_from_tss(lf_active_ts_last_old, lf_track_ts_start, short=True)})"
                             private_mode_html = f"<br><br>Duplicate entries ({p}) found, possible <b>private mode</b> (<b>{get_range_of_dates_from_tss(lf_active_ts_last_old, lf_track_ts_start, short=True)}</b>)"
@@ -1375,7 +1403,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                         m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple search URL: {apple_search_url}\nYouTube Music search URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}{played_for_m_body}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                         m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple search URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music search URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a>{played_for_m_body_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
 
-                    if track.upper() in map(str.upper, tracks) or album.upper() in map(str.upper, tracks):
+                    if track.upper() in tracks_upper or album.upper() in tracks_upper:
                         print("\n*** Track/album matched with the list!")
 
                         if track_notification and not email_sent:
@@ -1389,9 +1417,9 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                         email_sent = True
 
                     if song_on_loop == SONG_ON_LOOP_VALUE:
-                        print("---------------------------------------------------------------------------------------------------------")
+                        print("─" * HORIZONTAL_LINE)
                         print(f"User plays song on LOOP ({song_on_loop} times)")
-                        print("---------------------------------------------------------------------------------------------------------")
+                        print("─" * HORIZONTAL_LINE)
 
                     if song_on_loop == SONG_ON_LOOP_VALUE and song_on_loop_notification:
                         m_subject = f"Last.fm user {username} plays song on loop: '{artist} - {track}'"
@@ -1410,7 +1438,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                         if csv_file_name:
                             write_csv_entry(csv_file_name, datetime.fromtimestamp(int(lf_track_ts_start)), artist, track, album)
                     except Exception as e:
-                        print(f"* Cannot write CSV entry - {e}")
+                        print(f"* Error: {e}")
 
                     print_cur_ts("\nTimestamp:\t\t\t")
                 # Track has not changed, user is online and continues playing
@@ -1436,7 +1464,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                     playing_paused_ts = lf_active_ts_last
                     pauses_number += 1
                     if progress_indicator:
-                        print("---------------------------------------------------------------------------------------------------------")
+                        print("─" * HORIZONTAL_LINE)
                     print(f"User PAUSED playing after {calculate_timespan(int(playing_resumed_ts), int(playing_paused_ts))} (inactivity timer: {display_time(LASTFM_BREAK_CHECK_MULTIPLIER * LASTFM_ACTIVE_CHECK_INTERVAL)})")
                     print(f"Last activity:\t\t\t{get_date_from_ts(lf_active_ts_last)}")
                     print_cur_ts("\nTimestamp:\t\t\t")
@@ -1474,7 +1502,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                         played_for_m_body_html = f"<br><br>User played the last track for: {played_for_html}"
                         print(f"User played the last track for: {played_for}")
                         if not progress_indicator:
-                            print("---------------------------------------------------------------------------------------------------------")
+                            print("─" * HORIZONTAL_LINE)
                     # Handling how long user played the last track - in case track duration is NOT available
                     elif track_duration <= 0 and lf_track_ts_start_after_resume > 0:
                         played_for = display_time((lf_active_ts_last) - lf_track_ts_start_after_resume)
@@ -1485,10 +1513,10 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
 
                         print(played_for_str)
                         if not progress_indicator:
-                            print("---------------------------------------------------------------------------------------------------------")
+                            print("─" * HORIZONTAL_LINE)
 
                     if progress_indicator:
-                        print("---------------------------------------------------------------------------------------------------------")
+                        print("─" * HORIZONTAL_LINE)
 
                     print(f"*** User got INACTIVE after listening to music for {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}")
                     print(f"*** User played music from {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep=' to ')}")
@@ -1555,7 +1583,7 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                         with open(lastfm_last_activity_file, 'w', encoding="utf-8") as f:
                             json.dump(last_activity_to_save, f, indent=2)
                     except Exception as e:
-                        print(f"* Cannot save last status to '{lastfm_last_activity_file}' file - {e}")
+                        print(f"* Cannot save last status to '{lastfm_last_activity_file}' file: {e}")
                     if inactive_notification:
                         m_subject = f"Last.fm user {username} is inactive: '{artist} - {track}' (after {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start), show_seconds=False)}: {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True)})"
                         m_body = f"Last played: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple search URL: {apple_search_url}\nYouTube Music search URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}\n\nUser got inactive after listening to music for {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}\nUser played music from {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep=' to ')}{paused_mbody}{listened_songs_mbody}{played_for_m_body}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}\nInactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
@@ -1616,19 +1644,19 @@ def lastfm_monitor_user(user, network, username, tracks, error_notification, csv
                     error_network_issue_counter += 1
 
             if error_500_start_ts and (error_500_counter >= ERROR_500_NUMBER_LIMIT and (int(time.time()) - error_500_start_ts) >= ERROR_500_TIME_LIMIT):
-                print(f"Error 50x ({error_500_counter}x times in the last {display_time((int(time.time()) - error_500_start_ts))}) - '{e}'")
+                print(f"* Error 50x ({error_500_counter}x times in the last {display_time((int(time.time()) - error_500_start_ts))}): '{e}'")
                 print_cur_ts("Timestamp:\t\t\t")
                 error_500_start_ts = 0
                 error_500_counter = 0
 
             elif error_network_issue_start_ts and (error_network_issue_counter >= ERROR_NETWORK_ISSUES_NUMBER_LIMIT and (int(time.time()) - error_network_issue_start_ts) >= ERROR_NETWORK_ISSUES_TIME_LIMIT):
-                print(f"Error with network ({error_network_issue_counter}x times in the last {display_time((int(time.time()) - error_network_issue_start_ts))}) - '{e}'")
+                print(f"* Error with network ({error_network_issue_counter}x times in the last {display_time((int(time.time()) - error_network_issue_start_ts))}): '{e}'")
                 print_cur_ts("Timestamp:\t\t\t")
                 error_network_issue_start_ts = 0
                 error_network_issue_counter = 0
 
             elif not error_500_start_ts and not error_network_issue_start_ts:
-                print(f"Error - '{e}'")
+                print(f"* Error: '{e}'")
 
                 if 'Invalid API key' in str(e) or 'API Key Suspended' in str(e):
                     print("* API key might not be valid anymore!")
@@ -1656,54 +1684,200 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    try:
-        if platform.system() == 'Windows':
-            os.system('cls')
-        else:
-            os.system('clear')
-    except Exception:
-        print("* Cannot clear the screen contents")
+    clear_screen(CLEAR_SCREEN)
 
     print(f"Last.fm Monitoring Tool v{VERSION}\n")
 
-    parser = argparse.ArgumentParser("lastfm_monitor")
-    parser.add_argument("LASTFM_USERNAME", nargs="?", help="Last.fm username", type=str)
-    parser.add_argument("-u", "--lastfm_api_key", help="Last.fm API key to override the value defined within the script (LASTFM_API_KEY)", type=str)
-    parser.add_argument("-w", "--lastfm_shared_secret", help="Last.fm shared secret to override the value defined within the script (LASTFM_API_SECRET)", type=str)
-    parser.add_argument("-z", "--spotify_client_id_and_secret", help="Spotify client id and secret to override the value defined within the script (SP_CLIENT_ID and SP_CLIENT_SECRET); specify it in the following format: SP_CLIENT_ID:SP_CLIENT_SECRET (both values separated by colon)", type=str)
-    parser.add_argument("-a", "--active_notification", help="Send email notification once user gets active", action='store_true')
-    parser.add_argument("-i", "--inactive_notification", help="Send email notification once user gets inactive", action='store_true')
-    parser.add_argument("-t", "--track_notification", help="Send email notification once monitored track/album is found", action='store_true')
-    parser.add_argument("-j", "--song_notification", help="Send email notification for every changed song", action='store_true')
-    parser.add_argument("-f", "--offline_entries_notification", help="Send email notification in case new entries are detected while user is offline", action='store_true')
-    parser.add_argument("-x", "--song_on_loop_notification", help="Send email notification if user plays a song on loop (>= SONG_ON_LOOP_VALUE times)", action='store_true')
-    parser.add_argument("-e", "--error_notification", help="Disable sending email notifications in case of errors like invalid API key", action='store_false')
-    parser.add_argument("-c", "--check_interval", help="Time between monitoring checks if user is offline, in seconds", type=int)
-    parser.add_argument("-k", "--active_check_interval", help="Time between monitoring checks if user is active, in seconds", type=int)
-    parser.add_argument("-o", "--offline_timer", help="Time required to mark inactive user as offline, in seconds", type=int)
-    parser.add_argument("-p", "--progress_indicator", help="Show progress indicator while user is listening", action='store_true')
-    parser.add_argument("-g", "--track_songs", help="Automatically track listened songs by playing it in Spotify client", action='store_true')
-    parser.add_argument("-m", "--play_break_multiplier", help="If more than 0 it will show when user stops playing/resumes (while active), play break is assumed to be play_break_multiplier*active_check_interval", type=int)
-    parser.add_argument("-r", "--fetch_duration_from_spotify", help="Try to get the track duration from Spotify if SP_CLIENT_ID & SP_CLIENT_SECRET (-z) values are properly defined", action='store_true')
-    parser.add_argument("-q", "--do_not_show_duration_marks", help="Do not display L* or S* marks indicating from where the track duration has been fetched (Last.fm or Spotify); it is showed only if fetching duration from Spotify (-r) is enabled", action='store_true')
-    parser.add_argument("-b", "--csv_file", help="Write every listened track to CSV file", type=str, metavar="CSV_FILENAME")
-    parser.add_argument("-s", "--lastfm_tracks", help="Filename with Last.fm tracks/albums to monitor", type=str, metavar="TRACKS_FILENAME")
-    parser.add_argument("-l", "--list_recent_tracks", help="List recently played tracks for the user", action='store_true')
-    parser.add_argument("-n", "--number_of_recent_tracks", help="Number of tracks to display if used with -l", type=int)
-    parser.add_argument("-d", "--disable_logging", help="Disable output logging to file 'lastfm_monitor_user.log' file", action='store_true')
-    parser.add_argument("-y", "--send_test_email_notification", help="Send test email notification to verify SMTP settings defined in the script", action='store_true')
+    parser = argparse.ArgumentParser(
+        prog="lastfm_monitor",
+        description="Monitor a Last.fm user’s scrobbles and send customizable email alerts [ https://github.com/misiektoja/lastfm_monitor/ ]"
+    )
+
+    # Positional
+    parser.add_argument(
+        "username",
+        nargs="?",
+        metavar="LASTFM_USERNAME",
+        help="Last.fm username to monitor"
+    )
+
+    # API credentials
+    creds = parser.add_argument_group("API credentials")
+    creds.add_argument(
+        "-u", "--lastfm-api-key",
+        dest="lastfm_api_key",
+        metavar="LASTFM_API_KEY",
+        help="Last.fm API key"
+    )
+    creds.add_argument(
+        "-w", "--lastfm-secret",
+        dest="lastfm_secret",
+        metavar="LASTFM_API_SECRET",
+        help="Last.fm API secret"
+    )
+    creds.add_argument(
+        "-z", "--spotify-creds",
+        dest="spotify_creds",
+        nargs=2,
+        metavar=("SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET"),
+        help="Spotify client credentials - specify both values"
+    )
+
+    # Notifications
+    notify = parser.add_argument_group("Notifications")
+    notify.add_argument(
+        "-a", "--notify-active",
+        dest="notify_active",
+        action="store_true",
+        help="Email when user becomes active"
+    )
+    notify.add_argument(
+        "-i", "--notify-inactive",
+        dest="notify_inactive",
+        action="store_true",
+        help="Email when user goes inactive"
+    )
+    notify.add_argument(
+        "-t", "--notify-track",
+        dest="notify_track",
+        action="store_true",
+        help="Email when a monitored track/album plays"
+    )
+    notify.add_argument(
+        "-j", "--notify-song-changes",
+        dest="notify_song_changes",
+        action="store_true",
+        help="Email on every song change"
+    )
+    notify.add_argument(
+        "-f", "--notify-offline-entries",
+        dest="notify_offline_entries",
+        action="store_true",
+        help="Email when new scrobbles arrive while user is offline"
+    )
+    notify.add_argument(
+        "-x", "--notify-loop",
+        dest="notify_loop",
+        action="store_true",
+        help="Email when a song plays on loop (>= SONG_ON_LOOP_VALUE times)"
+    )
+    notify.add_argument(
+        "-e", "--no-error-notify",
+        action="store_false",
+        dest="notify_errors",
+        help="Disable email on errors (e.g. invalid API key)"
+    )
+    notify.add_argument(
+        "-y", "--send-test-email",
+        dest="send_test_email",
+        action="store_true",
+        help="Send a test email to verify SMTP settings"
+    )
+
+    # Intervals & Timers
+    times = parser.add_argument_group("Intervals & timers")
+    times.add_argument(
+        "-c", "--check-interval",
+        dest="check_interval",
+        metavar="SECONDS",
+        type=int,
+        help="Polling interval when user is offline"
+    )
+    times.add_argument(
+        "-k", "--active-interval",
+        dest="active_interval",
+        metavar="SECONDS",
+        type=int,
+        help="Polling interval when user is active"
+    )
+    times.add_argument(
+        "-o", "--offline-timer",
+        dest="offline_timer",
+        metavar="SECONDS",
+        type=int,
+        help="Time to mark inactive user as offline"
+    )
+    times.add_argument(
+        "-m", "--break-multiplier",
+        dest="break_multiplier",
+        metavar="N",
+        type=int,
+        help="Detect play breaks as N×active‑interval"
+    )
+
+    # Listing mode
+    listing = parser.add_argument_group("Listing")
+
+    listing.add_argument(
+        "-l", "--list-recent",
+        dest="list_recent",
+        action="store_true",
+        help="Print the user’s most recent tracks"
+    )
+    listing.add_argument(
+        "-n", "--recent-count",
+        dest="recent_count",
+        metavar="N",
+        type=int,
+        help="Number of recent tracks to list (use with -l)"
+    )
+
+    # Features & Output
+    opts = parser.add_argument_group("Features & output")
+    opts.add_argument(
+        "-p", "--progress",
+        dest="progress",
+        action="store_true",
+        help="Show a progress indicator while user is listening"
+    )
+    opts.add_argument(
+        "-g", "--track-in-spotify",
+        dest="track_in_spotify",
+        action="store_true",
+        help="Auto‑play each scrobble in your Spotify client"
+    )
+    opts.add_argument(
+        "-r", "--fetch-duration",
+        dest="fetch_duration",
+        action="store_true",
+        help="Fetch track duration from Spotify when credentials are set"
+    )
+    opts.add_argument(
+        "-q", "--hide-duration-source",
+        dest="hide_duration_source",
+        action="store_true",
+        help="Do not show whether duration came from Last.fm or Spotify"
+    )
+    opts.add_argument(
+        "-b", "--csv-file",
+        dest="csv_file",
+        metavar="CSV_FILE",
+        help="Append every scrobble to a CSV file"
+    )
+    opts.add_argument(
+        "-s", "--monitor-list",
+        dest="monitor_list",
+        metavar="TRACKS_FILE",
+        help="Path to file listing tracks/albums to monitor"
+    )
+
+    opts.add_argument(
+        "-d", "--disable-logging",
+        dest="disable_logging",
+        action="store_true",
+        help="Disable logging to lastfm_monitor_user.log"
+    )
+
     args = parser.parse_args()
 
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
         sys.exit(1)
 
-    sys.stdout.write("* Checking internet connectivity ... ")
-    sys.stdout.flush()
-    check_internet()
-    print("")
+    if not check_internet():
+        sys.exit(1)
 
-    if args.send_test_email_notification:
+    if args.send_test_email:
         print("* Sending test email notification ...\n")
         if send_email("lastfm_monitor: test email", "This is test email - your SMTP settings seems to be correct !", "", SMTP_SSL, smtp_timeout=5) == 0:
             print("* Email sent successfully !")
@@ -1711,98 +1885,100 @@ if __name__ == "__main__":
             sys.exit(1)
         sys.exit(0)
 
-    if not args.LASTFM_USERNAME:
+    if not args.username:
         print("* Error: LASTFM_USERNAME argument is required !")
         sys.exit(1)
 
     if args.lastfm_api_key:
         LASTFM_API_KEY = args.lastfm_api_key
 
-    if args.lastfm_shared_secret:
-        LASTFM_API_SECRET = args.lastfm_shared_secret
+    if args.lastfm_secret:
+        LASTFM_API_SECRET = args.lastfm_secret
 
     if not LASTFM_API_KEY or LASTFM_API_KEY == "your_lastfm_api_key":
         print("* Error: LASTFM_API_KEY (-u / --lastfm_api_key) value is empty or incorrect")
         sys.exit(1)
 
     if not LASTFM_API_SECRET or LASTFM_API_SECRET == "your_lastfm_api_secret":
-        print("* Error: LASTFM_API_SECRET (-w / --lastfm_shared_secret) value is empty or incorrect")
+        print("* Error: LASTFM_API_SECRET (-w / --lastfm-secret) value is empty or incorrect")
         sys.exit(1)
 
-    if args.spotify_client_id_and_secret:
-        try:
-            SP_CLIENT_ID, SP_CLIENT_SECRET = args.spotify_client_id_and_secret.split(":")
-        except ValueError:
-            print("* Error: SPOTIFY_CLIENT_ID_AND_SECRET (-z / --spotify_client_id_and_secret) has invalid format - use SP_CLIENT_ID:SP_CLIENT_SECRET")
+    if args.spotify_creds:
+        if len(args.spotify_creds) != 2:
+            print("* Error: --spotify-creds requires two values: CLIENT_ID CLIENT_SECRET")
             sys.exit(1)
+        SP_CLIENT_ID, SP_CLIENT_SECRET = args.spotify_creds
 
-    if args.fetch_duration_from_spotify:
-        USE_TRACK_DURATION_FROM_SPOTIFY = args.fetch_duration_from_spotify
+    if args.fetch_duration:
+        USE_TRACK_DURATION_FROM_SPOTIFY = args.fetch_duration
 
     if args.check_interval:
         LASTFM_CHECK_INTERVAL = args.check_interval
         TOOL_ALIVE_COUNTER = TOOL_ALIVE_INTERVAL / LASTFM_CHECK_INTERVAL
 
-    if args.active_check_interval:
-        LASTFM_ACTIVE_CHECK_INTERVAL = args.active_check_interval
+    if args.active_interval:
+        LASTFM_ACTIVE_CHECK_INTERVAL = args.active_interval
 
     if args.offline_timer:
         LASTFM_INACTIVITY_CHECK = args.offline_timer
 
-    if args.play_break_multiplier:
-        LASTFM_BREAK_CHECK_MULTIPLIER = args.play_break_multiplier
+    if args.break_multiplier:
+        LASTFM_BREAK_CHECK_MULTIPLIER = args.break_multiplier
 
     network = pylast.LastFMNetwork(LASTFM_API_KEY, LASTFM_API_SECRET)
-    user = network.get_user(args.LASTFM_USERNAME)
+    user = network.get_user(args.username)
 
-    if args.list_recent_tracks:
-        if args.number_of_recent_tracks and args.number_of_recent_tracks > 0:
-            tracks_n = args.number_of_recent_tracks
+    if args.list_recent:
+        if args.recent_count and args.recent_count > 0:
+            tracks_n = args.recent_count
         else:
             tracks_n = 30
-        print(f"* Listing {tracks_n} tracks recently listened by {args.LASTFM_USERNAME}:\n")
-        lastfm_list_tracks(args.LASTFM_USERNAME, user, network, tracks_n)
+        print(f"* Listing {tracks_n} tracks recently listened by {args.username}:\n")
+        lastfm_list_tracks(args.username, user, network, tracks_n)
         sys.exit(0)
 
-    if args.lastfm_tracks:
+    if args.monitor_list:
         try:
-            with open(args.lastfm_tracks, encoding="utf-8") as file:
-                lf_tracks = file.read().splitlines()
-            file.close()
+            try:
+                with open(args.monitor_list, encoding="utf-8") as file:
+                    lines = file.read().splitlines()
+            except UnicodeDecodeError:
+                with open(args.monitor_list, encoding="cp1252") as file:
+                    lines = file.read().splitlines()
+
+            lf_tracks = [
+                line.strip()
+                for line in lines
+                if line.strip() and not line.strip().startswith("#")
+            ]
         except Exception as e:
-            print(f"* Error: file with Last.fm tracks cannot be opened - {e}")
+            print(f"* Error, file with Last.fm tracks cannot be opened: {e}")
             sys.exit(1)
     else:
         lf_tracks = []
 
     if args.csv_file:
-        csv_enabled = True
-        csv_exists = os.path.isfile(args.csv_file)
         try:
-            csv_file = open(args.csv_file, 'a', newline='', buffering=1, encoding="utf-8")
+            with open(args.csv_file, 'a', newline='', buffering=1, encoding="utf-8") as _:
+                pass
         except Exception as e:
-            print(f"* Error: CSV file cannot be opened for writing - {e}")
+            print(f"* Error, CSV file cannot be opened for writing: {e}")
             sys.exit(1)
-        csv_file.close()
-    else:
-        csv_enabled = False
-        csv_file = None
-        csv_exists = False
 
     if not args.disable_logging:
-        LF_LOGFILE = f"{LF_LOGFILE}_{args.LASTFM_USERNAME}.log"
+        LF_LOGFILE = f"{LF_LOGFILE}_{args.username}.log"
         sys.stdout = Logger(LF_LOGFILE)
 
-    active_notification = args.active_notification
-    inactive_notification = args.inactive_notification
-    song_notification = args.song_notification
-    track_notification = args.track_notification
-    offline_entries_notification = args.offline_entries_notification
-    song_on_loop_notification = args.song_on_loop_notification
-    progress_indicator = args.progress_indicator
-    track_songs = args.track_songs
-    do_not_show_duration_marks = args.do_not_show_duration_marks
-    error_notification = args.error_notification
+    active_notification = args.notify_active
+    inactive_notification = args.notify_inactive
+    song_notification = args.notify_song_changes
+    track_notification = args.notify_track
+    offline_entries_notification = args.notify_offline_entries
+    song_on_loop_notification = args.notify_loop
+    error_notification = args.notify_errors
+    progress_indicator = args.progress
+    track_songs = args.track_in_spotify
+    do_not_show_duration_marks = args.hide_duration_source
 
     if not USE_TRACK_DURATION_FROM_SPOTIFY:
         do_not_show_duration_marks = True
@@ -1816,21 +1992,15 @@ if __name__ == "__main__":
         song_on_loop_notification = False
         error_notification = False
 
-    print(f"* Last.fm timers:\t\t\t[check interval: {display_time(LASTFM_CHECK_INTERVAL)}] [active check interval: {display_time(LASTFM_ACTIVE_CHECK_INTERVAL)}]\n*\t\t\t\t\t[inactivity: {display_time(LASTFM_INACTIVITY_CHECK)}]")
-    print(f"* Email notifications:\t\t\t[active = {active_notification}] [inactive = {inactive_notification}] [tracked = {track_notification}] [every song = {song_notification}]\n*\t\t\t\t\t[songs on loop = {song_on_loop_notification}] [offline entries = {offline_entries_notification}] [errors = {error_notification}]")
-    print(f"* Progress indicator enabled:\t\t{progress_indicator}")
-    print(f"* Track listened songs:\t\t\t{track_songs}")
-    print(f"* Get track duration from Spotify:\t{USE_TRACK_DURATION_FROM_SPOTIFY}")
-    print(f"* Do not show duration marks (L*, S*):\t{do_not_show_duration_marks}")
-    print(f"* Play break multiplier:\t\t{LASTFM_BREAK_CHECK_MULTIPLIER} ({display_time(LASTFM_BREAK_CHECK_MULTIPLIER * LASTFM_ACTIVE_CHECK_INTERVAL)})")
-    if not args.disable_logging:
-        print(f"* Output logging enabled:\t\t{not args.disable_logging} ({LF_LOGFILE})")
-    else:
-        print(f"* Output logging enabled:\t\t{not args.disable_logging}")
-    if csv_enabled:
-        print(f"* CSV logging enabled:\t\t\t{csv_enabled} ({args.csv_file})\n")
-    else:
-        print(f"* CSV logging enabled:\t\t\t{csv_enabled}\n")
+    print(f"* Last.fm timers:\t\t[check interval: {display_time(LASTFM_CHECK_INTERVAL)}] [active check interval: {display_time(LASTFM_ACTIVE_CHECK_INTERVAL)}]\n*\t\t\t\t[inactivity: {display_time(LASTFM_INACTIVITY_CHECK)}]")
+    print(f"* Email notifications:\t\t[active = {active_notification}] [inactive = {inactive_notification}] [tracked = {track_notification}] [every song = {song_notification}]\n*\t\t\t\t[songs on loop = {song_on_loop_notification}] [offline entries = {offline_entries_notification}] [errors = {error_notification}]")
+    print(f"* Progress indicator:\t\t{progress_indicator}")
+    print(f"* Track listened songs:\t\t{track_songs}")
+    print(f"* Track duration (Spotify):\t{USE_TRACK_DURATION_FROM_SPOTIFY}")
+    print(f"* Show duration marks:\t\t{not do_not_show_duration_marks}")
+    print(f"* Play break multiplier:\t{LASTFM_BREAK_CHECK_MULTIPLIER} ({display_time(LASTFM_BREAK_CHECK_MULTIPLIER * LASTFM_ACTIVE_CHECK_INTERVAL)})")
+    print(f"* Output logging enabled:\t{not args.disable_logging}" + (f" ({LF_LOGFILE})" if not args.disable_logging else ""))
+    print(f"* CSV logging enabled:\t\t{bool(args.csv_file)}" + (f" ({args.csv_file})\n" if args.csv_file else "\n"))
 
     # We define signal handlers only for Linux, Unix & MacOS since Windows has limited number of signals supported
     if platform.system() != 'Windows':
@@ -1842,11 +2012,11 @@ if __name__ == "__main__":
         signal.signal(signal.SIGTRAP, increase_inactivity_check_signal_handler)
         signal.signal(signal.SIGABRT, decrease_inactivity_check_signal_handler)
 
-    out = f"Monitoring user {args.LASTFM_USERNAME}"
+    out = f"Monitoring user {args.username}"
     print(out)
     print("-" * len(out))
 
-    lastfm_monitor_user(user, network, args.LASTFM_USERNAME, lf_tracks, error_notification, args.csv_file, csv_exists)
+    lastfm_monitor_user(user, network, args.username, lf_tracks, error_notification, args.csv_file)
 
     sys.stdout = stdout_bck
     sys.exit(0)
