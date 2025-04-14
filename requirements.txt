@@ -1,4 +1,5 @@
 pylast
+requests
+python-dateutil
 spotipy
-python_dateutil
-Requests
+python-dotenv
