@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.1
+v2.1.1
 
 Tool implementing real-time tracking of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -15,7 +15,7 @@ spotipy (optional, only for Spotify-related features)
 python-dotenv (optional)
 """
 
-VERSION = "2.1"
+VERSION = "2.1.1"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -116,7 +116,7 @@ LASTFM_ACTIVE_CHECK_INTERVAL = 3  # 3 seconds
 # Can also be set using the -o flag
 LASTFM_INACTIVITY_CHECK = 180  # 3 mins
 
-# Whether to auto‑play each listened song in your Spotify client
+# Whether to auto-play each listened song in your Spotify client
 # Can also be set using the -g flag
 TRACK_SONGS = False
 
@@ -235,7 +235,7 @@ LF_LOGFILE = "lastfm_monitor"
 # Can also be disabled via the -d flag
 DISABLE_LOGGING = False
 
-# Width of horizontal line (─)
+# Width of horizontal line
 HORIZONTAL_LINE = 113
 
 # Whether to clear the terminal screen after starting the tool
@@ -2080,7 +2080,7 @@ def main():
         dest="break_multiplier",
         metavar="N",
         type=int,
-        help="Detect play breaks as N×active‑interval"
+        help="Detect play breaks as N×active-interval"
     )
 
     # Listing mode
@@ -2114,7 +2114,7 @@ def main():
         dest="track_in_spotify",
         action="store_true",
         default=None,
-        help="Auto‑play each scrobble in your Spotify client"
+        help="Auto-play each scrobble in your Spotify client"
     )
     opts.add_argument(
         "-r", "--fetch-duration",
