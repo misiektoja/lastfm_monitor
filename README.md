@@ -162,7 +162,7 @@ Otherwise you will get this error message returned by the `pyLast` library: *'Lo
 <a id="spotify-client-id-and-secret-optional"></a>
 ### Spotify Client ID and Secret (optional)
 
-If you want to obtain the [track duration from Spotify](#getting-track-duration-from-spotify) or use the [automatic playback functionality](#automatic-playback-of-listened-tracks-in-the-spotify-client), you need to get Spotify credentials.
+If you want to obtain the [track duration from Spotify](#getting-track-duration-from-spotify) or use the [automatic playback functionality](#automatic-playback-of-listened-tracks-in-the-spotify-client), you need to get Spotify credentials to perform the Client Credentials OAuth flow.
 
 - Log in to Spotify Developer dashboard: https://developer.spotify.com/dashboard
 - Create a new app
@@ -171,16 +171,22 @@ If you want to obtain the [track duration from Spotify](#getting-track-duration-
 - Copy the **Client ID** and **Client Secret**
 
 Provide the `SP_CLIENT_ID` and `SP_CLIENT_SECRET` secrets using one of the following methods:
- - Pass it at runtime with `-z` / ` --spotify-creds`
+ - Pass it at runtime with `-z` / `--spotify-creds` (use `SP_CLIENT_ID`:`SP_CLIENT_SECRET` format - note the colon separator)
  - Set it as an [environment variable](#storing-secrets) (e.g. `export SP_CLIENT_ID=...; export SP_CLIENT_SECRET=...`)
  - Add it to [.env file](#storing-secrets) (`SP_CLIENT_ID=...` and `SP_CLIENT_SECRET=...`) for persistent use
 
 Fallback:
  - Hard-code it in the code or config file
 
+Example:
+
+```sh
+lastfm_monitor <lastfm_username> -z "your_spotify_app_client_id:your_spotify_app_client_secret"
+```
+
 The tool takes care of refreshing the access token so it should remain valid indefinitely.
 
-If you store the `SP_CLIENT_ID` and `SP_CLIENT_SECRET` in a dotenv file you can update their values and send a `SIGHUP` signal to the process to reload the file with the new secret values without restarting the tool. More info in [Storing Secrets](#storing-secrets) and [Signal Controls (macOS/Linux/Unix)](#signal-controls-macoslinuxunix).
+If you store the `SP_CLIENT_ID` and `SP_CLIENT_SECRET` in a dotenv file you can update their values and send a `SIGHUP` signal to reload the file with the new secret values without restarting the tool. More info in [Storing Secrets](#storing-secrets) and [Signal Controls (macOS/Linux/Unix)](#signal-controls-macoslinuxunix).
 
 <a id="smtp-settings"></a>
 ### SMTP Settings
@@ -257,7 +263,7 @@ lastfm_monitor <lastfm_username> -u "your_lastfm_api_key" -w "your_lastfm_api_se
 If you want to obtain the [track duration from Spotify](#getting-track-duration-from-spotify) or use the [automatic playback functionality](#automatic-playback-of-listened-tracks-in-the-spotify-client) and you have not set `SP_CLIENT_ID` and `SP_CLIENT_SECRET`, you can use `-z` flag:
 
 ```sh
-lastfm_monitor <lastfm_username> -z "your_spotify_app_client_id" "your_spotify_app_client_secret"
+lastfm_monitor <lastfm_username> -z "your_spotify_app_client_id:your_spotify_app_client_secret"
 ```
 
 By default, the tool looks for a configuration file named `lastfm_monitor.conf` in:
