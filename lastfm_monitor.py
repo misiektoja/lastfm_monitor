@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.1.2
+v2.2
 
 Tool implementing real-time tracking of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -15,7 +15,7 @@ spotipy (optional, only for Spotify-related features)
 python-dotenv (optional)
 """
 
-VERSION = "2.1.2"
+VERSION = "2.2"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -37,11 +37,11 @@ CONFIG_BLOCK = """
 LASTFM_API_KEY = "your_lastfm_api_key"
 LASTFM_API_SECRET = "your_lastfm_api_secret"
 
-# This section is optional and only needed if you want to:
+# This Spotify Client Credentials OAuth Flow section is optional and only needed if you want to:
 #   - Get track duration from Spotify (via USE_TRACK_DURATION_FROM_SPOTIFY / -r), which is more accurate than Last.fm
 #   - Use automatic playback functionality (via TRACK_SONGS / -g), which requires Spotify track IDs
 #
-# To get credentials:
+# To obtain the credentials:
 #   - Log in to Spotify Developer dashboard: https://developer.spotify.com/dashboard
 #   - Create a new app
 #   - For 'Redirect URL', use: http://127.0.0.1:1234
@@ -58,6 +58,10 @@ LASTFM_API_SECRET = "your_lastfm_api_secret"
 # The tool automatically refreshes the access token, so it remains valid indefinitely
 SP_CLIENT_ID = "your_spotify_app_client_id"
 SP_CLIENT_SECRET = "your_spotify_app_client_secret"
+
+# Path to cache file used to store OAuth app access tokens across tool restarts
+# Set to empty to use in-memory cache only
+SP_TOKENS_FILE = ".lastfm-monitor-oauth-app.json"
 
 # SMTP settings for sending email notifications
 # If left as-is, no notifications will be sent
@@ -255,6 +259,7 @@ LASTFM_API_KEY = ""
 LASTFM_API_SECRET = ""
 SP_CLIENT_ID = ""
 SP_CLIENT_SECRET = ""
+SP_TOKENS_FILE = ""
 SMTP_HOST = ""
 SMTP_PORT = 0
 SMTP_USER = ""
@@ -320,7 +325,7 @@ re_replace_str = r'( - (\d*)( )*remaster$)|( - (\d*)( )*remastered( version)*( \
 FUNCTION_TIMEOUT = 5  # 5 seconds
 
 # Variables for caching functionality of the Spotify access token to avoid unnecessary refreshing
-SP_CACHED_TOKEN = None
+SP_CACHED_ACCESS_TOKEN = None
 
 LIVENESS_CHECK_COUNTER = LIVENESS_CHECK_INTERVAL / LASTFM_CHECK_INTERVAL
 
@@ -905,7 +910,7 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
 
 
 # Sends a lightweight request to check token validity since Spotipy deprecates as_dict=True and there is no
-# get_cached_token() method implemented yet for client credentials auth flow
+# get_cached_token() method implemented yet for Client Credentials OAuth Flow
 def check_token_validity(token):
     url = "https://api.spotify.com/v1/browse/categories?limit=1&fields=categories.items(id)"
     headers = {"Authorization": f"Bearer {token}"}
@@ -916,23 +921,30 @@ def check_token_validity(token):
         return False
 
 
-# Gets Spotify access token based on provided sp_client_id & sp_client_secret values (Client Credentials Flow)
+# Gets Spotify access token based on provided sp_client_id & sp_client_secret values (Client Credentials OAuth Flow)
 def spotify_get_access_token(sp_client_id, sp_client_secret):
-    global SP_CACHED_TOKEN
+    global SP_CACHED_ACCESS_TOKEN
 
     try:
         from spotipy.oauth2 import SpotifyClientCredentials
+        from spotipy.cache_handler import CacheFileHandler, MemoryCacheHandler
     except ImportError:
-        print("* Warning, the 'spotipy' package is required for Spotify-related features, install it with `pip install spotipy`")
+        print("* Warning: the 'spotipy' package is required for Spotify-related features, install it with `pip install spotipy`")
         return None
 
-    if SP_CACHED_TOKEN and check_token_validity(SP_CACHED_TOKEN):
-        return SP_CACHED_TOKEN
+    if SP_CACHED_ACCESS_TOKEN and check_token_validity(SP_CACHED_ACCESS_TOKEN):
+        return SP_CACHED_ACCESS_TOKEN
 
-    auth_manager = SpotifyClientCredentials(client_id=sp_client_id, client_secret=sp_client_secret)
-    SP_CACHED_TOKEN = auth_manager.get_access_token(as_dict=False)
+    if SP_TOKENS_FILE:
+        cache_handler = CacheFileHandler(cache_path=SP_TOKENS_FILE)
+    else:
+        cache_handler = MemoryCacheHandler()
 
-    return SP_CACHED_TOKEN
+    auth_manager = SpotifyClientCredentials(client_id=sp_client_id, client_secret=sp_client_secret, cache_handler=cache_handler)
+
+    SP_CACHED_ACCESS_TOKEN = auth_manager.get_access_token(as_dict=False)
+
+    return SP_CACHED_ACCESS_TOKEN
 
 
 # Converts Spotify URI (e.g. spotify:user:username) to URL (e.g. https://open.spotify.com/user/username)
@@ -1234,7 +1246,11 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
         print(f"Album:\t\t\t\t{album}")
 
         if (USE_TRACK_DURATION_FROM_SPOTIFY or TRACK_SONGS) and SP_CLIENT_ID and SP_CLIENT_SECRET and SP_CLIENT_ID != "your_spotify_app_client_id" and SP_CLIENT_SECRET != "your_spotify_app_client_secret":
-            accessToken = spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET)
+            try:
+                accessToken = spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET)
+            except Exception as e:
+                print(f"* spotify_get_access_token(): {e}")
+                accessToken = None
             if accessToken:
                 sp_track_uri_id, sp_track_duration = spotify_search_song_trackid_duration(accessToken, artist, track, album)
                 if not USE_TRACK_DURATION_FROM_SPOTIFY:
@@ -1522,7 +1538,11 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                     duration_mark = ""
 
                     if (USE_TRACK_DURATION_FROM_SPOTIFY or TRACK_SONGS) and SP_CLIENT_ID and SP_CLIENT_SECRET and SP_CLIENT_ID != "your_spotify_app_client_id" and SP_CLIENT_SECRET != "your_spotify_app_client_secret":
-                        accessToken = spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET)
+                        try:
+                            accessToken = spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET)
+                        except Exception as e:
+                            # print(f"* spotify_get_access_token(): {e}")
+                            accessToken = None
                         if accessToken:
                             sp_track_uri_id, sp_track_duration = spotify_search_song_trackid_duration(accessToken, artist, track, album)
                             if not USE_TRACK_DURATION_FROM_SPOTIFY:
@@ -1912,7 +1932,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
 
 
 def main():
-    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck
+    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, SP_TOKENS_FILE
 
     if "--generate-config" in sys.argv:
         print(CONFIG_BLOCK.strip("\n"))
@@ -2243,6 +2263,9 @@ def main():
             print("* Error: -z / --spotify-creds has invalid format - use SP_CLIENT_ID:SP_CLIENT_SECRET")
             sys.exit(1)
 
+    if SP_TOKENS_FILE:
+        SP_TOKENS_FILE = os.path.expanduser(SP_TOKENS_FILE)
+
     if args.fetch_duration:
         USE_TRACK_DURATION_FROM_SPOTIFY = args.fetch_duration
 
@@ -2387,6 +2410,8 @@ def main():
     print(f"* CSV logging enabled:\t\t{bool(CSV_FILE)}" + (f" ({CSV_FILE})" if CSV_FILE else ""))
     print(f"* Alert on monitored tracks:\t{bool(MONITOR_LIST_FILE)}" + (f" ({MONITOR_LIST_FILE})" if MONITOR_LIST_FILE else ""))
     print(f"* Output logging enabled:\t{not DISABLE_LOGGING}" + (f" ({FINAL_LOG_PATH})" if not DISABLE_LOGGING else ""))
+    if TRACK_SONGS or USE_TRACK_DURATION_FROM_SPOTIFY:
+        print(f"* Spotify token cache file:\t{SP_TOKENS_FILE or 'None (memory only)'}")
     print(f"* Configuration file:\t\t{cfg_path}")
     print(f"* Dotenv file:\t\t\t{env_path or 'None'}\n")
 
