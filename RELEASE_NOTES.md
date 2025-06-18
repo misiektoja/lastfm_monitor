@@ -2,6 +2,20 @@
 
 This is a high-level summary of the most important changes. 
 
+# Changes in 2.2 (18 Jun 2025)
+
+**Features and Improvements**:
+
+- **NEW:** Added display of last played track duration at startup when user is offline
+- **NEW:** Added option to customize the path for OAuth app access token cache file with possibility to use in-memory only cache
+- **IMPROVE:** Restored old SP_CLIENT_ID:SP_CLIENT_SECRET format for -z / --spotify-creds flag (more reliable in corner cases)
+- **IMPROVE:** Updated captions shown for Apple and YouTube Music links
+
+**Bug fixes**:
+
+- **BUGFIX:** Added exception handling when retrieving Spotify access tokens to prevent crashes
+- **BUGFIX:** Coerced artist, track and album to strings before sanitization
+
 # Changes in 2.1.1 (13 Jun 2025)
 
 **Bug fixes**:
@@ -34,7 +48,7 @@ This is a high-level summary of the most important changes.
 
 **Bug fixes**:
 
-- **BUGFIX:** Fixed issue handling 'track songs' files encoded in Windows-1252/CP1252 
+- **BUGFIX:** Fixed issue handling 'track songs' files encoded in Windows-1252/CP1252
 
 # Changes in 2.0.1 (25 Mar 2025)
 
