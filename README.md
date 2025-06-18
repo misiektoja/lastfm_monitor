@@ -134,17 +134,14 @@ Edit the `lastfm_monitor.conf` file and change any desired configuration options
 <a id="lastfm-api-key-and-shared-secret"></a>
 ### Last.fm API Key and Shared Secret
 
-Create your Last.fm `API key` and `Shared secret` at: [https://www.last.fm/api/account/create](https://www.last.fm/api/account/create)
+- Create your Last.fm `API key` and `Shared secret` at: [https://www.last.fm/api/account/create](https://www.last.fm/api/account/create)
+   - Or get your existing credentials from: [https://www.last.fm/api/accounts](https://www.last.fm/api/accounts)
 
-Or get your existing credentials from: [https://www.last.fm/api/accounts](https://www.last.fm/api/accounts)
-
-Provide the `LASTFM_API_KEY` and `LASTFM_API_SECRET` secrets using one of the following methods:
- - Pass it at runtime with `-u` / `--lastfm-api-key` and `-w` / `--lastfm-secret`
- - Set it as an [environment variable](#storing-secrets) (e.g. `export LASTFM_API_KEY=...; export LASTFM_API_SECRET=...`)
- - Add it to [.env file](#storing-secrets) (`LASTFM_API_KEY=...` and `LASTFM_API_SECRET=...`) for persistent use
-
-Fallback:
- - Hard-code it in the code or config file
+- Provide the `LASTFM_API_KEY` and `LASTFM_API_SECRET` secrets using one of the following methods:
+   - Pass it at runtime with `-u` / `--lastfm-api-key` and `-w` / `--lastfm-secret`
+   - Set it as an [environment variable](#storing-secrets) (e.g. `export LASTFM_API_KEY=...; export LASTFM_API_SECRET=...`)
+   - Add it to [.env file](#storing-secrets) (`LASTFM_API_KEY=...` and `LASTFM_API_SECRET=...`) for persistent use
+   - Fallback: hard-code it in the code or config file
 
 If you store the `LASTFM_API_KEY` and `LASTFM_API_SECRET` in a dotenv file you can update their values and send a `SIGHUP` signal to the process to reload the file with the new secret values without restarting the tool. More info in [Storing Secrets](#storing-secrets) and [Signal Controls (macOS/Linux/Unix)](#signal-controls-macoslinuxunix).
 
@@ -165,18 +162,21 @@ Otherwise you will get this error message returned by the `pyLast` library: *'Lo
 If you want to obtain the [track duration from Spotify](#getting-track-duration-from-spotify) or use the [automatic playback functionality](#automatic-playback-of-listened-tracks-in-the-spotify-client), you need to get Spotify credentials to perform the Client Credentials OAuth flow.
 
 - Log in to Spotify Developer dashboard: https://developer.spotify.com/dashboard
+
 - Create a new app
+
 - For **Redirect URL**, use: http://127.0.0.1:1234
+
 - Select **Web API** as the intended API
+
 - Copy the **Client ID** and **Client Secret**
 
-Provide the `SP_CLIENT_ID` and `SP_CLIENT_SECRET` secrets using one of the following methods:
- - Pass it at runtime with `-z` / `--spotify-creds` (use `SP_CLIENT_ID`:`SP_CLIENT_SECRET` format - note the colon separator)
- - Set it as an [environment variable](#storing-secrets) (e.g. `export SP_CLIENT_ID=...; export SP_CLIENT_SECRET=...`)
- - Add it to [.env file](#storing-secrets) (`SP_CLIENT_ID=...` and `SP_CLIENT_SECRET=...`) for persistent use
-
-Fallback:
- - Hard-code it in the code or config file
+- Provide the `SP_CLIENT_ID` and `SP_CLIENT_SECRET` secrets using one of the following methods:
+   - Pass it at runtime with `-z` / `--spotify-creds`
+      - Use `SP_CLIENT_ID`:`SP_CLIENT_SECRET` format - note the colon separator
+   - Set it as an [environment variable](#storing-secrets) (e.g. `export SP_CLIENT_ID=...; export SP_CLIENT_SECRET=...`)
+   - Add it to [.env file](#storing-secrets) (`SP_CLIENT_ID=...` and `SP_CLIENT_SECRET=...`) for persistent use
+   - Fallback: hard-code it in the code or config file
 
 Example:
 
@@ -204,7 +204,7 @@ lastfm_monitor --send-test-email
 
 It is recommended to store secrets like `LASTFM_API_KEY`, `LASTFM_API_SECRET`, `SP_CLIENT_ID`, `SP_CLIENT_SECRET` or `SMTP_PASSWORD` as either an environment variable or in a dotenv file.
 
-Set environment variables using `export` on **Linux/Unix/macOS/WSL** systems:
+Set the needed environment variables using `export` on **Linux/Unix/macOS/WSL** systems:
 
 ```sh
 export LASTFM_API_KEY="your_lastfm_api_key"
