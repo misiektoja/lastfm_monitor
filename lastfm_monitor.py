@@ -995,6 +995,9 @@ def spotify_search_process_track_items(track_items, track):
 
 # Returns Spotify track ID & duration for specific artist, track and optionally album
 def spotify_search_song_trackid_duration(access_token, artist, track, album=""):
+    artist, track = map(str, (artist, track))
+    album = str(album) if album else ""
+
     re_chars_to_remove = r'([\'])'
     artist_sanitized = re.sub(re_chars_to_remove, '', artist, flags=re.IGNORECASE)
     track_sanitized = re.sub(re_chars_to_remove, '', track, flags=re.IGNORECASE)
@@ -1125,6 +1128,43 @@ def resolve_executable(path):
     raise FileNotFoundError(f"Could not find executable '{path}'")
 
 
+def get_track_info(artist, track, album, network, silent=True):
+    sp_track_uri_id = None
+    sp_track_duration = 0
+    track_duration = 0
+    duration_mark = ""
+
+    if (USE_TRACK_DURATION_FROM_SPOTIFY or TRACK_SONGS) and SP_CLIENT_ID and SP_CLIENT_SECRET and SP_CLIENT_ID != "your_spotify_app_client_id" and SP_CLIENT_SECRET != "your_spotify_app_client_secret":
+        try:
+            accessToken = spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET)
+        except Exception as e:
+            if not silent:
+                print(f"* spotify_get_access_token(): {e}")
+            accessToken = None
+        if accessToken:
+            sp_track_uri_id, sp_track_duration = spotify_search_song_trackid_duration(accessToken, artist, track, album)
+            if not USE_TRACK_DURATION_FROM_SPOTIFY:
+                sp_track_duration = 0
+
+    if sp_track_duration > 0:
+        track_duration = sp_track_duration
+        if not DO_NOT_SHOW_DURATION_MARKS:
+            duration_mark = " S*"
+    else:
+        try:
+            lf_duration = pylast.Track(artist, track, network).get_duration()
+            if lf_duration and lf_duration > 0:
+                if USE_TRACK_DURATION_FROM_SPOTIFY and not DO_NOT_SHOW_DURATION_MARKS:
+                    duration_mark = " L*"
+                track_duration = int(str(lf_duration)[0:-3])
+        except Exception as e:
+            print(e)
+            track_duration = 0
+
+    return track_duration, sp_track_uri_id, duration_mark
+
+
+
 # Main function that monitors activity of the specified Last.fm user
 def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
 
@@ -1219,6 +1259,11 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
         print(f"* Last activity:\t\t{last_activity_ts_weekday} {last_activity_dt}")
         print(f"* Last track:\t\t\t{last_activity_artist} - {last_activity_track}")
 
+        track_duration, sp_track_uri_id, duration_mark = get_track_info(last_activity_artist, last_activity_track, "", network, silent=False)
+
+        if track_duration > 0:
+            print(f"* Last track duration:\t\t{display_time(track_duration)}{duration_mark}")
+
         spotify_search_url, apple_search_url, genius_search_url, youtube_music_search_url = get_spotify_apple_genius_search_urls(str(last_activity_artist), str(last_activity_track))
 
         print(f"\n* Spotify search URL:\t\t{spotify_search_url}")
@@ -1245,32 +1290,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
         print(f"\nTrack:\t\t\t\t{artist} - {track}")
         print(f"Album:\t\t\t\t{album}")
 
-        if (USE_TRACK_DURATION_FROM_SPOTIFY or TRACK_SONGS) and SP_CLIENT_ID and SP_CLIENT_SECRET and SP_CLIENT_ID != "your_spotify_app_client_id" and SP_CLIENT_SECRET != "your_spotify_app_client_secret":
-            try:
-                accessToken = spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET)
-            except Exception as e:
-                print(f"* spotify_get_access_token(): {e}")
-                accessToken = None
-            if accessToken:
-                sp_track_uri_id, sp_track_duration = spotify_search_song_trackid_duration(accessToken, artist, track, album)
-                if not USE_TRACK_DURATION_FROM_SPOTIFY:
-                    sp_track_duration = 0
-
-        if sp_track_duration > 0:
-            track_duration = sp_track_duration
-            if not DO_NOT_SHOW_DURATION_MARKS:
-                duration_mark = " S*"
-        else:
-            try:
-                track_duration = pylast.Track(new_track.artist, new_track.title, network).get_duration()
-                if track_duration > 0:
-                    if USE_TRACK_DURATION_FROM_SPOTIFY:
-                        if not DO_NOT_SHOW_DURATION_MARKS:
-                            duration_mark = " L*"
-                    track_duration = int(str(track_duration)[0:-3])
-            except Exception as e:
-                track_duration = 0
-                pass
+        track_duration, sp_track_uri_id, duration_mark = get_track_info(artist, track, album, network, silent=False)
 
         if track_duration > 0:
             print(f"Duration:\t\t\t{display_time(track_duration)}{duration_mark}")
@@ -1533,36 +1553,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                     print(f"Track:\t\t\t\t{artist} - {track}")
                     print(f"Album:\t\t\t\t{album}")
 
-                    sp_track_uri_id = None
-                    sp_track_duration = 0
-                    duration_mark = ""
-
-                    if (USE_TRACK_DURATION_FROM_SPOTIFY or TRACK_SONGS) and SP_CLIENT_ID and SP_CLIENT_SECRET and SP_CLIENT_ID != "your_spotify_app_client_id" and SP_CLIENT_SECRET != "your_spotify_app_client_secret":
-                        try:
-                            accessToken = spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET)
-                        except Exception as e:
-                            # print(f"* spotify_get_access_token(): {e}")
-                            accessToken = None
-                        if accessToken:
-                            sp_track_uri_id, sp_track_duration = spotify_search_song_trackid_duration(accessToken, artist, track, album)
-                            if not USE_TRACK_DURATION_FROM_SPOTIFY:
-                                sp_track_duration = 0
-
-                    if sp_track_duration > 0:
-                        track_duration = sp_track_duration
-                        if not DO_NOT_SHOW_DURATION_MARKS:
-                            duration_mark = " S*"
-                    else:
-                        try:
-                            track_duration = pylast.Track(playing_track.artist, playing_track.title, network).get_duration()
-                            if track_duration > 0:
-                                if USE_TRACK_DURATION_FROM_SPOTIFY:
-                                    if not DO_NOT_SHOW_DURATION_MARKS:
-                                        duration_mark = " L*"
-                                track_duration = int(str(track_duration)[0:-3])
-                        except Exception as e:
-                            track_duration = 0
-                            pass
+                    track_duration, sp_track_uri_id, duration_mark = get_track_info(artist, track, album, network)
 
                     if track_duration > 0:
                         print(f"Duration:\t\t\t{display_time(track_duration)}{duration_mark}")
