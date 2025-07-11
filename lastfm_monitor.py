@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.2
+v2.3
 
 Tool implementing real-time tracking of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -15,7 +15,7 @@ spotipy (optional, only for Spotify-related features)
 python-dotenv (optional)
 """
 
-VERSION = "2.2"
+VERSION = "2.3"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -1645,8 +1645,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
 
                     if (TRACK_NOTIFICATION or SONG_NOTIFICATION) and not email_sent:
                         m_subject = f"Last.fm user {username}: '{artist} - {track}'"
-                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}{played_for_m_body}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a>{played_for_m_body_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}{played_for_m_body}\n\nSongs Played: {listened_songs} ({calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_start))}){get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a>{played_for_m_body_html}<br><br>Songs Played: {listened_songs} ({calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_start))}){get_cur_ts('<br><br>Timestamp: ')}</body></html>"
 
                     if track.upper() in tracks_upper or album.upper() in tracks_upper:
                         print("\n*** Track/album matched with the list!")
@@ -1668,8 +1668,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
 
                     if song_on_loop == SONG_ON_LOOP_VALUE and SONG_ON_LOOP_NOTIFICATION:
                         m_subject = f"Last.fm user {username} plays song on loop: '{artist} - {track}'"
-                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}{played_for_m_body}\n\nUser plays song on LOOP ({song_on_loop} times){get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a>{played_for_m_body_html}<br><br>User plays song on LOOP (<b>{song_on_loop}</b> times){get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}{played_for_m_body}\n\nUser plays song on LOOP ({song_on_loop} times)\n\nSongs Played: {listened_songs} ({calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_start))}){get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a>{played_for_m_body_html}<br><br>User plays song on LOOP (<b>{song_on_loop}</b> times)<br><br>Songs Played: {listened_songs} ({calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_start))}){get_cur_ts('<br><br>Timestamp: ')}</body></html>"
                         print(f"Sending email notification to {RECEIVER_EMAIL}")
                         send_email(m_subject, m_body, m_body_html, SMTP_SSL)
 
@@ -1684,6 +1684,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             write_csv_entry(csv_file_name, datetime.fromtimestamp(int(lf_track_ts_start)), artist, track, album)
                     except Exception as e:
                         print(f"* Error: {e}")
+                    if listened_songs:
+                        print(f"\nSongs Played:\t\t\t{listened_songs} ({calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_start))})")
 
                     print_cur_ts("\nTimestamp:\t\t\t")
                 # Track has not changed, user is online and continues playing
