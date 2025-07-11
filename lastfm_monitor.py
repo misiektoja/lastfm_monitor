@@ -1191,6 +1191,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
     artist_old = ""
     track_old = ""
     song_on_loop = 0
+    recent_songs_session = []
     sp_track_uri_id = None
     sp_track_duration = 0
     duration_mark = ""
@@ -1305,6 +1306,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
         print("\n*** User is currently ACTIVE !")
 
         listened_songs = 1
+        recent_songs_session = [{'artist': artist, 'track': track, 'timestamp': lf_track_ts_start}]
 
         last_activity_to_save = []
         last_activity_to_save.append(lf_track_ts_start)
@@ -1550,6 +1552,16 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                     lf_track_ts_start_after_resume = lf_track_ts_start
                     last_track_start_ts_old = last_track_start_ts
 
+                    # Add current song to recent songs session list
+                    recent_songs_session.append({
+                        'artist': artist,
+                        'track': track,
+                        'timestamp': lf_track_ts_start
+                    })
+                    # Keep only last 5 songs
+                    if len(recent_songs_session) > 5:
+                        recent_songs_session.pop(0)
+
                     print(f"Track:\t\t\t\t{artist} - {track}")
                     print(f"Album:\t\t\t\t{album}")
 
@@ -1634,6 +1646,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                         pauses_number = 0
                         lf_active_ts_start = lf_track_ts_start
                         playing_resumed_ts = lf_track_ts_start
+                        recent_songs_session = [{'artist': artist, 'track': track, 'timestamp': lf_track_ts_start}]
                         m_subject = f"Last.fm user {username} is active: '{artist} - {track}' (after {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last), show_seconds=False)} - {get_short_date_from_ts(lf_active_ts_last)})"
                         m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}{played_for_m_body}\n\nFriend got active after being offline for {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))}{last_track_start_changed}{private_mode}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
                         m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a>{played_for_m_body_html}<br><br>Friend got active after being offline for <b>{calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))}</b>{last_track_start_changed_html}{private_mode_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
@@ -1832,9 +1845,25 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                     except Exception as e:
                         print(f"* Cannot save last status to '{lastfm_last_activity_file}' file: {e}")
                     if INACTIVE_NOTIFICATION:
+                        # Format recently listened songs list for email (skip if only 1 song)
+                        recent_songs_mbody = ""
+                        recent_songs_mbody_html = ""
+                        if listened_songs > 1 and len(recent_songs_session) > 0:
+                            # Get last up to 5 songs
+                            songs_to_show = recent_songs_session[-min(5, len(recent_songs_session)):]
+                            recent_songs_list = []
+                            recent_songs_list_html = []
+                            for song in songs_to_show:
+                                song_date = get_date_from_ts(song['timestamp'])
+                                recent_songs_list.append(f"{song['artist']} - {song['track']} ({song_date})")
+                                recent_songs_list_html.append(f"<b>{escape(song['artist'])} - {escape(song['track'])}</b> ({song_date})")
+                            if recent_songs_list:
+                                recent_songs_mbody = f"\n\nRecently listened songs in this session:\n" + "\n".join(recent_songs_list)
+                                recent_songs_mbody_html = f"<br><br>Recently listened songs in this session:<br>" + "<br>".join(recent_songs_list_html)
+                        
                         m_subject = f"Last.fm user {username} is inactive: '{artist} - {track}' (after {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start), show_seconds=False)}: {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True)})"
-                        m_body = f"Last played: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}\n\nUser got inactive after listening to music for {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}\nUser played music from {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep=' to ')}{paused_mbody}{listened_songs_mbody}{played_for_m_body}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}\nInactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a><br><br>User got inactive after listening to music for <b>{calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}</b><br>User played music from <b>{get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep='</b> to <b>')}</b>{paused_mbody_html}{listened_songs_mbody_html}{played_for_m_body_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b><br>Inactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                        m_body = f"Last played: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}\n\nUser got inactive after listening to music for {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}\nUser played music from {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep=' to ')}{paused_mbody}{listened_songs_mbody}{played_for_m_body}{recent_songs_mbody}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}\nInactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a><br><br>User got inactive after listening to music for <b>{calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}</b><br>User played music from <b>{get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep='</b> to <b>')}</b>{paused_mbody_html}{listened_songs_mbody_html}{played_for_m_body_html}{recent_songs_mbody_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b><br>Inactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
                         print(f"Sending email notification to {RECEIVER_EMAIL}")
                         send_email(m_subject, m_body, m_body_html, SMTP_SSL)
@@ -1846,6 +1875,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                     looped_songs = 0
                     skipped_songs = 0
                     pauses_number = 0
+                    recent_songs_session = []
                     print_cur_ts("\nTimestamp:\t\t\t")
 
                 if LIVENESS_CHECK_COUNTER and alive_counter >= LIVENESS_CHECK_COUNTER:
