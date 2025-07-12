@@ -149,6 +149,10 @@ LASTFM_BREAK_CHECK_MULTIPLIER = 4
 # How many recent tracks we fetch after start and every time user gets online
 RECENT_TRACKS_NUMBER = 10
 
+# How many recently listened songs to display in the inactive notification email
+# Set to 0 to disable the recently listened songs list
+INACTIVE_EMAIL_RECENT_SONGS_COUNT = 5
+
 # Method used to play the song listened by the tracked user in local Spotify client under macOS
 # (i.e. when TRACK_SONGS / -g functionality is enabled)
 # Methods:
@@ -283,6 +287,7 @@ USE_TRACK_DURATION_FROM_SPOTIFY = False
 DO_NOT_SHOW_DURATION_MARKS = False
 LASTFM_BREAK_CHECK_MULTIPLIER = 0
 RECENT_TRACKS_NUMBER = 0
+INACTIVE_EMAIL_RECENT_SONGS_COUNT = 5
 SPOTIFY_MACOS_PLAYING_METHOD = ""
 SPOTIFY_LINUX_PLAYING_METHOD = ""
 SPOTIFY_WINDOWS_PLAYING_METHOD = ""
@@ -1565,8 +1570,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                         'timestamp': lf_track_ts_start,
                         'skipped': False
                     })
-                    # Keep only last 5 songs
-                    if len(recent_songs_session) > 5:
+                    # Keep only last INACTIVE_EMAIL_RECENT_SONGS_COUNT songs (or 5 if not set)
+                    max_songs = INACTIVE_EMAIL_RECENT_SONGS_COUNT if INACTIVE_EMAIL_RECENT_SONGS_COUNT > 0 else 5
+                    if len(recent_songs_session) > max_songs:
                         recent_songs_session.pop(0)
 
                     print(f"Track:\t\t\t\t{artist} - {track}")
@@ -1870,9 +1876,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                         # Format recently listened songs list for email (skip if only 1 song)
                         recent_songs_mbody = ""
                         recent_songs_mbody_html = ""
-                        if listened_songs > 1 and len(recent_songs_session) > 0:
-                            # Get last up to 5 songs
-                            songs_to_show = recent_songs_session[-min(5, len(recent_songs_session)):]
+                        if listened_songs > 1 and len(recent_songs_session) > 0 and INACTIVE_EMAIL_RECENT_SONGS_COUNT > 0:
+                            # Get last up to INACTIVE_EMAIL_RECENT_SONGS_COUNT songs
+                            songs_to_show = recent_songs_session[-min(INACTIVE_EMAIL_RECENT_SONGS_COUNT, len(recent_songs_session)):]
                             recent_songs_list = []
                             recent_songs_list_html = []
                             for song in songs_to_show:
@@ -1884,7 +1890,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             if recent_songs_list:
                                 recent_songs_mbody = f"\n\nRecently listened songs in this session:\n" + "\n".join(recent_songs_list)
                                 recent_songs_mbody_html = f"<br><br>Recently listened songs in this session:<br>" + "<br>".join(recent_songs_list_html)
-                        
+
                         m_subject = f"Last.fm user {username} is inactive: '{artist} - {track}' (after {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start), show_seconds=False)}: {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True)})"
                         m_body = f"Last played: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}\n\nUser got inactive after listening to music for {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}\nUser played music from {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep=' to ')}{paused_mbody}{listened_songs_mbody}{played_for_m_body}{recent_songs_mbody}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}\nInactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
                         m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a><br><br>User got inactive after listening to music for <b>{calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}</b><br>User played music from <b>{get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep='</b> to <b>')}</b>{paused_mbody_html}{listened_songs_mbody_html}{played_for_m_body_html}{recent_songs_mbody_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b><br>Inactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
