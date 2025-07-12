@@ -287,7 +287,7 @@ USE_TRACK_DURATION_FROM_SPOTIFY = False
 DO_NOT_SHOW_DURATION_MARKS = False
 LASTFM_BREAK_CHECK_MULTIPLIER = 0
 RECENT_TRACKS_NUMBER = 0
-INACTIVE_EMAIL_RECENT_SONGS_COUNT = 5
+INACTIVE_EMAIL_RECENT_SONGS_COUNT = 0
 SPOTIFY_MACOS_PLAYING_METHOD = ""
 SPOTIFY_LINUX_PLAYING_METHOD = ""
 SPOTIFY_WINDOWS_PLAYING_METHOD = ""
@@ -1311,7 +1311,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
         print("\n*** User is currently ACTIVE !")
 
         listened_songs = 1
-        recent_songs_session = [{'artist': artist, 'track': track, 'timestamp': lf_track_ts_start, 'skipped': False}]
+        recent_songs_session = [{'artist': artist, 'track': track, 'timestamp': lf_track_ts_start, 'skipped': False, 'cont': False}]
 
         last_activity_to_save = []
         last_activity_to_save.append(lf_track_ts_start)
@@ -1490,6 +1490,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                                     played_for += f" - CONT ({int(listened_percentage * 100)}%)"
                                     played_for_html += f" - <b>CONT</b> ({int(listened_percentage * 100)}%)"
                                     signal_previous_the_same = False
+                                    # Mark previous track as CONT in recent_songs_session
+                                    if len(recent_songs_session) > 0 and recent_songs_session[-1]['artist'] == artist_old and recent_songs_session[-1]['track'] == track_old:
+                                        recent_songs_session[-1]['cont'] = True
                                 else:
                                     played_for += f" - SKIPPED ({int(listened_percentage * 100)}%)"
                                     played_for_html += f" - <b>SKIPPED</b> ({int(listened_percentage * 100)}%)"
@@ -1527,6 +1530,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                                 played_for_m_body_html = f"<br><br>User <b>CONT</b> the previous track (<b>{escape(artist_old)} - {escape(track_old)}</b>) for: {played_for_html}"
                                 played_for_str = f"User CONT the previous track for {played_for}"
                                 signal_previous_the_same = False
+                                # Mark previous track as CONT in recent_songs_session
+                                if len(recent_songs_session) > 0 and recent_songs_session[-1]['artist'] == artist_old and recent_songs_session[-1]['track'] == track_old:
+                                    recent_songs_session[-1]['cont'] = True
                             else:
                                 skipped_songs += 1
                                 played_for_m_body = f"\n\nUser SKIPPED the previous track ({artist_old} - {track_old}) after: {played_for}"
@@ -1568,7 +1574,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                         'artist': artist,
                         'track': track,
                         'timestamp': lf_track_ts_start,
-                        'skipped': False
+                        'skipped': False,
+                        'cont': False
                     })
                     # Keep only last INACTIVE_EMAIL_RECENT_SONGS_COUNT songs (or 5 if not set)
                     max_songs = INACTIVE_EMAIL_RECENT_SONGS_COUNT if INACTIVE_EMAIL_RECENT_SONGS_COUNT > 0 else 5
@@ -1659,7 +1666,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                         pauses_number = 0
                         lf_active_ts_start = lf_track_ts_start
                         playing_resumed_ts = lf_track_ts_start
-                        recent_songs_session = [{'artist': artist, 'track': track, 'timestamp': lf_track_ts_start, 'skipped': False}]
+                        recent_songs_session = [{'artist': artist, 'track': track, 'timestamp': lf_track_ts_start, 'skipped': False, 'cont': False}]
                         m_subject = f"Last.fm user {username} is active: '{artist} - {track}' (after {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last), show_seconds=False)} - {get_short_date_from_ts(lf_active_ts_last)})"
                         m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}{played_for_m_body}\n\nFriend got active after being offline for {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))}{last_track_start_changed}{private_mode}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
                         m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a>{played_for_m_body_html}<br><br>Friend got active after being offline for <b>{calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))}</b>{last_track_start_changed_html}{private_mode_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
@@ -1883,10 +1890,16 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             recent_songs_list_html = []
                             for song in songs_to_show:
                                 song_date = get_date_from_ts(song['timestamp'])
-                                skipped_marker = ", SKIPPED" if song.get('skipped', False) else ""
-                                recent_songs_list.append(f"{song['artist']} - {song['track']} ({song_date}{skipped_marker})")
-                                skipped_marker_html = ", <b>SKIPPED</b>" if song.get('skipped', False) else ""
-                                recent_songs_list_html.append(f"<b>{escape(song['artist'])} - {escape(song['track'])}</b> ({song_date}{skipped_marker_html})")
+                                marker = ""
+                                marker_html = ""
+                                if song.get('cont', False):
+                                    marker = ", CONT"
+                                    marker_html = ", <b>CONT</b>"
+                                elif song.get('skipped', False):
+                                    marker = ", SKIPPED"
+                                    marker_html = ", <b>SKIPPED</b>"
+                                recent_songs_list.append(f"{song['artist']} - {song['track']} ({song_date}{marker})")
+                                recent_songs_list_html.append(f"<b>{escape(song['artist'])} - {escape(song['track'])}</b> ({song_date}{marker_html})")
                             if recent_songs_list:
                                 recent_songs_mbody = f"\n\nRecently listened songs in this session:\n" + "\n".join(recent_songs_list)
                                 recent_songs_mbody_html = f"<br><br>Recently listened songs in this session:<br>" + "<br>".join(recent_songs_list_html)
