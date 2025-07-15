@@ -406,7 +406,8 @@ def signal_handler(sig, frame):
 # Checks internet connectivity
 def check_internet(url=CHECK_INTERNET_URL, timeout=CHECK_INTERNET_TIMEOUT):
     try:
-        headers = {'User-Agent': f'pylast/{pylast.__version__}'}
+        pylast_version = getattr(pylast, '__version__', 'unknown')
+        headers = {'User-Agent': f'pylast/{pylast_version}'}
         _ = req.get(url, timeout=timeout, headers=headers)
         return True
     except req.RequestException as e:
@@ -919,7 +920,8 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
 # get_cached_token() method implemented yet for Client Credentials OAuth Flow
 def check_token_validity(token):
     url = "https://api.spotify.com/v1/browse/categories?limit=1&fields=categories.items(id)"
-    headers = {"Authorization": f"Bearer {token}", "User-Agent": f"pylast/{pylast.__version__}"}
+    pylast_version = getattr(pylast, '__version__', 'unknown')
+    headers = {"Authorization": f"Bearer {token}", "User-Agent": f"pylast/{pylast_version}"}
 
     try:
         return req.get(url, headers=headers, timeout=FUNCTION_TIMEOUT).status_code == 200
@@ -1012,7 +1014,8 @@ def spotify_search_song_trackid_duration(access_token, artist, track, album=""):
     url1 = f'https://api.spotify.com/v1/search?q={quote_plus(f"artist:{artist_sanitized} track:{track_sanitized} album:{album_sanitized}")}&type=track&limit=5'
     url2 = f'https://api.spotify.com/v1/search?q={quote_plus(f"artist:{artist_sanitized} track:{track_sanitized}")}&type=track&limit=5'
 
-    headers = {"Authorization": "Bearer " + access_token, "User-Agent": f"pylast/{pylast.__version__}"}
+    pylast_version = getattr(pylast, '__version__', 'unknown')
+    headers = {"Authorization": "Bearer " + access_token, "User-Agent": f"pylast/{pylast_version}"}
 
     sp_track_uri_id = None
     sp_track_duration = 0
@@ -1168,7 +1171,6 @@ def get_track_info(artist, track, album, network, silent=True):
             track_duration = 0
 
     return track_duration, sp_track_uri_id, duration_mark
-
 
 
 # Main function that monitors activity of the specified Last.fm user
