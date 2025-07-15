@@ -406,7 +406,8 @@ def signal_handler(sig, frame):
 # Checks internet connectivity
 def check_internet(url=CHECK_INTERNET_URL, timeout=CHECK_INTERNET_TIMEOUT):
     try:
-        _ = req.get(url, timeout=timeout)
+        headers = {'User-Agent': f'pylast/{pylast.__version__}'}
+        _ = req.get(url, timeout=timeout, headers=headers)
         return True
     except req.RequestException as e:
         print(f"* No connectivity, please check your network:\n\n{e}")
