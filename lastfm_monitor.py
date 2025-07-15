@@ -919,7 +919,7 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
 # get_cached_token() method implemented yet for Client Credentials OAuth Flow
 def check_token_validity(token):
     url = "https://api.spotify.com/v1/browse/categories?limit=1&fields=categories.items(id)"
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = {"Authorization": f"Bearer {token}", "User-Agent": f"pylast/{pylast.__version__}"}
 
     try:
         return req.get(url, headers=headers, timeout=FUNCTION_TIMEOUT).status_code == 200
@@ -1012,7 +1012,7 @@ def spotify_search_song_trackid_duration(access_token, artist, track, album=""):
     url1 = f'https://api.spotify.com/v1/search?q={quote_plus(f"artist:{artist_sanitized} track:{track_sanitized} album:{album_sanitized}")}&type=track&limit=5'
     url2 = f'https://api.spotify.com/v1/search?q={quote_plus(f"artist:{artist_sanitized} track:{track_sanitized}")}&type=track&limit=5'
 
-    headers = {"Authorization": "Bearer " + access_token}
+    headers = {"Authorization": "Bearer " + access_token, "User-Agent": f"pylast/{pylast.__version__}"}
 
     sp_track_uri_id = None
     sp_track_duration = 0
