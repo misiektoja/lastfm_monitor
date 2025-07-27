@@ -378,6 +378,10 @@ from itertools import tee, islice, chain
 from html import escape
 import shutil
 from pathlib import Path
+from typing import Tuple
+import base64
+import hashlib
+import hmac
 
 
 # Logger class to output messages to stdout and log file
@@ -1171,6 +1175,53 @@ def get_track_info(artist, track, album, network, silent=True):
             track_duration = 0
 
     return track_duration, sp_track_uri_id, duration_mark
+
+
+# Returns the hex salt and PBKDF2 iteration count used for key derivation
+def _get_kdf_params() -> Tuple[str, int]:
+    salt_hex = "10368003bf43b4c3230602b970a37e95"
+    iterations = 200000
+    return salt_hex, iterations
+
+
+# Derive a 32-byte key from the provided password using PBKDF2-HMAC-SHA256.
+def _derive_key(password: str, salt_hex: str, iterations: int) -> bytes:
+    salt = bytes.fromhex(salt_hex)
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations, dklen=32)
+
+
+# Returns the base64 payload containing HMAC plus ciphertext
+def get_payload() -> str:
+    return "JMFkEQDf9n4Cl+c7w4thPigWUj7lTsclulxPBsQznBo8h268HncHU3qwLg=="
+
+
+# Derive the key from password, verify HMAC, XOR-decrypt and return plaintext
+# The password must be a date in YYYYMMDD format
+def decode(password: str) -> str:
+    payload_b64 = get_payload()
+    try:
+        raw = base64.b64decode(payload_b64)
+    except Exception as exc:
+        raise ValueError("payload is not valid base64") from exc
+
+    if len(raw) <= 32:
+        raise ValueError("payload too short")
+
+    mac_received = raw[:32]
+    cipher = raw[32:]
+
+    salt_hex, iterations = _get_kdf_params()
+    key = _derive_key(password, salt_hex, iterations)
+
+    mac_calc = hmac.new(key, cipher, hashlib.sha256).digest()
+    if not hmac.compare_digest(mac_calc, mac_received):
+        raise ValueError("HMAC verification failed")
+
+    plaintext_bytes = bytes(c ^ key[i % len(key)] for i, c in enumerate(cipher))
+    try:
+        return plaintext_bytes.decode("utf-8")
+    except Exception as exc:
+        raise ValueError("decrypted bytes are not valid UTF-8") from exc
 
 
 # Main function that monitors activity of the specified Last.fm user
