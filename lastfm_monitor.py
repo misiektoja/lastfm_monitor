@@ -251,6 +251,15 @@ CLEAR_SCREEN = True
 
 # Value added/subtracted via signal handlers to adjust inactivity timeout (LASTFM_INACTIVITY_CHECK); in seconds
 LASTFM_INACTIVITY_CHECK_SIGNAL_VALUE = 30  # 30 seconds
+
+# Whether to show Genius lyrics URL in console and emails
+ENABLE_GENIUS_LYRICS_URL = True
+
+# Whether to show AZLyrics URL in console and emails
+ENABLE_AZLYRICS_URL = True
+
+# Whether to show Tekstowo.pl lyrics URL in console and emails
+ENABLE_TEKSTOWO_URL = True
 """
 
 # -------------------------
@@ -313,6 +322,9 @@ DISABLE_LOGGING = False
 HORIZONTAL_LINE = 0
 CLEAR_SCREEN = False
 LASTFM_INACTIVITY_CHECK_SIGNAL_VALUE = 0
+ENABLE_GENIUS_LYRICS_URL = False
+ENABLE_AZLYRICS_URL = False
+ENABLE_TEKSTOWO_URL = False
 
 exec(CONFIG_BLOCK, globals())
 
@@ -841,18 +853,59 @@ def previous_and_next(some_iterable):
     return zip(prevs, items, nexts)
 
 
-# Prepares Spotify, Apple & Genius search URLs for specified track
+# Prepares Spotify, Apple & lyrics search URLs for specified track
 def get_spotify_apple_genius_search_urls(artist, track):
     spotify_search_string = quote_plus(f"{artist} {track}")
-    genius_search_string = f"{artist} {track}"
-    if re.search(re_search_str, genius_search_string, re.IGNORECASE):
-        genius_search_string = re.sub(re_replace_str, '', genius_search_string, flags=re.IGNORECASE)
+    # Clean search string for lyrics services (remove remaster, extended, etc.)
+    lyrics_search_string = f"{artist} {track}"
+    if re.search(re_search_str, lyrics_search_string, re.IGNORECASE):
+        lyrics_search_string = re.sub(re_replace_str, '', lyrics_search_string, flags=re.IGNORECASE)
     apple_search_string = quote(f"{artist} {track}")
     spotify_search_url = f"https://open.spotify.com/search/{spotify_search_string}?si=1"
     apple_search_url = f"https://music.apple.com/pl/search?term={apple_search_string}"
-    genius_search_url = f"https://genius.com/search?q={quote_plus(genius_search_string)}"
+    genius_search_url = f"https://genius.com/search?q={quote_plus(lyrics_search_string)}"
+    azlyrics_search_url = f"https://search.azlyrics.com/search.php?q={quote_plus(lyrics_search_string)}"
+    tekstowo_search_url = f"https://www.tekstowo.pl/szukaj,{quote_plus(lyrics_search_string)}.html"
     youtube_music_search_url = f"https://music.youtube.com/search?q={spotify_search_string}"
-    return spotify_search_url, apple_search_url, genius_search_url, youtube_music_search_url
+    return spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, youtube_music_search_url
+
+
+# Formats lyrics URLs for console output based on configuration
+def format_lyrics_urls_console(genius_url, azlyrics_url, tekstowo_url):
+    lines = []
+    if ENABLE_GENIUS_LYRICS_URL:
+        lines.append(f"Genius lyrics URL:\t\t{genius_url}")
+    if ENABLE_AZLYRICS_URL:
+        lines.append(f"AZLyrics URL:\t\t\t{azlyrics_url}")
+    if ENABLE_TEKSTOWO_URL:
+        lines.append(f"Tekstowo.pl URL:\t\t{tekstowo_url}")
+    return "\n".join(lines) if lines else ""
+
+
+# Formats lyrics URLs for plain text email body based on configuration
+def format_lyrics_urls_email_text(genius_url, azlyrics_url, tekstowo_url):
+    lines = []
+    if ENABLE_GENIUS_LYRICS_URL:
+        lines.append(f"Genius lyrics URL: {genius_url}")
+    if ENABLE_AZLYRICS_URL:
+        lines.append(f"AZLyrics URL: {azlyrics_url}")
+    if ENABLE_TEKSTOWO_URL:
+        lines.append(f"Tekstowo.pl URL: {tekstowo_url}")
+    return "\n".join(lines) if lines else ""
+
+
+# Formats lyrics URLs for HTML email body based on configuration
+def format_lyrics_urls_email_html(genius_url, azlyrics_url, tekstowo_url, artist, track):
+    lines = []
+    escaped_artist = escape(artist)
+    escaped_track = escape(track)
+    if ENABLE_GENIUS_LYRICS_URL:
+        lines.append(f'Genius lyrics URL: <a href="{genius_url}">{escaped_artist} - {escaped_track}</a>')
+    if ENABLE_AZLYRICS_URL:
+        lines.append(f'AZLyrics URL: <a href="{azlyrics_url}">{escaped_artist} - {escaped_track}</a>')
+    if ENABLE_TEKSTOWO_URL:
+        lines.append(f'Tekstowo.pl URL: <a href="{tekstowo_url}">{escaped_artist} - {escaped_track}</a>')
+    return "<br>".join(lines) if lines else ""
 
 
 # Returns the list of recently played Last.fm tracks
@@ -1324,12 +1377,14 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
         if track_duration > 0:
             print(f"* Last track duration:\t\t{display_time(track_duration)}{duration_mark}")
 
-        spotify_search_url, apple_search_url, genius_search_url, youtube_music_search_url = get_spotify_apple_genius_search_urls(str(last_activity_artist), str(last_activity_track))
+        spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, youtube_music_search_url = get_spotify_apple_genius_search_urls(str(last_activity_artist), str(last_activity_track))
 
         print(f"\n* Spotify search URL:\t\t{spotify_search_url}")
         print(f"* Apple Music URL:\t\t{apple_search_url}")
         print(f"* YouTube Music URL:\t\t{youtube_music_search_url}")
-        print(f"* Genius lyrics URL:\t\t{genius_search_url}\n")
+        lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url)
+        if lyrics_output:
+            print(f"* {lyrics_output.replace(chr(10), chr(10) + '* ')}\n")
 
         print(f"*** User is OFFLINE for {calculate_timespan(int(time.time()), lf_active_ts_last, show_seconds=False)} !")
 
@@ -1355,12 +1410,14 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
         if track_duration > 0:
             print(f"Duration:\t\t\t{display_time(track_duration)}{duration_mark}")
 
-        spotify_search_url, apple_search_url, genius_search_url, youtube_music_search_url = get_spotify_apple_genius_search_urls(str(artist), str(track))
+        spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, youtube_music_search_url = get_spotify_apple_genius_search_urls(str(artist), str(track))
 
         print(f"\nSpotify search URL:\t\t{spotify_search_url}")
         print(f"Apple Music URL:\t\t{apple_search_url}")
         print(f"YouTube Music URL:\t\t{youtube_music_search_url}")
-        print(f"Genius lyrics URL:\t\t{genius_search_url}")
+        lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url)
+        if lyrics_output:
+            print(lyrics_output)
 
         print("\n*** User is currently ACTIVE !")
 
@@ -1392,8 +1449,12 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             duration_m_body_html = f"<br>Duration: {display_time(track_duration)}{duration_mark}"
 
         m_subject = f"Last.fm user {username} is active: '{artist} - {track}'"
-        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a><br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
+        lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url)
+        lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, artist, track)
+        lyrics_section_text = f"\n{lyrics_urls_text}\n" if lyrics_urls_text else "\n"
+        lyrics_section_html = f"<br>{lyrics_urls_html}<br>" if lyrics_urls_html else "<br>"
+        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}{lyrics_section_text}Last activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a>{lyrics_section_html}Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
         if ACTIVE_NOTIFICATION:
             print(f"Sending email notification to {RECEIVER_EMAIL}")
@@ -1644,12 +1705,14 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                     if track_duration > 0:
                         print(f"Duration:\t\t\t{display_time(track_duration)}{duration_mark}")
 
-                    spotify_search_url, apple_search_url, genius_search_url, youtube_music_search_url = get_spotify_apple_genius_search_urls(str(artist), str(track))
+                    spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, youtube_music_search_url = get_spotify_apple_genius_search_urls(str(artist), str(track))
 
                     print(f"\nSpotify search URL:\t\t{spotify_search_url}")
                     print(f"Apple Music URL:\t\t{apple_search_url}")
                     print(f"YouTube Music URL:\t\t{youtube_music_search_url}")
-                    print(f"Genius lyrics URL:\t\t{genius_search_url}")
+                    lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url)
+                    if lyrics_output:
+                        print(lyrics_output)
 
                     last_activity_to_save = []
                     last_activity_to_save.append(lf_track_ts_start)
@@ -1722,8 +1785,12 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                         playing_resumed_ts = lf_track_ts_start
                         recent_songs_session = [{'artist': artist, 'track': track, 'timestamp': lf_track_ts_start, 'skipped': False, 'cont': False}]
                         m_subject = f"Last.fm user {username} is active: '{artist} - {track}' (after {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last), show_seconds=False)} - {get_short_date_from_ts(lf_active_ts_last)})"
-                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}{played_for_m_body}\n\nFriend got active after being offline for {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))}{last_track_start_changed}{private_mode}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a>{played_for_m_body_html}<br><br>Friend got active after being offline for <b>{calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))}</b>{last_track_start_changed_html}{private_mode_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                        lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url)
+                        lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, artist, track)
+                        lyrics_section_text = f"\n{lyrics_urls_text}\n" if lyrics_urls_text else "\n"
+                        lyrics_section_html = f"<br>{lyrics_urls_html}<br>" if lyrics_urls_html else "<br>"
+                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}{lyrics_section_text}{played_for_m_body}\n\nFriend got active after being offline for {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))}{last_track_start_changed}{private_mode}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a>{lyrics_section_html}{played_for_m_body_html}<br><br>Friend got active after being offline for <b>{calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))}</b>{last_track_start_changed_html}{private_mode_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
                         if ACTIVE_NOTIFICATION:
                             print(f"Sending email notification to {RECEIVER_EMAIL}")
@@ -1738,8 +1805,12 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             timespan_str += f" ({timespan})"
                             timespan_str_html += f" ({timespan})"
                         m_subject = f"Last.fm user {username}: '{artist} - {track}'"
-                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}{played_for_m_body}{timespan_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a>{played_for_m_body_html}{timespan_str_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                        lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url)
+                        lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, artist, track)
+                        lyrics_section_text = f"\n{lyrics_urls_text}\n" if lyrics_urls_text else "\n"
+                        lyrics_section_html = f"<br>{lyrics_urls_html}<br>" if lyrics_urls_html else "<br>"
+                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}{lyrics_section_text}{played_for_m_body}{timespan_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a>{lyrics_section_html}{played_for_m_body_html}{timespan_str_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
 
                     if track.upper() in tracks_upper or album.upper() in tracks_upper:
                         print("\n*** Track/album matched with the list!")
@@ -1767,8 +1838,12 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             timespan_str += f" ({timespan})"
                             timespan_str_html += f" ({timespan})"
                         m_subject = f"Last.fm user {username} plays song on loop: '{artist} - {track}'"
-                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}{played_for_m_body}\n\nUser plays song on LOOP ({song_on_loop} times){timespan_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a>{played_for_m_body_html}<br><br>User plays song on LOOP (<b>{song_on_loop}</b> times){timespan_str_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                        lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url)
+                        lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, artist, track)
+                        lyrics_section_text = f"\n{lyrics_urls_text}\n" if lyrics_urls_text else "\n"
+                        lyrics_section_html = f"<br>{lyrics_urls_html}<br>" if lyrics_urls_html else "<br>"
+                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}{lyrics_section_text}{played_for_m_body}\n\nUser plays song on LOOP ({song_on_loop} times){timespan_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a>{lyrics_section_html}{played_for_m_body_html}<br><br>User plays song on LOOP (<b>{song_on_loop}</b> times){timespan_str_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
                         print(f"Sending email notification to {RECEIVER_EMAIL}")
                         send_email(m_subject, m_body, m_body_html, SMTP_SSL)
 
@@ -1959,8 +2034,14 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                                 recent_songs_mbody_html = f"<br><br>Recently listened songs in this session:<br>" + "<br>".join(recent_songs_list_html)
 
                         m_subject = f"Last.fm user {username} is inactive: '{artist} - {track}' (after {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start), show_seconds=False)}: {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True)})"
-                        m_body = f"Last played: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}\n\nUser got inactive after listening to music for {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}\nUser played music from {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep=' to ')}{paused_mbody}{listened_songs_mbody}{played_for_m_body}{recent_songs_mbody}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}\nInactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(artist)} - {escape(track)}</a><br><br>User got inactive after listening to music for <b>{calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}</b><br>User played music from <b>{get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep='</b> to <b>')}</b>{paused_mbody_html}{listened_songs_mbody_html}{played_for_m_body_html}{recent_songs_mbody_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b><br>Inactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                        # Get URLs for the last played track
+                        spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, youtube_music_search_url = get_spotify_apple_genius_search_urls(str(artist), str(track))
+                        lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url)
+                        lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, artist, track)
+                        lyrics_section_text = f"\n{lyrics_urls_text}\n" if lyrics_urls_text else "\n"
+                        lyrics_section_html = f"<br>{lyrics_urls_html}<br>" if lyrics_urls_html else "<br>"
+                        m_body = f"Last played: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}{lyrics_section_text}User got inactive after listening to music for {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}\nUser played music from {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep=' to ')}{paused_mbody}{listened_songs_mbody}{played_for_m_body}{recent_songs_mbody}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}\nInactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a>{lyrics_section_html}User got inactive after listening to music for <b>{calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}</b><br>User played music from <b>{get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep='</b> to <b>')}</b>{paused_mbody_html}{listened_songs_mbody_html}{played_for_m_body_html}{recent_songs_mbody_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b><br>Inactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
                         print(f"Sending email notification to {RECEIVER_EMAIL}")
                         send_email(m_subject, m_body, m_body_html, SMTP_SSL)
