@@ -1862,12 +1862,14 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             spotify_linux_play_song(sp_track_uri_id)
 
                     # User was offline and got active
-                    if (not lf_user_online and (lf_track_ts_start - lf_active_ts_last) > LASTFM_INACTIVITY_CHECK and lf_active_ts_last > 0) or (not lf_user_online and lf_active_ts_last > 0 and app_started_and_user_offline):
+                    # Handle case where user had no tracks initially and is becoming active for the first time
+                    if (not lf_user_online and lf_active_ts_start == 0) or (not lf_user_online and (lf_track_ts_start - lf_active_ts_last) > LASTFM_INACTIVITY_CHECK and lf_active_ts_last > 0) or (not lf_user_online and lf_active_ts_last > 0 and app_started_and_user_offline):
                         app_started_and_user_offline = False
                         last_track_start_changed = ""
                         last_track_start_changed_html = ""
                         lf_active_ts_last_old = lf_active_ts_last
-                        if last_track_start_ts > (lf_active_ts_last + 60) and (int(time.time()) - last_track_start_ts > 240):
+                        # If user had no tracks initially, lf_active_ts_last will be 0, so skip the check
+                        if lf_active_ts_last > 0 and last_track_start_ts > (lf_active_ts_last + 60) and (int(time.time()) - last_track_start_ts > 240):
                             last_track_start_changed = f"\n(last track start changed from {get_short_date_from_ts(lf_active_ts_last)} to {get_short_date_from_ts(last_track_start_ts)} - offline mode ?)"
                             last_track_start_changed_html = f"<br>(last track start changed from <b>{get_short_date_from_ts(lf_active_ts_last)}</b> to <b>{get_short_date_from_ts(last_track_start_ts)}</b> - offline mode ?)"
                             lf_active_ts_last = last_track_start_ts
@@ -1890,8 +1892,12 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             private_mode_html = f"<br><br>Duplicate entries ({p}) found, possible <b>private mode</b> (<b>{get_range_of_dates_from_tss(lf_active_ts_last_old, lf_track_ts_start, short=True)}</b>)"
                             print(f"\n*** Duplicate entries ({p}) found, possible PRIVATE MODE ({get_range_of_dates_from_tss(lf_active_ts_last_old, lf_track_ts_start, short=True)})")
 
-                        print(f"\n*** User got ACTIVE after being offline for {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))}{last_track_start_changed}")
-                        print(f"*** Last activity:\t\t{get_date_from_ts(lf_active_ts_last)}")
+                        # Only show timespan if user had previous activity
+                        if lf_active_ts_last > 0:
+                            print(f"\n*** User got ACTIVE after being offline for {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))}{last_track_start_changed}")
+                            print(f"*** Last activity:\t\t{get_date_from_ts(lf_active_ts_last)}")
+                        else:
+                            print(f"\n*** User got ACTIVE (first track)")
                         # We signal that the currently played song is the same as previous one before user got inactive, so might be continuation of previous track
                         if artist_old == artist and track_old == track:
                             signal_previous_the_same = True
@@ -1905,13 +1911,27 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                         lf_active_ts_start = lf_track_ts_start
                         playing_resumed_ts = lf_track_ts_start
                         recent_songs_session = [{'artist': artist, 'track': track, 'timestamp': lf_track_ts_start, 'skipped': False, 'cont': False}]
-                        m_subject = f"Last.fm user {username} is active: '{artist} - {track}' (after {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last), show_seconds=False)} - {get_short_date_from_ts(lf_active_ts_last)})"
+                        # Handle email subject and body - only include timespan if user had previous activity
+                        if lf_active_ts_last > 0:
+                            m_subject = f"Last.fm user {username} is active: '{artist} - {track}' (after {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last), show_seconds=False)} - {get_short_date_from_ts(lf_active_ts_last)})"
+                            offline_timespan = calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))
+                            last_activity_text = f"\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}"
+                            last_activity_html = f"<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>"
+                        else:
+                            m_subject = f"Last.fm user {username} is active: '{artist} - {track}'"
+                            offline_timespan = ""
+                            last_activity_text = ""
+                            last_activity_html = ""
                         lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url)
                         lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, artist, track)
                         lyrics_section_text = f"\n{lyrics_urls_text}" if lyrics_urls_text else ""
                         lyrics_section_html = f"<br>{lyrics_urls_html}" if lyrics_urls_html else ""
-                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}{lyrics_section_text}{played_for_m_body}\n\nFriend got active after being offline for {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))}{last_track_start_changed}{private_mode}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a>{lyrics_section_html}{played_for_m_body_html}<br><br>Friend got active after being offline for <b>{calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))}</b>{last_track_start_changed_html}{private_mode_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                        if lf_active_ts_last > 0:
+                            m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}{lyrics_section_text}{played_for_m_body}\n\nFriend got active after being offline for {offline_timespan}{last_track_start_changed}{private_mode}{last_activity_text}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+                            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a>{lyrics_section_html}{played_for_m_body_html}<br><br>Friend got active after being offline for <b>{offline_timespan}</b>{last_track_start_changed_html}{private_mode_html}{last_activity_html}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                        else:
+                            m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}{lyrics_section_text}{played_for_m_body}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+                            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a>{lyrics_section_html}{played_for_m_body_html}{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
                         if ACTIVE_NOTIFICATION:
                             print(f"Sending email notification to {RECEIVER_EMAIL}")
@@ -1921,7 +1941,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                     if (TRACK_NOTIFICATION or SONG_NOTIFICATION) and not email_sent:
                         timespan_str = f"\n\nSongs Played: {listened_songs}"
                         timespan_str_html = f"<br><br>Songs Played: {listened_songs}"
-                        if lf_track_ts_start != lf_active_ts_start:
+                        # Only show timespan if lf_active_ts_start is properly set (not 0) and different from current track start
+                        if lf_active_ts_start > 0 and lf_track_ts_start != lf_active_ts_start:
                             timespan = calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_start))
                             timespan_str += f" ({timespan})"
                             timespan_str_html += f" ({timespan})"
@@ -1954,7 +1975,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                     if song_on_loop == SONG_ON_LOOP_VALUE and SONG_ON_LOOP_NOTIFICATION:
                         timespan_str = f"\n\nSongs Played: {listened_songs}"
                         timespan_str_html = f"<br><br>Songs Played: {listened_songs}"
-                        if lf_track_ts_start != lf_active_ts_start:
+                        # Only show timespan if lf_active_ts_start is properly set (not 0) and different from current track start
+                        if lf_active_ts_start > 0 and lf_track_ts_start != lf_active_ts_start:
                             timespan = calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_start))
                             timespan_str += f" ({timespan})"
                             timespan_str_html += f" ({timespan})"
@@ -1983,7 +2005,11 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                         if lf_track_ts_start == lf_active_ts_start:
                             print(f"\nSongs Played:\t\t\t{listened_songs}")
                         else:
-                            print(f"\nSongs Played:\t\t\t{listened_songs} ({calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_start))})")
+                            # Only show timespan if lf_active_ts_start is properly set (not 0) and different from current track start
+                            if lf_active_ts_start > 0 and lf_track_ts_start != lf_active_ts_start:
+                                print(f"\nSongs Played:\t\t\t{listened_songs} ({calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_start))})")
+                            else:
+                                print(f"\nSongs Played:\t\t\t{listened_songs}")
 
                     print_cur_ts("\nTimestamp:\t\t\t")
                 # Track has not changed, user is online and continues playing
