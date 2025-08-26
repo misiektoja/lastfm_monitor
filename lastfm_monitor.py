@@ -1347,122 +1347,167 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
         print(f"* Error: {e}")
         sys.exit(1)
 
-    last_track_start_ts_old2 = int(recent_tracks[0].timestamp)
-    lf_track_ts_start_old = last_track_start_ts_old2
-
-    # User is offline (does not play music at the moment)
-    if new_track is None:
-        app_started_and_user_offline = True
-        playing_track = None
+    # Handle case where user has no tracks yet (fresh account)
+    if not recent_tracks or len(recent_tracks) == 0:
+        print("\n*** User has no tracks yet (fresh account). Waiting for first track to appear...\n")
+        last_track_start_ts_old2 = 0
+        lf_track_ts_start_old = 0
         last_track_start_ts_old = 0
-        lf_user_online = False
-        lf_active_ts_last = int(recent_tracks[0].timestamp)
-        if lf_active_ts_last >= last_activity_ts:
-            last_activity_artist = recent_tracks[0].track.artist
-            last_activity_track = recent_tracks[0].track.title
-        elif lf_active_ts_last < last_activity_ts and last_activity_ts > 0:
-            lf_active_ts_last = last_activity_ts
-
-        last_activity_dt = datetime.fromtimestamp(lf_active_ts_last).strftime("%d %b %Y, %H:%M:%S")
-        last_activity_ts_weekday = str(calendar.day_abbr[(datetime.fromtimestamp(lf_active_ts_last)).weekday()])
-
-        artist_old = str(last_activity_artist)
-        track_old = str(last_activity_track)
-
-        print(f"* Last activity:\t\t{last_activity_ts_weekday} {last_activity_dt}")
-        print(f"* Last track:\t\t\t{last_activity_artist} - {last_activity_track}")
-
-        track_duration, sp_track_uri_id, duration_mark = get_track_info(last_activity_artist, last_activity_track, "", network, silent=False)
-
-        if track_duration > 0:
-            print(f"* Last track duration:\t\t{display_time(track_duration)}{duration_mark}")
-
-        spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, youtube_music_search_url = get_spotify_apple_genius_search_urls(str(last_activity_artist), str(last_activity_track))
-
-        print(f"\n* Spotify search URL:\t\t{spotify_search_url}")
-        print(f"* Apple Music URL:\t\t{apple_search_url}")
-        print(f"* YouTube Music URL:\t\t{youtube_music_search_url}")
-        lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url)
-        if lyrics_output:
-            print(f"* {lyrics_output.replace(chr(10), chr(10) + '* ')}\n")
-
-        print(f"*** User is OFFLINE for {calculate_timespan(int(time.time()), lf_active_ts_last, show_seconds=False)} !")
-
-    # User is online (plays music at the moment)
+        
+        # If user is currently playing music but has no history yet, handle it
+        if new_track is not None:
+            app_started_and_user_offline = False
+            lf_active_ts_start = int(time.time())
+            lf_active_ts_last = lf_active_ts_start
+            lf_track_ts_start = lf_active_ts_start
+            lf_track_ts_start_after_resume = lf_active_ts_start
+            playing_resumed_ts = lf_active_ts_start
+            song_on_loop = 1
+            artist = str(new_track.artist)
+            track = str(new_track.title)
+            album = str(new_track.info['album'])
+            artist_old = artist
+            track_old = track
+            last_activity_artist = artist
+            last_activity_track = track
+            playing_track = new_track
+            lf_user_online = True
+            print(f"\nTrack:\t\t\t\t{artist} - {track}")
+            print(f"Album:\t\t\t\t{album}")
+            print("\n*** User is currently ACTIVE (first track) !")
+        else:
+            app_started_and_user_offline = True
+            playing_track = None
+            lf_user_online = False
+            lf_active_ts_last = 0
+            last_activity_artist = ""
+            last_activity_track = ""
+            artist_old = ""
+            track_old = ""
+            print(f"* Last activity:\t\tNo tracks yet")
+            print(f"* Last track:\t\t\tNo tracks yet")
+            print(f"\n*** User is OFFLINE (no tracks yet) !")
     else:
-        app_started_and_user_offline = False
-        lf_active_ts_start = int(time.time())
-        lf_active_ts_last = lf_active_ts_start
-        lf_track_ts_start = lf_active_ts_start
-        lf_track_ts_start_after_resume = lf_active_ts_start
-        playing_resumed_ts = lf_active_ts_start
-        song_on_loop = 1
-        artist = str(new_track.artist)
-        track = str(new_track.title)
-        album = str(new_track.info['album'])
-        artist_old = artist
-        track_old = track
-        print(f"\nTrack:\t\t\t\t{artist} - {track}")
-        print(f"Album:\t\t\t\t{album}")
+        last_track_start_ts_old2 = int(recent_tracks[0].timestamp)
+        lf_track_ts_start_old = last_track_start_ts_old2
 
-        track_duration, sp_track_uri_id, duration_mark = get_track_info(artist, track, album, network, silent=False)
+        # User is offline (does not play music at the moment)
+        if new_track is None:
+            app_started_and_user_offline = True
+            playing_track = None
+            last_track_start_ts_old = 0
+            lf_user_online = False
+            lf_active_ts_last = int(recent_tracks[0].timestamp)
+            if lf_active_ts_last >= last_activity_ts:
+                last_activity_artist = recent_tracks[0].track.artist
+                last_activity_track = recent_tracks[0].track.title
+            elif lf_active_ts_last < last_activity_ts and last_activity_ts > 0:
+                lf_active_ts_last = last_activity_ts
 
-        if track_duration > 0:
-            print(f"Duration:\t\t\t{display_time(track_duration)}{duration_mark}")
+            last_activity_dt = datetime.fromtimestamp(lf_active_ts_last).strftime("%d %b %Y, %H:%M:%S")
+            last_activity_ts_weekday = str(calendar.day_abbr[(datetime.fromtimestamp(lf_active_ts_last)).weekday()])
 
-        spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, youtube_music_search_url = get_spotify_apple_genius_search_urls(str(artist), str(track))
+            artist_old = str(last_activity_artist)
+            track_old = str(last_activity_track)
 
-        print(f"\nSpotify search URL:\t\t{spotify_search_url}")
-        print(f"Apple Music URL:\t\t{apple_search_url}")
-        print(f"YouTube Music URL:\t\t{youtube_music_search_url}")
-        lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url)
-        if lyrics_output:
-            print(lyrics_output)
+            print(f"* Last activity:\t\t{last_activity_ts_weekday} {last_activity_dt}")
+            print(f"* Last track:\t\t\t{last_activity_artist} - {last_activity_track}")
 
-        print("\n*** User is currently ACTIVE !")
+            track_duration, sp_track_uri_id, duration_mark = get_track_info(last_activity_artist, last_activity_track, "", network, silent=False)
 
-        listened_songs = 1
-        recent_songs_session = [{'artist': artist, 'track': track, 'timestamp': lf_track_ts_start, 'skipped': False, 'cont': False}]
+            if track_duration > 0:
+                print(f"* Last track duration:\t\t{display_time(track_duration)}{duration_mark}")
 
-        last_activity_to_save = []
-        last_activity_to_save.append(lf_track_ts_start)
-        last_activity_to_save.append(artist)
-        last_activity_to_save.append(track)
-        last_activity_to_save.append(album)
+            spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, youtube_music_search_url = get_spotify_apple_genius_search_urls(str(last_activity_artist), str(last_activity_track))
 
-        try:
-            with open(lastfm_last_activity_file, 'w', encoding="utf-8") as f:
-                json.dump(last_activity_to_save, f, indent=2)
-        except Exception as e:
-            print(f"* Cannot save last status to '{lastfm_last_activity_file}' file: {e}")
+            print(f"\n* Spotify search URL:\t\t{spotify_search_url}")
+            print(f"* Apple Music URL:\t\t{apple_search_url}")
+            print(f"* YouTube Music URL:\t\t{youtube_music_search_url}")
+            lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url)
+            if lyrics_output:
+                print(f"* {lyrics_output.replace(chr(10), chr(10) + '* ')}\n")
 
-        try:
-            if csv_file_name:
-                write_csv_entry(csv_file_name, datetime.fromtimestamp(int(lf_track_ts_start)), artist, track, album)
-        except Exception as e:
-            print(f"* Error: {e}")
+            print(f"*** User is OFFLINE for {calculate_timespan(int(time.time()), lf_active_ts_last, show_seconds=False)} !")
 
-        duration_m_body = ""
-        duration_m_body_html = ""
-        if track_duration > 0:
-            duration_m_body = f"\nDuration: {display_time(track_duration)}{duration_mark}"
-            duration_m_body_html = f"<br>Duration: {display_time(track_duration)}{duration_mark}"
+        # User is online (plays music at the moment)
+        else:
+            app_started_and_user_offline = False
+            lf_active_ts_start = int(time.time())
+            lf_active_ts_last = lf_active_ts_start
+            lf_track_ts_start = lf_active_ts_start
+            lf_track_ts_start_after_resume = lf_active_ts_start
+            playing_resumed_ts = lf_active_ts_start
+            song_on_loop = 1
+            artist = str(new_track.artist)
+            track = str(new_track.title)
+            album = str(new_track.info['album'])
+            artist_old = artist
+            track_old = track
+            print(f"\nTrack:\t\t\t\t{artist} - {track}")
+            print(f"Album:\t\t\t\t{album}")
 
-        m_subject = f"Last.fm user {username} is active: '{artist} - {track}'"
-        lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url)
-        lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, artist, track)
-        lyrics_section_text = f"\n{lyrics_urls_text}\n\n" if lyrics_urls_text else "\n\n"
-        lyrics_section_html = f"<br>{lyrics_urls_html}<br><br>" if lyrics_urls_html else "<br><br>"
-        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}{lyrics_section_text}Last activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a>{lyrics_section_html}Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
+            track_duration, sp_track_uri_id, duration_mark = get_track_info(artist, track, album, network, silent=False)
 
-        if ACTIVE_NOTIFICATION:
-            print(f"Sending email notification to {RECEIVER_EMAIL}")
-            send_email(m_subject, m_body, m_body_html, SMTP_SSL)
+            if track_duration > 0:
+                print(f"Duration:\t\t\t{display_time(track_duration)}{duration_mark}")
 
-        playing_track = new_track
-        last_track_start_ts_old = int(recent_tracks[0].timestamp)
-        lf_user_online = True
+            spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, youtube_music_search_url = get_spotify_apple_genius_search_urls(str(artist), str(track))
+
+            print(f"\nSpotify search URL:\t\t{spotify_search_url}")
+            print(f"Apple Music URL:\t\t{apple_search_url}")
+            print(f"YouTube Music URL:\t\t{youtube_music_search_url}")
+            lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url)
+            if lyrics_output:
+                print(lyrics_output)
+
+            print("\n*** User is currently ACTIVE !")
+
+            listened_songs = 1
+            recent_songs_session = [{'artist': artist, 'track': track, 'timestamp': lf_track_ts_start, 'skipped': False, 'cont': False}]
+
+            last_activity_to_save = []
+            last_activity_to_save.append(lf_track_ts_start)
+            last_activity_to_save.append(artist)
+            last_activity_to_save.append(track)
+            last_activity_to_save.append(album)
+
+            try:
+                with open(lastfm_last_activity_file, 'w', encoding="utf-8") as f:
+                    json.dump(last_activity_to_save, f, indent=2)
+            except Exception as e:
+                print(f"* Cannot save last status to '{lastfm_last_activity_file}' file: {e}")
+
+            try:
+                if csv_file_name:
+                    write_csv_entry(csv_file_name, datetime.fromtimestamp(int(lf_track_ts_start)), artist, track, album)
+            except Exception as e:
+                print(f"* Error: {e}")
+
+            duration_m_body = ""
+            duration_m_body_html = ""
+            if track_duration > 0:
+                duration_m_body = f"\nDuration: {display_time(track_duration)}{duration_mark}"
+                duration_m_body_html = f"<br>Duration: {display_time(track_duration)}{duration_mark}"
+
+            m_subject = f"Last.fm user {username} is active: '{artist} - {track}'"
+            lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url)
+            lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, artist, track)
+            lyrics_section_text = f"\n{lyrics_urls_text}\n\n" if lyrics_urls_text else "\n\n"
+            lyrics_section_html = f"<br>{lyrics_urls_html}<br><br>" if lyrics_urls_html else "<br><br>"
+            m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}{lyrics_section_text}Last activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a>{lyrics_section_html}Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
+
+            if ACTIVE_NOTIFICATION:
+                print(f"Sending email notification to {RECEIVER_EMAIL}")
+                send_email(m_subject, m_body, m_body_html, SMTP_SSL)
+
+            playing_track = new_track
+            # If user has tracks, use the first one's timestamp, otherwise use current time
+            if recent_tracks and len(recent_tracks) > 0:
+                last_track_start_ts_old = int(recent_tracks[0].timestamp)
+            else:
+                last_track_start_ts_old = lf_active_ts_start
+            lf_user_online = True
 
         # If tracking functionality is enabled then play the current song via Spotify client
         if TRACK_SONGS and sp_track_uri_id:
@@ -1477,14 +1522,17 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
     p = 0
     duplicate_entries = False
     print("\nList of recently listened tracks:\n")
-    for previous, t, nxt in previous_and_next(reversed(recent_tracks)):
-        i += 1
-        print(f'{i}\t{datetime.fromtimestamp(int(t.timestamp)).strftime("%d %b %Y, %H:%M:%S")}\t{calendar.day_abbr[(datetime.fromtimestamp(int(t.timestamp))).weekday()]}\t{t.track}')
-        if previous:
-            if previous.timestamp == t.timestamp:
-                p += 1
-                duplicate_entries = True
-                print("DUPLICATE ENTRY")
+    if not recent_tracks or len(recent_tracks) == 0:
+        print("(No tracks yet)")
+    else:
+        for previous, t, nxt in previous_and_next(reversed(recent_tracks)):
+            i += 1
+            print(f'{i}\t{datetime.fromtimestamp(int(t.timestamp)).strftime("%d %b %Y, %H:%M:%S")}\t{calendar.day_abbr[(datetime.fromtimestamp(int(t.timestamp))).weekday()]}\t{t.track}')
+            if previous:
+                if previous.timestamp == t.timestamp:
+                    p += 1
+                    duplicate_entries = True
+                    print("DUPLICATE ENTRY")
 
     if duplicate_entries:
         print(f"*** Duplicate entries ({p}) found, possible PRIVATE MODE")
@@ -1501,6 +1549,11 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
     while True:
         try:
             recent_tracks = lastfm_get_recent_tracks(username, network, 1)
+            # Handle case where user still has no tracks
+            if not recent_tracks or len(recent_tracks) == 0:
+                # Wait for first track to appear
+                time.sleep(LASTFM_ACTIVE_CHECK_INTERVAL)
+                continue
             last_track_start_ts = int(recent_tracks[0].timestamp)
             new_track = user.get_now_playing()
             email_sent = False
@@ -1509,6 +1562,11 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
 
             # Detecting new Last.fm entries when user is offline
             if not lf_user_online:
+                # If this is the first track appearing (user had no tracks before)
+                if last_track_start_ts_old2 == 0:
+                    print("\n*** First track appeared! Starting monitoring...\n")
+                    last_track_start_ts_old2 = last_track_start_ts
+                    lf_track_ts_start_old = last_track_start_ts
                 if last_track_start_ts > last_track_start_ts_old2:
                     print("\n*** New last.fm entries showed up while user was offline!\n")
                     lf_track_ts_start_old = last_track_start_ts
