@@ -1374,7 +1374,70 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             lf_user_online = True
             print(f"\nTrack:\t\t\t\t{artist} - {track}")
             print(f"Album:\t\t\t\t{album}")
+
+            track_duration, sp_track_uri_id, duration_mark = get_track_info(artist, track, album, network, silent=False)
+
+            if track_duration > 0:
+                print(f"Duration:\t\t\t{display_time(track_duration)}{duration_mark}")
+
+            spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, youtube_music_search_url = get_spotify_apple_genius_search_urls(str(artist), str(track))
+
+            print(f"\nSpotify search URL:\t\t{spotify_search_url}")
+            print(f"Apple Music URL:\t\t{apple_search_url}")
+            print(f"YouTube Music URL:\t\t{youtube_music_search_url}")
+            lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url)
+            if lyrics_output:
+                print(lyrics_output)
+
             print("\n*** User is currently ACTIVE (first track) !")
+
+            listened_songs = 1
+            recent_songs_session = [{'artist': artist, 'track': track, 'timestamp': lf_track_ts_start, 'skipped': False, 'cont': False}]
+
+            last_activity_to_save = []
+            last_activity_to_save.append(lf_track_ts_start)
+            last_activity_to_save.append(artist)
+            last_activity_to_save.append(track)
+            last_activity_to_save.append(album)
+
+            try:
+                with open(lastfm_last_activity_file, 'w', encoding="utf-8") as f:
+                    json.dump(last_activity_to_save, f, indent=2)
+            except Exception as e:
+                print(f"* Cannot save last status to '{lastfm_last_activity_file}' file: {e}")
+
+            try:
+                if csv_file_name:
+                    write_csv_entry(csv_file_name, datetime.fromtimestamp(int(lf_track_ts_start)), artist, track, album)
+            except Exception as e:
+                print(f"* Error: {e}")
+
+            duration_m_body = ""
+            duration_m_body_html = ""
+            if track_duration > 0:
+                duration_m_body = f"\nDuration: {display_time(track_duration)}{duration_mark}"
+                duration_m_body_html = f"<br>Duration: {display_time(track_duration)}{duration_mark}"
+
+            m_subject = f"Last.fm user {username} is active: '{artist} - {track}'"
+            lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url)
+            lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, artist, track)
+            lyrics_section_text = f"\n{lyrics_urls_text}\n\n" if lyrics_urls_text else "\n\n"
+            lyrics_section_html = f"<br>{lyrics_urls_html}<br><br>" if lyrics_urls_html else "<br><br>"
+            m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify search URL: {spotify_search_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}{lyrics_section_text}Last activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{spotify_search_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {escape(album)}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a>{lyrics_section_html}Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
+
+            if ACTIVE_NOTIFICATION:
+                print(f"Sending email notification to {RECEIVER_EMAIL}")
+                send_email(m_subject, m_body, m_body_html, SMTP_SSL)
+
+            # If tracking functionality is enabled then play the current song via Spotify client
+            if TRACK_SONGS and sp_track_uri_id:
+                if platform.system() == 'Darwin':       # macOS
+                    spotify_macos_play_song(sp_track_uri_id)
+                elif platform.system() == 'Windows':    # Windows
+                    spotify_win_play_song(sp_track_uri_id)
+                else:                                   # Linux variants
+                    spotify_linux_play_song(sp_track_uri_id)
         else:
             app_started_and_user_offline = True
             playing_track = None
