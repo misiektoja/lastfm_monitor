@@ -1572,14 +1572,15 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                 last_track_start_ts_old = lf_active_ts_start
             lf_user_online = True
 
-        # If tracking functionality is enabled then play the current song via Spotify client
-        if TRACK_SONGS and sp_track_uri_id:
-            if platform.system() == 'Darwin':       # macOS
-                spotify_macos_play_song(sp_track_uri_id)
-            elif platform.system() == 'Windows':    # Windows
-                spotify_win_play_song(sp_track_uri_id)
-            else:                                   # Linux variants
-                spotify_linux_play_song(sp_track_uri_id)
+            # If tracking functionality is enabled then play the current song via Spotify client
+            # Only play when user is online and actively playing
+            if TRACK_SONGS and sp_track_uri_id:
+                if platform.system() == 'Darwin':       # macOS
+                    spotify_macos_play_song(sp_track_uri_id)
+                elif platform.system() == 'Windows':    # Windows
+                    spotify_win_play_song(sp_track_uri_id)
+                else:                                   # Linux variants
+                    spotify_linux_play_song(sp_track_uri_id)
 
     i = 0
     p = 0
