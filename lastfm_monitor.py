@@ -1787,15 +1787,15 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
 
             spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(last_activity_artist), str(last_activity_track), "", network)
 
-            print(f"\n* Spotify URL:\t\t\t{spotify_search_url}")
-            print(f"* Last.fm URL:\t\t\t{lastfm_url}")
+            print(f"\nSpotify URL:\t\t\t{spotify_search_url}")
+            print(f"Last.fm URL:\t\t\t{lastfm_url}")
             if lastfm_album_url:
-                print(f"* Last.fm album URL:\t\t{lastfm_album_url}")
-            print(f"* Apple Music URL:\t\t{apple_search_url}")
-            print(f"* YouTube Music URL:\t\t{youtube_music_search_url}")
+                print(f"Last.fm album URL:\t\t{lastfm_album_url}")
+            print(f"Apple Music URL:\t\t{apple_search_url}")
+            print(f"YouTube Music URL:\t\t{youtube_music_search_url}")
             lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
             if lyrics_output:
-                print(f"* {lyrics_output.replace(chr(10), chr(10) + '* ')}\n")
+                print(f"{lyrics_output}\n")
 
             print(f"*** User is OFFLINE for {calculate_timespan(int(time.time()), lf_active_ts_last, show_seconds=False)} !")
 
