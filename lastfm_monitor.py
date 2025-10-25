@@ -991,27 +991,242 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
     except Exception as e:
         print(f"* Error: {e}")
 
-    last_played = 0
+    # Helper function to shorten strings in the middle
+    def _shorten_middle(s, max_len, ellipsis="..."):
+        if s is None:
+            return ""
+        s = str(s)
+        if len(s) <= max_len:
+            return s
+        keep = max_len - len(ellipsis)
+        if keep <= 0:
+            return ellipsis[:max_len]
+        left = keep // 2
+        right = keep - left
+        return f"{s[:left]}{ellipsis}{s[-right:]}"
 
-    i = 0
+    # Collect track data and identify duplicates
+    track_entries = []
+    last_played = 0
     p = 0
     duplicate_entries = False
+
     for previous, t, nxt in previous_and_next(reversed(recent_tracks)):
-        i += 1
+        i = len(track_entries) + 1
         if i == len(recent_tracks):
             last_played = int(t.timestamp)
-        print(f'{i}\t{datetime.fromtimestamp(int(t.timestamp)).strftime("%d %b %Y, %H:%M:%S")}\t{calendar.day_abbr[(datetime.fromtimestamp(int(t.timestamp))).weekday()]}\t{t.track}')
+
+        artist = str(t.track.artist) if t.track.artist else ""
+        title = str(t.track.title) if t.track.title else ""
+        album = str(t.album) if t.album else ""
+        timestamp = int(t.timestamp)
+        date_str = datetime.fromtimestamp(timestamp).strftime("%d %b %Y, %H:%M:%S")
+        day_str = calendar.day_abbr[datetime.fromtimestamp(timestamp).weekday()]
+
+        is_duplicate = False
+        if previous and previous.timestamp == t.timestamp:
+            p += 1
+            duplicate_entries = True
+            is_duplicate = True
+
+        track_entries.append({
+            'num': i,
+            'artist': artist,
+            'title': title,
+            'album': album,
+            'date': date_str,
+            'day': day_str,
+            'is_duplicate': is_duplicate
+        })
+
         try:
             if csv_file_name:
-                write_csv_entry(csv_file_name, datetime.fromtimestamp(int(t.timestamp)), str(t.track.artist), str(t.track.title), str(t.album))
+                write_csv_entry(csv_file_name, datetime.fromtimestamp(timestamp), artist, title, album)
         except Exception as e:
             print(f"* Error: {e}")
-        if previous:
-            if previous.timestamp == t.timestamp:
-                p += 1
-                duplicate_entries = True
-                print("DUPLICATE ENTRY")
-    print("─" * HORIZONTAL_LINE)
+
+    # Calculate column widths based on terminal size
+    try:
+        term_width = shutil.get_terminal_size(fallback=(100, 24)).columns
+    except Exception:
+        term_width = 100
+
+    w_num = 4
+    w_day = 4
+    w_date = 24
+
+    # Find the maximum lengths needed for artist, title, and album
+    max_artist_len = 0
+    max_title_len = 0
+    max_album_len = 0
+    for entry in track_entries:
+        artist_len = len(str(entry['artist'])) if entry['artist'] else 0
+        title_len = len(str(entry['title'])) if entry['title'] else 0
+        album_len = len(str(entry['album'])) if entry['album'] else 0
+        if artist_len > max_artist_len:
+            max_artist_len = artist_len
+        if title_len > max_title_len:
+            max_title_len = title_len
+        if album_len > max_album_len:
+            max_album_len = album_len
+    
+    # Calculate spacing and fixed widths for table width calculation
+    # Format: "#  Day  Date/Time  Artist  Title  Album"
+    # Total spacing: 2 + 2 + 2 + 2 + 2 = 10 spaces
+    spacing_between_cols = 2
+    total_spacing = 5 * spacing_between_cols  # 5 gaps between 6 columns
+    fixed_cols_width = w_num + w_day + w_date
+
+    # Calculate available width for variable columns (artist, title, album)
+    available_width = term_width - fixed_cols_width - total_spacing
+
+    # Allocate space: prioritize artist and title, but always ensure album is visible
+    # Ensure minimum widths
+    w_artist_min = 15
+    w_title_min = 15
+    w_album_min = 20  # Album must always be visible with at least this width
+    
+    # Calculate ideal widths (what we'd like if we had unlimited space)
+    ideal_artist = max(w_artist_min, max_artist_len)
+    ideal_title = max(w_title_min, max_title_len)
+    ideal_album = max(w_album_min, max_album_len)
+    
+    # Strategy: Always reserve minimum for album, then prioritize artist and title
+    # First, ensure we have enough space for minimums
+    min_total_needed = w_artist_min + w_title_min + w_album_min
+    if available_width < min_total_needed:
+        # Very narrow terminal: scale everything proportionally but keep minimums
+        scale = available_width / min_total_needed
+        w_artist = max(10, int(w_artist_min * scale))  # Absolute minimum 10
+        w_title = max(10, int(w_title_min * scale))
+        w_album = max(10, int(w_album_min * scale))
+        # Distribute any remainder
+        remaining = available_width - (w_artist + w_title + w_album)
+        if remaining > 0:
+            # Give remainder to title (highest priority after artist)
+            w_title += remaining
+    else:
+        # We have at least minimum space - allocate intelligently
+        # Always reserve minimum for album first
+        space_for_artist_title = available_width - w_album_min
+        
+        # Calculate ideal needs for artist and title
+        if max_artist_len < w_artist_min:
+            # Artist is shorter than minimum - use actual length, give extra to title
+            ideal_artist_actual = max_artist_len
+            extra_for_title = w_artist_min - max_artist_len
+            ideal_title_actual = max(w_title_min, max_title_len + extra_for_title)
+        else:
+            ideal_artist_actual = ideal_artist
+            ideal_title_actual = ideal_title
+        
+        ideal_artist_title_needed = ideal_artist_actual + ideal_title_actual
+        
+        if space_for_artist_title >= ideal_artist_title_needed:
+            # Plenty of space: give artist and title their ideal lengths
+            w_artist = ideal_artist_actual
+            w_title = ideal_title_actual
+            # Album gets what's left (at least minimum, up to ideal)
+            remaining_for_album = available_width - (w_artist + w_title)
+            w_album = min(ideal_album, remaining_for_album)
+        elif space_for_artist_title >= w_artist_min + w_title_min:
+            # Can fit minimums, but need to scale artist/title proportionally
+            if max_artist_len + max_title_len > 0:
+                # Scale proportionally based on their ideal lengths
+                total_ideal = ideal_artist_actual + ideal_title_actual
+                w_artist = int(ideal_artist_actual * space_for_artist_title / total_ideal)
+                # Ensure minimums
+                if max_artist_len < w_artist_min:
+                    w_artist = min(w_artist, max_artist_len)
+                else:
+                    w_artist = max(w_artist, w_artist_min)
+                w_title = max(w_title_min, space_for_artist_title - w_artist)
+                # Use all available space
+                if w_artist + w_title < space_for_artist_title:
+                    w_title = space_for_artist_title - w_artist
+            else:
+                w_artist = w_artist_min if max_artist_len >= w_artist_min else max_artist_len
+                w_title = w_title_min
+            w_album = w_album_min
+        else:
+            # Very constrained: use minimums for all
+            w_artist = w_artist_min if max_artist_len >= w_artist_min else max_artist_len
+            w_title = w_title_min
+            w_album = w_album_min
+    
+    # Final verification: ensure total width doesn't exceed terminal width
+    total_row_width = w_num + w_day + w_date + w_artist + w_title + w_album + total_spacing
+    if total_row_width > term_width:
+        # We need to reduce, but album must stay at minimum
+        excess = total_row_width - term_width
+        # Try to reduce album first, but not below minimum
+        if w_album > w_album_min:
+            reduction = min(excess, w_album - w_album_min)
+            w_album -= reduction
+            excess -= reduction
+        
+        # If still too wide, reduce artist and title proportionally
+        if excess > 0:
+            total_row_width = w_num + w_day + w_date + w_artist + w_title + w_album + total_spacing
+            if total_row_width > term_width:
+                excess = total_row_width - term_width
+                current_artist_title = w_artist + w_title
+                if current_artist_title > excess:
+                    # Scale proportionally, but ensure album stays at minimum
+                    scale = (current_artist_title - excess) / current_artist_title
+                    w_artist = max(10, int(w_artist * scale))  # Absolute minimum 10
+                    w_title = max(10, int(w_title * scale))
+                    # Ensure album is at minimum
+                    w_album = w_album_min
+
+    # Print table header
+    if track_entries:
+        print()
+        hdr = (
+            f"{'#'.ljust(w_num)}  "
+            f"{'Day'.ljust(w_day)}  "
+            f"{'Date/Time'.ljust(w_date)}  "
+            f"{'Artist'.ljust(w_artist)}  "
+            f"{'Title'.ljust(w_title)}  "
+            f"{'Album'.ljust(w_album)}"
+        )
+        sep = (
+            f"{'-' * w_num}  "
+            f"{'-' * w_day}  "
+            f"{'-' * w_date}  "
+            f"{'-' * w_artist}  "
+            f"{'-' * w_title}  "
+            f"{'-' * w_album}"
+        )
+        print(hdr)
+        print(sep)
+
+        # Print table rows
+        for entry in track_entries:
+            # For duplicates, reserve space for [DUP] prefix
+            dup_prefix_len = 6  # "[DUP] "
+            if entry['is_duplicate']:
+                artist_fmt = _shorten_middle(entry['artist'], w_artist - dup_prefix_len)
+                title_fmt = _shorten_middle(entry['title'], w_title - dup_prefix_len)
+                artist_fmt = f"[DUP] {artist_fmt}"
+                title_fmt = f"[DUP] {title_fmt}"
+            else:
+                artist_fmt = _shorten_middle(entry['artist'], w_artist)
+                title_fmt = _shorten_middle(entry['title'], w_title)
+            album_fmt = _shorten_middle(entry['album'], w_album)
+
+            row = (
+                f"{str(entry['num']).ljust(w_num)}  "
+                f"{entry['day'].ljust(w_day)}  "
+                f"{entry['date'].ljust(w_date)}  "
+                f"{artist_fmt.ljust(w_artist)}  "
+                f"{title_fmt.ljust(w_title)}  "
+                f"{album_fmt.ljust(w_album)}"
+            )
+            print(row)
+
+    # Use the calculated table width for the horizontal line
+    print("─" * total_row_width)
     if last_played > 0 and not new_track:
         print(f"*** User played last time {calculate_timespan(int(time.time()), last_played, show_seconds=True)} ago! ({get_date_from_ts(last_played)})")
 
