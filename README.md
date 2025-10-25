@@ -16,6 +16,7 @@ lastfm_monitor is a tool for real-time monitoring of Last.fm users' music activi
 - Support for detecting offline mode
 - Support for detecting Spotify's private mode (not 100% accurate)
 - Ability to control the running copy of the script via signals
+- Functional, procedural Python (minimal OOP)
 
 <p align="center">
    <img src="https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/assets/lastfm_monitor.png" alt="lastfm_monitor_screenshot" width="90%"/>
