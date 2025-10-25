@@ -261,6 +261,13 @@ ENABLE_AZLYRICS_URL = False
 # Whether to show Tekstowo.pl lyrics URL in console and emails
 ENABLE_TEKSTOWO_URL = False
 
+# Whether to show Musixmatch lyrics URL in console and emails
+# Note: Musixmatch requires users to be logged in to their account in the web browser to use the search functionality
+ENABLE_MUSIXMATCH_URL = False
+
+# Whether to show Lyrics.com lyrics URL in console and emails
+ENABLE_LYRICS_COM_URL = False
+
 # Whether to use Last.fm URL in "Last played:" field in HTML email notifications (default: True)
 # When True: "Last played:" uses Last.fm URL and the secondary URL field shows Spotify URL
 # When False: "Last played:" uses Spotify URL and the secondary URL field shows Last.fm URL (old behavior)
@@ -330,6 +337,8 @@ LASTFM_INACTIVITY_CHECK_SIGNAL_VALUE = 0
 ENABLE_GENIUS_LYRICS_URL = False
 ENABLE_AZLYRICS_URL = False
 ENABLE_TEKSTOWO_URL = False
+ENABLE_MUSIXMATCH_URL = False
+ENABLE_LYRICS_COM_URL = False
 USE_LASTFM_URL_IN_LAST_PLAYED = False
 
 exec(CONFIG_BLOCK, globals())
@@ -872,6 +881,8 @@ def get_spotify_apple_genius_search_urls(artist, track, album=None, network=None
     genius_search_url = f"https://genius.com/search?q={quote_plus(lyrics_search_string)}"
     azlyrics_search_url = f"https://www.azlyrics.com/search/?q={quote_plus(lyrics_search_string)}"
     tekstowo_search_url = f"https://www.tekstowo.pl/szukaj,{quote_plus(lyrics_search_string)}.html"
+    musixmatch_search_url = f"https://www.musixmatch.com/search?query={quote_plus(lyrics_search_string)}"
+    lyrics_com_search_url = f"https://www.lyrics.com/serp.php?st={quote_plus(lyrics_search_string)}&qtype=1"
     youtube_music_search_url = f"https://music.youtube.com/search?q={spotify_search_string}"
     
     # Get Last.fm URL - use track object if available, otherwise construct manually
@@ -921,11 +932,11 @@ def get_spotify_apple_genius_search_urls(artist, track, album=None, network=None
             except Exception:
                 lastfm_album_url = ""
 
-    return spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url
+    return spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url
 
 
 # Formats lyrics URLs for console output based on configuration
-def format_lyrics_urls_console(genius_url, azlyrics_url, tekstowo_url):
+def format_lyrics_urls_console(genius_url, azlyrics_url, tekstowo_url, musixmatch_url, lyrics_com_url):
     lines = []
     if ENABLE_GENIUS_LYRICS_URL:
         lines.append(f"Genius lyrics URL:\t\t{genius_url}")
@@ -933,11 +944,15 @@ def format_lyrics_urls_console(genius_url, azlyrics_url, tekstowo_url):
         lines.append(f"AZLyrics URL:\t\t\t{azlyrics_url}")
     if ENABLE_TEKSTOWO_URL:
         lines.append(f"Tekstowo.pl URL:\t\t{tekstowo_url}")
+    if ENABLE_MUSIXMATCH_URL:
+        lines.append(f"Musixmatch URL:\t\t\t{musixmatch_url}")
+    if ENABLE_LYRICS_COM_URL:
+        lines.append(f"Lyrics.com URL:\t\t\t{lyrics_com_url}")
     return "\n".join(lines) if lines else ""
 
 
 # Formats lyrics URLs for plain text email body based on configuration
-def format_lyrics_urls_email_text(genius_url, azlyrics_url, tekstowo_url):
+def format_lyrics_urls_email_text(genius_url, azlyrics_url, tekstowo_url, musixmatch_url, lyrics_com_url):
     lines = []
     if ENABLE_GENIUS_LYRICS_URL:
         lines.append(f"Genius lyrics URL: {genius_url}")
@@ -945,11 +960,15 @@ def format_lyrics_urls_email_text(genius_url, azlyrics_url, tekstowo_url):
         lines.append(f"AZLyrics URL: {azlyrics_url}")
     if ENABLE_TEKSTOWO_URL:
         lines.append(f"Tekstowo.pl URL: {tekstowo_url}")
+    if ENABLE_MUSIXMATCH_URL:
+        lines.append(f"Musixmatch URL: {musixmatch_url}")
+    if ENABLE_LYRICS_COM_URL:
+        lines.append(f"Lyrics.com URL: {lyrics_com_url}")
     return "\n".join(lines) if lines else ""
 
 
 # Formats lyrics URLs for HTML email body based on configuration
-def format_lyrics_urls_email_html(genius_url, azlyrics_url, tekstowo_url, artist, track):
+def format_lyrics_urls_email_html(genius_url, azlyrics_url, tekstowo_url, musixmatch_url, lyrics_com_url, artist, track):
     lines = []
     escaped_artist = escape(artist)
     escaped_track = escape(track)
@@ -959,6 +978,10 @@ def format_lyrics_urls_email_html(genius_url, azlyrics_url, tekstowo_url, artist
         lines.append(f'AZLyrics URL: <a href="{azlyrics_url}">{escaped_artist} - {escaped_track}</a>')
     if ENABLE_TEKSTOWO_URL:
         lines.append(f'Tekstowo.pl URL: <a href="{tekstowo_url}">{escaped_artist} - {escaped_track}</a>')
+    if ENABLE_MUSIXMATCH_URL:
+        lines.append(f'Musixmatch URL: <a href="{musixmatch_url}">{escaped_artist} - {escaped_track}</a>')
+    if ENABLE_LYRICS_COM_URL:
+        lines.append(f'Lyrics.com URL: <a href="{lyrics_com_url}">{escaped_artist} - {escaped_track}</a>')
     return "<br>".join(lines) if lines else ""
 
 
@@ -1649,7 +1672,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             if track_duration > 0:
                 print(f"Duration:\t\t\t{display_time(track_duration)}{duration_mark}")
 
-            spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network, playing_track)
+            spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network, playing_track)
 
             print(f"\nSpotify URL:\t\t\t{spotify_search_url}")
             print(f"Last.fm URL:\t\t\t{lastfm_url}")
@@ -1657,7 +1680,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                 print(f"Last.fm album URL:\t\t{lastfm_album_url}")
             print(f"Apple Music URL:\t\t{apple_search_url}")
             print(f"YouTube Music URL:\t\t{youtube_music_search_url}")
-            lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url)
+            lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
             if lyrics_output:
                 print(lyrics_output)
 
@@ -1691,8 +1714,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                 duration_m_body_html = f"<br>Duration: {display_time(track_duration)}{duration_mark}"
 
             m_subject = f"Last.fm user {username} is active: '{artist} - {track}'"
-            lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url)
-            lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, artist, track)
+            lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
+            lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, artist, track)
             lyrics_section_text = f"\n{lyrics_urls_text}\n\n" if lyrics_urls_text else "\n\n"
             lyrics_section_html = f"<br>{lyrics_urls_html}<br><br>" if lyrics_urls_html else "<br><br>"
             # Determine URLs for "Track:" and secondary URL field based on configuration
@@ -1762,7 +1785,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             if track_duration > 0:
                 print(f"* Last track duration:\t\t{display_time(track_duration)}{duration_mark}")
 
-            spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(last_activity_artist), str(last_activity_track), "", network)
+            spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(last_activity_artist), str(last_activity_track), "", network)
 
             print(f"\n* Spotify URL:\t\t\t{spotify_search_url}")
             print(f"* Last.fm URL:\t\t\t{lastfm_url}")
@@ -1770,7 +1793,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                 print(f"* Last.fm album URL:\t\t{lastfm_album_url}")
             print(f"* Apple Music URL:\t\t{apple_search_url}")
             print(f"* YouTube Music URL:\t\t{youtube_music_search_url}")
-            lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url)
+            lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
             if lyrics_output:
                 print(f"* {lyrics_output.replace(chr(10), chr(10) + '* ')}\n")
 
@@ -1798,7 +1821,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             if track_duration > 0:
                 print(f"Duration:\t\t\t{display_time(track_duration)}{duration_mark}")
 
-            spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network, new_track)
+            spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network, new_track)
 
             print(f"\nSpotify URL:\t\t\t{spotify_search_url}")
             print(f"Last.fm URL:\t\t\t{lastfm_url}")
@@ -1806,7 +1829,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                 print(f"Last.fm album URL:\t\t{lastfm_album_url}")
             print(f"Apple Music URL:\t\t{apple_search_url}")
             print(f"YouTube Music URL:\t\t{youtube_music_search_url}")
-            lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url)
+            lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
             if lyrics_output:
                 print(lyrics_output)
 
@@ -1840,8 +1863,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                 duration_m_body_html = f"<br>Duration: {display_time(track_duration)}{duration_mark}"
 
             m_subject = f"Last.fm user {username} is active: '{artist} - {track}'"
-            lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url)
-            lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, artist, track)
+            lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
+            lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, artist, track)
             lyrics_section_text = f"\n{lyrics_urls_text}\n\n" if lyrics_urls_text else "\n\n"
             lyrics_section_html = f"<br>{lyrics_urls_html}<br><br>" if lyrics_urls_html else "<br><br>"
             # Determine URLs for "Track:" and secondary URL field based on configuration
@@ -2123,7 +2146,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                     if track_duration > 0:
                         print(f"Duration:\t\t\t{display_time(track_duration)}{duration_mark}")
 
-                    spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network, playing_track)
+                    spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network, playing_track)
 
                     print(f"\nSpotify URL:\t\t\t{spotify_search_url}")
                     print(f"Last.fm URL:\t\t\t{lastfm_url}")
@@ -2131,7 +2154,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                         print(f"Last.fm album URL:\t\t{lastfm_album_url}")
                     print(f"Apple Music URL:\t\t{apple_search_url}")
                     print(f"YouTube Music URL:\t\t{youtube_music_search_url}")
-                    lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url)
+                    lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
                     if lyrics_output:
                         print(lyrics_output)
 
@@ -2222,8 +2245,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             offline_timespan = ""
                             last_activity_text = ""
                             last_activity_html = ""
-                        lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url)
-                        lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, artist, track)
+                        lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
+                        lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, artist, track)
                         lyrics_section_text = f"\n{lyrics_urls_text}" if lyrics_urls_text else ""
                         lyrics_section_html = f"<br>{lyrics_urls_html}" if lyrics_urls_html else ""
                         # Determine URLs for "Track:" and secondary URL field based on configuration
@@ -2258,8 +2281,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             timespan_str += f" ({timespan})"
                             timespan_str_html += f" ({timespan})"
                         m_subject = f"Last.fm user {username}: '{artist} - {track}'"
-                        lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url)
-                        lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, artist, track)
+                        lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
+                        lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, artist, track)
                         lyrics_section_text = f"\n{lyrics_urls_text}" if lyrics_urls_text else ""
                         lyrics_section_html = f"<br>{lyrics_urls_html}" if lyrics_urls_html else ""
                         # Determine URLs for "Track:" and secondary URL field based on configuration
@@ -2301,8 +2324,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             timespan_str += f" ({timespan})"
                             timespan_str_html += f" ({timespan})"
                         m_subject = f"Last.fm user {username} plays song on loop: '{artist} - {track}'"
-                        lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url)
-                        lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, artist, track)
+                        lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
+                        lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, artist, track)
                         lyrics_section_text = f"\n{lyrics_urls_text}" if lyrics_urls_text else ""
                         lyrics_section_html = f"<br>{lyrics_urls_html}" if lyrics_urls_html else ""
                         # Determine URLs for "Track:" and secondary URL field based on configuration
@@ -2511,9 +2534,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
 
                         m_subject = f"Last.fm user {username} is inactive: '{artist} - {track}' (after {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start), show_seconds=False)}: {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True)})"
                         # Get URLs for the last played track
-                        spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network)
-                        lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url)
-                        lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, artist, track)
+                        spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network)
+                        lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
+                        lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, artist, track)
                         lyrics_section_text = f"\n{lyrics_urls_text}\n\n" if lyrics_urls_text else "\n\n"
                         lyrics_section_html = f"<br>{lyrics_urls_html}<br><br>" if lyrics_urls_html else "<br><br>"
                         # Determine URLs for "Last played:" and secondary URL field based on configuration
