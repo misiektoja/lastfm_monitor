@@ -2426,19 +2426,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                         album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
                         m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html}{played_for_m_body_html}{timespan_str_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
 
-                    if track.upper() in tracks_upper or album.upper() in tracks_upper:
-                        print("\n*** Track/album matched with the list!")
-
-                        if TRACK_NOTIFICATION and not email_sent:
-                            print(f"Sending email notification to {RECEIVER_EMAIL}")
-                            send_email(m_subject, m_body, m_body_html, SMTP_SSL)
-                            email_sent = True
-
-                    if SONG_NOTIFICATION and not email_sent:
-                        print(f"Sending email notification to {RECEIVER_EMAIL}")
-                        send_email(m_subject, m_body, m_body_html, SMTP_SSL)
-                        email_sent = True
-
+                    # Check for loop first, before track/song notifications
                     if song_on_loop == SONG_ON_LOOP_VALUE:
                         print("─" * HORIZONTAL_LINE)
                         print(f"User plays song on LOOP ({song_on_loop} times)")
@@ -2481,6 +2469,21 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                         m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html}{played_for_m_body_html}<br><br>User plays song on LOOP (<b>{song_on_loop}</b> times){timespan_str_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
                         print(f"Sending email notification to {RECEIVER_EMAIL}")
                         send_email(m_subject, m_body, m_body_html, SMTP_SSL)
+                        email_sent = True
+
+                    # Send track/song notifications only if loop notification was not sent
+                    if track.upper() in tracks_upper or album.upper() in tracks_upper:
+                        print("\n*** Track/album matched with the list!")
+
+                        if TRACK_NOTIFICATION and not email_sent:
+                            print(f"Sending email notification to {RECEIVER_EMAIL}")
+                            send_email(m_subject, m_body, m_body_html, SMTP_SSL)
+                            email_sent = True
+
+                    if SONG_NOTIFICATION and not email_sent:
+                        print(f"Sending email notification to {RECEIVER_EMAIL}")
+                        send_email(m_subject, m_body, m_body_html, SMTP_SSL)
+                        email_sent = True
 
                     lf_user_online = True
                     lf_active_ts_last = int(time.time())
