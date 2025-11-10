@@ -1749,9 +1749,11 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network, playing_track)
 
             music_urls_output = format_music_urls_console(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
-            if music_urls_output:
-                print(f"\n{music_urls_output}")
             lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
+            if music_urls_output or lyrics_output:
+                print()  # Always add newline before first section (music URLs or lyrics)
+            if music_urls_output:
+                print(music_urls_output)
             if lyrics_output:
                 print(lyrics_output)
 
@@ -1864,9 +1866,11 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(last_activity_artist), str(last_activity_track), "", network)
 
             music_urls_output = format_music_urls_console(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
-            if music_urls_output:
-                print(f"\n{music_urls_output}")
             lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
+            if music_urls_output or lyrics_output:
+                print()  # Always add newline before first section (music URLs or lyrics)
+            if music_urls_output:
+                print(music_urls_output)
             if lyrics_output:
                 print(f"{lyrics_output}\n")
 
@@ -1897,9 +1901,11 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network, new_track)
 
             music_urls_output = format_music_urls_console(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
-            if music_urls_output:
-                print(f"\n{music_urls_output}")
             lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
+            if music_urls_output or lyrics_output:
+                print()  # Always add newline before first section (music URLs or lyrics)
+            if music_urls_output:
+                print(music_urls_output)
             if lyrics_output:
                 print(lyrics_output)
 
@@ -2228,6 +2234,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                         print(f"\n{music_urls_output}")
                     lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
                     if lyrics_output:
+                        if not music_urls_output:
+                            print()  # Add newline before lyrics when music URLs are disabled
                         print(lyrics_output)
 
                     last_activity_to_save = []
