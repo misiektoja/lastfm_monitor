@@ -1166,7 +1166,7 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
             max_title_len = title_len
         if album_len > max_album_len:
             max_album_len = album_len
-    
+
     # Calculate spacing and fixed widths for table width calculation
     # Format: "#  Day  Date/Time  Artist  Title  Album"
     # Total spacing: 2 + 2 + 2 + 2 + 2 = 10 spaces
@@ -1182,12 +1182,12 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
     w_artist_min = 15
     w_title_min = 15
     w_album_min = 20  # Album must always be visible with at least this width
-    
+
     # Calculate ideal widths (what we'd like if we had unlimited space)
     ideal_artist = max(w_artist_min, max_artist_len)
     ideal_title = max(w_title_min, max_title_len)
     ideal_album = max(w_album_min, max_album_len)
-    
+
     # Strategy: Always reserve minimum for album, then prioritize artist and title
     # First, ensure we have enough space for minimums
     min_total_needed = w_artist_min + w_title_min + w_album_min
@@ -1206,7 +1206,7 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
         # We have at least minimum space - allocate intelligently
         # Always reserve minimum for album first
         space_for_artist_title = available_width - w_album_min
-        
+
         # Calculate ideal needs for artist and title
         if max_artist_len < w_artist_min:
             # Artist is shorter than minimum - use actual length, give extra to title
@@ -1216,9 +1216,9 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
         else:
             ideal_artist_actual = ideal_artist
             ideal_title_actual = ideal_title
-        
+
         ideal_artist_title_needed = ideal_artist_actual + ideal_title_actual
-        
+
         if space_for_artist_title >= ideal_artist_title_needed:
             # Plenty of space: give artist and title their ideal lengths
             w_artist = ideal_artist_actual
@@ -1250,7 +1250,7 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
             w_artist = w_artist_min if max_artist_len >= w_artist_min else max_artist_len
             w_title = w_title_min
             w_album = w_album_min
-    
+
     # Final verification: ensure total width doesn't exceed terminal width
     total_row_width = w_num + w_day + w_date + w_artist + w_title + w_album + total_spacing
     if total_row_width > term_width:
@@ -1261,7 +1261,7 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
             reduction = min(excess, w_album - w_album_min)
             w_album -= reduction
             excess -= reduction
-        
+
         # If still too wide, reduce artist and title proportionally
         if excess > 0:
             total_row_width = w_num + w_day + w_date + w_artist + w_title + w_album + total_spacing
@@ -3291,7 +3291,8 @@ def main():
 
     out = f"Monitoring user {args.username}"
     print(out)
-    print("-" * len(out))
+    # print("-" * len(out))
+    print("─" * HORIZONTAL_LINE)
 
     lastfm_monitor_user(user, network, args.username, lf_tracks, CSV_FILE)
 
