@@ -2,6 +2,28 @@
 
 This is a high-level summary of the most important changes. 
 
+# Changes in 2.3 (11 Nov 2025)
+
+**Features and Improvements**:
+
+- **NEW:** Added support for Amazon Music, Deezer and Tidal URLs in console and email outputs
+- **NEW:** Added support for AZLyrics, Tekstowo.pl, Musixmatch and Lyrics.com lyrics services
+- **NEW:** Added Last.fm track and album URLs in email notifications and console output
+- **NEW:** Added configuration options to enable/disable music service URLs in console and email outputs (see `ENABLE_SPOTIFY_URL`, `ENABLE_LASTFM_URL`, `ENABLE_LASTFM_ALBUM_URL`, `ENABLE_APPLE_MUSIC_URL`, `ENABLE_YOUTUBE_MUSIC_URL`, `ENABLE_AMAZON_MUSIC_URL`, `ENABLE_DEEZER_URL` and `ENABLE_TIDAL_URL` config options)
+- **NEW:** Added configuration options to enable/disable lyrics service URLs in console and email outputs (see `ENABLE_GENIUS_LYRICS_URL`, `ENABLE_AZLYRICS_URL`, `ENABLE_TEKSTOWO_URL`, `ENABLE_MUSIXMATCH_URL` and `ENABLE_LYRICS_COM_URL` config options)
+- **NEW:** Added songs played count and session duration to email notifications and console output
+- **NEW:** Added recent songs tracking in session with inclusion in inactivity emails, including skipped and continued track status (see `INACTIVE_EMAIL_RECENT_SONGS_COUNT` config option)
+- **NEW:** Added support for user activity tracking for fresh Last.fm accounts with no tracks yet
+- **NEW:** Added configurable option to use Last.fm or Spotify URL in "Last played:" / "Track:" field in HTML email notifications (see `USE_LASTFM_URL_IN_LAST_PLAYED` config option, defaults to True)
+- **IMPROVE:** Redesigned track listing output (`-l` flag) to display tracks in a formatted table with proper column alignment
+- **IMPROVE:** Standardized User-Agent header construction and added it to Spotify API requests and internet connectivity checks
+- **IMPROVE:** Updated print statements and email body to consistently use "Spotify URL" instead of "Spotify search URL"
+
+**Bug fixes**:
+
+- **BUGFIX:** Prevented duplicate emails when songs on loop also match track/song alerts
+- **BUGFIX:** Fixed missing album information handling by using default empty string
+
 # Changes in 2.2 (18 Jun 2025)
 
 **Features and Improvements**:
