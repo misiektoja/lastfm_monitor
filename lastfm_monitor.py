@@ -1367,7 +1367,7 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
     if new_track:
         artist = str(new_track.artist)
         track = str(new_track.title)
-        album = str(new_track.info['album'])
+        album = str(new_track.info.get('album', '')) if new_track.info.get('album') else ""
         print("*** User is currently ACTIVE !")
         print(f"\nTrack:\t\t{artist} - {track}")
         print(f"Album:\t\t{album}")
@@ -1769,7 +1769,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             song_on_loop = 1
             artist = str(new_track.artist)
             track = str(new_track.title)
-            album = str(new_track.info['album'])
+            album = str(new_track.info.get('album', '')) if new_track.info.get('album') else ""
             artist_old = artist
             track_old = track
             last_activity_artist = artist
@@ -1939,7 +1939,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             song_on_loop = 1
             artist = str(new_track.artist)
             track = str(new_track.title)
-            album = str(new_track.info['album'])
+            album = str(new_track.info.get('album', '')) if new_track.info.get('album') else ""
             artist_old = artist
             track_old = track
             print(f"\nTrack:\t\t\t\t{artist} - {track}")
@@ -2164,7 +2164,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                     playing_track = new_track
                     artist = str(playing_track.artist)
                     track = str(playing_track.title)
-                    album = str(playing_track.info['album'])
+                    album = str(playing_track.info.get('album', '')) if playing_track.info.get('album') else ""
                     info = playing_track.info
 
                     played_for_m_body = ""
