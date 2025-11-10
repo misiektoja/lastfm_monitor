@@ -267,6 +267,16 @@ ENABLE_APPLE_MUSIC_URL = True
 # Whether to show YouTube Music URL in console and emails
 ENABLE_YOUTUBE_MUSIC_URL = True
 
+# Whether to show Amazon Music URL in console and emails
+ENABLE_AMAZON_MUSIC_URL = False
+
+# Whether to show Deezer URL in console and emails
+ENABLE_DEEZER_URL = False
+
+# Whether to show Tidal URL in console and emails
+# Note: Tidal requires users to be logged in to their account in the web browser to use the search functionality
+ENABLE_TIDAL_URL = False
+
 # Whether to show Genius lyrics URL in console and emails
 ENABLE_GENIUS_LYRICS_URL = True
 
@@ -360,6 +370,9 @@ ENABLE_LASTFM_URL = False
 ENABLE_LASTFM_ALBUM_URL = False
 ENABLE_APPLE_MUSIC_URL = False
 ENABLE_YOUTUBE_MUSIC_URL = False
+ENABLE_AMAZON_MUSIC_URL = False
+ENABLE_DEEZER_URL = False
+ENABLE_TIDAL_URL = False
 
 exec(CONFIG_BLOCK, globals())
 
@@ -904,6 +917,9 @@ def get_spotify_apple_genius_search_urls(artist, track, album=None, network=None
     musixmatch_search_url = f"https://www.musixmatch.com/search?query={quote_plus(lyrics_search_string)}"
     lyrics_com_search_url = f"https://www.lyrics.com/serp.php?st={quote_plus(lyrics_search_string)}&qtype=1"
     youtube_music_search_url = f"https://music.youtube.com/search?q={spotify_search_string}"
+    amazon_music_search_url = f"https://music.amazon.com/search/{spotify_search_string}"
+    deezer_search_url = f"https://www.deezer.com/search/{spotify_search_string}"
+    tidal_search_url = f"https://tidal.com/search?q={spotify_search_string}"
     
     # Get Last.fm URL - use track object if available, otherwise construct manually
     lastfm_url = ""
@@ -952,7 +968,7 @@ def get_spotify_apple_genius_search_urls(artist, track, album=None, network=None
             except Exception:
                 lastfm_album_url = ""
 
-    return spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url
+    return spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, lastfm_url, lastfm_album_url
 
 
 # Formats lyrics URLs for console output based on configuration
@@ -1007,7 +1023,7 @@ def format_lyrics_urls_email_html(genius_url, azlyrics_url, tekstowo_url, musixm
 
 # Formats music service URLs for console output based on configuration
 # Note: This excludes the primary "Track:" URL which is controlled by USE_LASTFM_URL_IN_LAST_PLAYED
-def format_music_urls_console(spotify_url, lastfm_url, lastfm_album_url, apple_music_url, youtube_music_url):
+def format_music_urls_console(spotify_url, lastfm_url, lastfm_album_url, apple_music_url, youtube_music_url, amazon_music_url, deezer_url, tidal_url):
     lines = []
     if ENABLE_SPOTIFY_URL:
         lines.append(f"Spotify URL:\t\t\t{spotify_url}")
@@ -1019,12 +1035,18 @@ def format_music_urls_console(spotify_url, lastfm_url, lastfm_album_url, apple_m
         lines.append(f"Apple Music URL:\t\t{apple_music_url}")
     if ENABLE_YOUTUBE_MUSIC_URL:
         lines.append(f"YouTube Music URL:\t\t{youtube_music_url}")
+    if ENABLE_AMAZON_MUSIC_URL:
+        lines.append(f"Amazon Music URL:\t\t{amazon_music_url}")
+    if ENABLE_DEEZER_URL:
+        lines.append(f"Deezer URL:\t\t\t{deezer_url}")
+    if ENABLE_TIDAL_URL:
+        lines.append(f"Tidal URL:\t\t\t{tidal_url}")
     return "\n".join(lines) if lines else ""
 
 
 # Formats music service URLs for plain text email body based on configuration
 # Note: This excludes the primary "Track:" / "Last played:" URL which is controlled by USE_LASTFM_URL_IN_LAST_PLAYED
-def format_music_urls_email_text(spotify_url, lastfm_url, lastfm_album_url, apple_music_url, youtube_music_url):
+def format_music_urls_email_text(spotify_url, lastfm_url, lastfm_album_url, apple_music_url, youtube_music_url, amazon_music_url, deezer_url, tidal_url):
     lines = []
     if ENABLE_SPOTIFY_URL:
         lines.append(f"Spotify URL: {spotify_url}")
@@ -1036,6 +1058,12 @@ def format_music_urls_email_text(spotify_url, lastfm_url, lastfm_album_url, appl
         lines.append(f"Apple Music URL: {apple_music_url}")
     if ENABLE_YOUTUBE_MUSIC_URL:
         lines.append(f"YouTube Music URL: {youtube_music_url}")
+    if ENABLE_AMAZON_MUSIC_URL:
+        lines.append(f"Amazon Music URL: {amazon_music_url}")
+    if ENABLE_DEEZER_URL:
+        lines.append(f"Deezer URL: {deezer_url}")
+    if ENABLE_TIDAL_URL:
+        lines.append(f"Tidal URL: {tidal_url}")
     return "\n".join(lines) if lines else ""
 
 
@@ -1043,7 +1071,7 @@ def format_music_urls_email_text(spotify_url, lastfm_url, lastfm_album_url, appl
 # Note: This excludes the primary "Track:" / "Last played:" URL which is controlled by USE_LASTFM_URL_IN_LAST_PLAYED
 # Note: Last.fm album URL is not included here as it's part of the Album line in HTML emails
 # secondary_url and secondary_url_label are the URL and label for the secondary URL field (Spotify or Last.fm)
-def format_music_urls_email_html(spotify_url, lastfm_url, lastfm_album_url, apple_music_url, youtube_music_url, artist, track, secondary_url, secondary_url_label):
+def format_music_urls_email_html(spotify_url, lastfm_url, lastfm_album_url, apple_music_url, youtube_music_url, amazon_music_url, deezer_url, tidal_url, artist, track, secondary_url, secondary_url_label):
     lines = []
     escaped_artist = escape(artist)
     escaped_track = escape(track)
@@ -1056,6 +1084,12 @@ def format_music_urls_email_html(spotify_url, lastfm_url, lastfm_album_url, appl
         lines.append(f'Apple Music URL: <a href="{apple_music_url}">{escaped_artist} - {escaped_track}</a>')
     if ENABLE_YOUTUBE_MUSIC_URL:
         lines.append(f'YouTube Music URL: <a href="{youtube_music_url}">{escaped_artist} - {escaped_track}</a>')
+    if ENABLE_AMAZON_MUSIC_URL:
+        lines.append(f'Amazon Music URL: <a href="{amazon_music_url}">{escaped_artist} - {escaped_track}</a>')
+    if ENABLE_DEEZER_URL:
+        lines.append(f'Deezer URL: <a href="{deezer_url}">{escaped_artist} - {escaped_track}</a>')
+    if ENABLE_TIDAL_URL:
+        lines.append(f'Tidal URL: <a href="{tidal_url}">{escaped_artist} - {escaped_track}</a>')
     return "<br>".join(lines) if lines else ""
 
 
@@ -1746,9 +1780,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             if track_duration > 0:
                 print(f"Duration:\t\t\t{display_time(track_duration)}{duration_mark}")
 
-            spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network, playing_track)
+            spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network, playing_track)
 
-            music_urls_output = format_music_urls_console(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
+            music_urls_output = format_music_urls_console(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url)
             lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
             if music_urls_output or lyrics_output:
                 print()  # Always add newline before first section (music URLs or lyrics)
@@ -1800,8 +1834,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                 track_url = spotify_search_url
                 secondary_url = lastfm_url
                 secondary_url_label = "Last.fm URL"
-            music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
-            music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, artist, track, secondary_url, secondary_url_label)
+            music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url)
+            music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, artist, track, secondary_url, secondary_url_label)
             music_section_text = f"\n\n{music_urls_text}\n" if music_urls_text else "\n"
             music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else ""
             # When both music and lyrics are empty, use single <br><br> instead of <br> + <br><br>
@@ -1869,9 +1903,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             if track_duration > 0:
                 print(f"* Last track duration:\t\t{display_time(track_duration)}{duration_mark}")
 
-            spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(last_activity_artist), str(last_activity_track), "", network)
+            spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(last_activity_artist), str(last_activity_track), "", network)
 
-            music_urls_output = format_music_urls_console(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
+            music_urls_output = format_music_urls_console(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url)
             lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
             if music_urls_output or lyrics_output:
                 print()  # Always add newline before first section (music URLs or lyrics)
@@ -1908,9 +1942,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             if track_duration > 0:
                 print(f"Duration:\t\t\t{display_time(track_duration)}{duration_mark}")
 
-            spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network, new_track)
+            spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network, new_track)
 
-            music_urls_output = format_music_urls_console(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
+            music_urls_output = format_music_urls_console(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url)
             lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
             if music_urls_output or lyrics_output:
                 print()  # Always add newline before first section (music URLs or lyrics)
@@ -1962,8 +1996,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                 track_url = spotify_search_url
                 secondary_url = lastfm_url
                 secondary_url_label = "Last.fm URL"
-            music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
-            music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, artist, track, secondary_url, secondary_url_label)
+            music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url)
+            music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, artist, track, secondary_url, secondary_url_label)
             music_section_text = f"\n\n{music_urls_text}\n" if music_urls_text else "\n"
             music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else ""
             # When both music and lyrics are empty, use single <br><br> instead of <br> + <br><br>
@@ -2243,9 +2277,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                     if track_duration > 0:
                         print(f"Duration:\t\t\t{display_time(track_duration)}{duration_mark}")
 
-                    spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network, playing_track)
+                    spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network, playing_track)
 
-                    music_urls_output = format_music_urls_console(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
+                    music_urls_output = format_music_urls_console(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url)
                     if music_urls_output:
                         print(f"\n{music_urls_output}")
                     lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
@@ -2354,8 +2388,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             track_url = spotify_search_url
                             secondary_url = lastfm_url
                             secondary_url_label = "Last.fm URL"
-                        music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
-                        music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, artist, track, secondary_url, secondary_url_label)
+                        music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url)
+                        music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, artist, track, secondary_url, secondary_url_label)
                         music_section_text = f"\n\n{music_urls_text}\n" if music_urls_text else "\n"
                         music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else ""
                         # When both music and lyrics are empty, don't add <br><br> here because there's a hardcoded <br><br> after played_for_m_body_html
@@ -2410,8 +2444,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             track_url = spotify_search_url
                             secondary_url = lastfm_url
                             secondary_url_label = "Last.fm URL"
-                        music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
-                        music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, artist, track, secondary_url, secondary_url_label)
+                        music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url)
+                        music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, artist, track, secondary_url, secondary_url_label)
                         music_section_text = f"\n\n{music_urls_text}\n" if music_urls_text else "\n"
                         music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else ""
                         lyrics_section_text = f"\n{lyrics_urls_text}" if lyrics_urls_text else ""
@@ -2452,8 +2486,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             track_url = spotify_search_url
                             secondary_url = lastfm_url
                             secondary_url_label = "Last.fm URL"
-                        music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
-                        music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, artist, track, secondary_url, secondary_url_label)
+                        music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url)
+                        music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, artist, track, secondary_url, secondary_url_label)
                         music_section_text = f"\n\n{music_urls_text}\n" if music_urls_text else "\n"
                         music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else ""
                         lyrics_section_text = f"\n{lyrics_urls_text}" if lyrics_urls_text else ""
@@ -2677,7 +2711,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
 
                         m_subject = f"Last.fm user {username} is inactive: '{artist} - {track}' (after {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start), show_seconds=False)}: {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True)})"
                         # Get URLs for the last played track
-                        spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network)
+                        spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network)
                         lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
                         lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, artist, track)
                         lyrics_section_text = f"\n{lyrics_urls_text}\n\n" if lyrics_urls_text else "\n\n"
@@ -2691,8 +2725,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             last_played_url = spotify_search_url
                             secondary_url = lastfm_url
                             secondary_url_label = "Last.fm URL"
-                        music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
-                        music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, artist, track, secondary_url, secondary_url_label)
+                        music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url)
+                        music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, artist, track, secondary_url, secondary_url_label)
                         music_section_text = f"\n\n{music_urls_text}\n" if music_urls_text else "\n"
                         music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else ""
                         # When both music and lyrics are empty, use single <br><br> instead of <br> + <br><br>
