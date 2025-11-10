@@ -252,6 +252,21 @@ CLEAR_SCREEN = True
 # Value added/subtracted via signal handlers to adjust inactivity timeout (LASTFM_INACTIVITY_CHECK); in seconds
 LASTFM_INACTIVITY_CHECK_SIGNAL_VALUE = 30  # 30 seconds
 
+# Whether to show Spotify URL in console and emails
+ENABLE_SPOTIFY_URL = True
+
+# Whether to show Last.fm URL in console and emails
+ENABLE_LASTFM_URL = True
+
+# Whether to show Last.fm album URL in console and emails
+ENABLE_LASTFM_ALBUM_URL = True
+
+# Whether to show Apple Music URL in console and emails
+ENABLE_APPLE_MUSIC_URL = True
+
+# Whether to show YouTube Music URL in console and emails
+ENABLE_YOUTUBE_MUSIC_URL = True
+
 # Whether to show Genius lyrics URL in console and emails
 ENABLE_GENIUS_LYRICS_URL = True
 
@@ -340,6 +355,11 @@ ENABLE_TEKSTOWO_URL = False
 ENABLE_MUSIXMATCH_URL = False
 ENABLE_LYRICS_COM_URL = False
 USE_LASTFM_URL_IN_LAST_PLAYED = False
+ENABLE_SPOTIFY_URL = False
+ENABLE_LASTFM_URL = False
+ENABLE_LASTFM_ALBUM_URL = False
+ENABLE_APPLE_MUSIC_URL = False
+ENABLE_YOUTUBE_MUSIC_URL = False
 
 exec(CONFIG_BLOCK, globals())
 
@@ -982,6 +1002,60 @@ def format_lyrics_urls_email_html(genius_url, azlyrics_url, tekstowo_url, musixm
         lines.append(f'Musixmatch URL: <a href="{musixmatch_url}">{escaped_artist} - {escaped_track}</a>')
     if ENABLE_LYRICS_COM_URL:
         lines.append(f'Lyrics.com URL: <a href="{lyrics_com_url}">{escaped_artist} - {escaped_track}</a>')
+    return "<br>".join(lines) if lines else ""
+
+
+# Formats music service URLs for console output based on configuration
+# Note: This excludes the primary "Track:" URL which is controlled by USE_LASTFM_URL_IN_LAST_PLAYED
+def format_music_urls_console(spotify_url, lastfm_url, lastfm_album_url, apple_music_url, youtube_music_url):
+    lines = []
+    if ENABLE_SPOTIFY_URL:
+        lines.append(f"Spotify URL:\t\t\t{spotify_url}")
+    if ENABLE_LASTFM_URL:
+        lines.append(f"Last.fm URL:\t\t\t{lastfm_url}")
+    if ENABLE_LASTFM_ALBUM_URL and lastfm_album_url:
+        lines.append(f"Last.fm album URL:\t\t{lastfm_album_url}")
+    if ENABLE_APPLE_MUSIC_URL:
+        lines.append(f"Apple Music URL:\t\t{apple_music_url}")
+    if ENABLE_YOUTUBE_MUSIC_URL:
+        lines.append(f"YouTube Music URL:\t\t{youtube_music_url}")
+    return "\n".join(lines) if lines else ""
+
+
+# Formats music service URLs for plain text email body based on configuration
+# Note: This excludes the primary "Track:" / "Last played:" URL which is controlled by USE_LASTFM_URL_IN_LAST_PLAYED
+def format_music_urls_email_text(spotify_url, lastfm_url, lastfm_album_url, apple_music_url, youtube_music_url):
+    lines = []
+    if ENABLE_SPOTIFY_URL:
+        lines.append(f"Spotify URL: {spotify_url}")
+    if ENABLE_LASTFM_URL:
+        lines.append(f"Last.fm URL: {lastfm_url}")
+    if ENABLE_LASTFM_ALBUM_URL and lastfm_album_url:
+        lines.append(f"Last.fm album URL: {lastfm_album_url}")
+    if ENABLE_APPLE_MUSIC_URL:
+        lines.append(f"Apple Music URL: {apple_music_url}")
+    if ENABLE_YOUTUBE_MUSIC_URL:
+        lines.append(f"YouTube Music URL: {youtube_music_url}")
+    return "\n".join(lines) if lines else ""
+
+
+# Formats music service URLs for HTML email body based on configuration
+# Note: This excludes the primary "Track:" / "Last played:" URL which is controlled by USE_LASTFM_URL_IN_LAST_PLAYED
+# Note: Last.fm album URL is not included here as it's part of the Album line in HTML emails
+# secondary_url and secondary_url_label are the URL and label for the secondary URL field (Spotify or Last.fm)
+def format_music_urls_email_html(spotify_url, lastfm_url, lastfm_album_url, apple_music_url, youtube_music_url, artist, track, secondary_url, secondary_url_label):
+    lines = []
+    escaped_artist = escape(artist)
+    escaped_track = escape(track)
+    # Secondary URL (Spotify or Last.fm) - only show if enabled
+    if secondary_url_label == "Spotify URL" and ENABLE_SPOTIFY_URL:
+        lines.append(f'{secondary_url_label}: <a href="{secondary_url}">{escaped_artist} - {escaped_track}</a>')
+    elif secondary_url_label == "Last.fm URL" and ENABLE_LASTFM_URL:
+        lines.append(f'{secondary_url_label}: <a href="{secondary_url}">{escaped_artist} - {escaped_track}</a>')
+    if ENABLE_APPLE_MUSIC_URL:
+        lines.append(f'Apple Music URL: <a href="{apple_music_url}">{escaped_artist} - {escaped_track}</a>')
+    if ENABLE_YOUTUBE_MUSIC_URL:
+        lines.append(f'YouTube Music URL: <a href="{youtube_music_url}">{escaped_artist} - {escaped_track}</a>')
     return "<br>".join(lines) if lines else ""
 
 
@@ -1674,12 +1748,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
 
             spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network, playing_track)
 
-            print(f"\nSpotify URL:\t\t\t{spotify_search_url}")
-            print(f"Last.fm URL:\t\t\t{lastfm_url}")
-            if lastfm_album_url:
-                print(f"Last.fm album URL:\t\t{lastfm_album_url}")
-            print(f"Apple Music URL:\t\t{apple_search_url}")
-            print(f"YouTube Music URL:\t\t{youtube_music_search_url}")
+            music_urls_output = format_music_urls_console(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
+            if music_urls_output:
+                print(f"\n{music_urls_output}")
             lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
             if lyrics_output:
                 print(lyrics_output)
@@ -1727,8 +1798,13 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                 track_url = spotify_search_url
                 secondary_url = lastfm_url
                 secondary_url_label = "Last.fm URL"
-            m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify URL: {spotify_search_url}\nLast.fm URL: {lastfm_url}\nLast.fm album URL: {lastfm_album_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}{lyrics_section_text}Last activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: <a href=\"{lastfm_album_url}\">{escape(album)}</a><br><br>{secondary_url_label}: <a href=\"{secondary_url}\">{escape(artist)} - {escape(track)}</a><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a>{lyrics_section_html}Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
+            music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
+            music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, artist, track, secondary_url, secondary_url_label)
+            music_section_text = f"\n{music_urls_text}\n" if music_urls_text else "\n"
+            music_section_html = f"<br>{music_urls_html}<br>" if music_urls_html else "<br>"
+            m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}{music_section_text}{lyrics_section_text}Last activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+            album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
+            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html}Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
             if ACTIVE_NOTIFICATION:
                 print(f"Sending email notification to {RECEIVER_EMAIL}")
@@ -1787,12 +1863,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
 
             spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(last_activity_artist), str(last_activity_track), "", network)
 
-            print(f"\nSpotify URL:\t\t\t{spotify_search_url}")
-            print(f"Last.fm URL:\t\t\t{lastfm_url}")
-            if lastfm_album_url:
-                print(f"Last.fm album URL:\t\t{lastfm_album_url}")
-            print(f"Apple Music URL:\t\t{apple_search_url}")
-            print(f"YouTube Music URL:\t\t{youtube_music_search_url}")
+            music_urls_output = format_music_urls_console(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
+            if music_urls_output:
+                print(f"\n{music_urls_output}")
             lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
             if lyrics_output:
                 print(f"{lyrics_output}\n")
@@ -1823,12 +1896,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
 
             spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network, new_track)
 
-            print(f"\nSpotify URL:\t\t\t{spotify_search_url}")
-            print(f"Last.fm URL:\t\t\t{lastfm_url}")
-            if lastfm_album_url:
-                print(f"Last.fm album URL:\t\t{lastfm_album_url}")
-            print(f"Apple Music URL:\t\t{apple_search_url}")
-            print(f"YouTube Music URL:\t\t{youtube_music_search_url}")
+            music_urls_output = format_music_urls_console(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
+            if music_urls_output:
+                print(f"\n{music_urls_output}")
             lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
             if lyrics_output:
                 print(lyrics_output)
@@ -1876,8 +1946,13 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                 track_url = spotify_search_url
                 secondary_url = lastfm_url
                 secondary_url_label = "Last.fm URL"
-            m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify URL: {spotify_search_url}\nLast.fm URL: {lastfm_url}\nLast.fm album URL: {lastfm_album_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}{lyrics_section_text}Last activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: <a href=\"{lastfm_album_url}\">{escape(album)}</a><br><br>{secondary_url_label}: <a href=\"{secondary_url}\">{escape(artist)} - {escape(track)}</a><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a>{lyrics_section_html}Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
+            music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
+            music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, artist, track, secondary_url, secondary_url_label)
+            music_section_text = f"\n{music_urls_text}\n" if music_urls_text else "\n"
+            music_section_html = f"<br>{music_urls_html}<br>" if music_urls_html else "<br>"
+            m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}{music_section_text}{lyrics_section_text}Last activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+            album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
+            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html}Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
             if ACTIVE_NOTIFICATION:
                 print(f"Sending email notification to {RECEIVER_EMAIL}")
@@ -2148,12 +2223,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
 
                     spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network, playing_track)
 
-                    print(f"\nSpotify URL:\t\t\t{spotify_search_url}")
-                    print(f"Last.fm URL:\t\t\t{lastfm_url}")
-                    if lastfm_album_url:
-                        print(f"Last.fm album URL:\t\t{lastfm_album_url}")
-                    print(f"Apple Music URL:\t\t{apple_search_url}")
-                    print(f"YouTube Music URL:\t\t{youtube_music_search_url}")
+                    music_urls_output = format_music_urls_console(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
+                    if music_urls_output:
+                        print(f"\n{music_urls_output}")
                     lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
                     if lyrics_output:
                         print(lyrics_output)
@@ -2258,14 +2330,20 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             track_url = spotify_search_url
                             secondary_url = lastfm_url
                             secondary_url_label = "Last.fm URL"
+                        music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
+                        music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, artist, track, secondary_url, secondary_url_label)
+                        music_section_text = f"\n{music_urls_text}" if music_urls_text else ""
+                        music_section_html = f"<br>{music_urls_html}" if music_urls_html else ""
                         if lf_active_ts_last > 0:
-                            m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify URL: {spotify_search_url}\nLast.fm URL: {lastfm_url}\nLast.fm album URL: {lastfm_album_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}{lyrics_section_text}{played_for_m_body}\n\nFriend got active after being offline for {offline_timespan}{last_track_start_changed}{private_mode}{last_activity_text}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: <a href=\"{lastfm_album_url}\">{escape(album)}</a><br><br>{secondary_url_label}: <a href=\"{secondary_url}\">{escape(artist)} - {escape(track)}</a><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a>{lyrics_section_html}{played_for_m_body_html}<br><br>Friend got active after being offline for <b>{offline_timespan}</b>{last_track_start_changed_html}{private_mode_html}{last_activity_html}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                            m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}{music_section_text}{lyrics_section_text}{played_for_m_body}\n\nFriend got active after being offline for {offline_timespan}{last_track_start_changed}{private_mode}{last_activity_text}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+                            album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
+                            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html}{played_for_m_body_html}<br><br>Friend got active after being offline for <b>{offline_timespan}</b>{last_track_start_changed_html}{private_mode_html}{last_activity_html}{get_cur_ts('<br>Timestamp: ')}</body></html>"
                         else:
                             lyrics_section_text_fresh = f"\n{lyrics_urls_text}\n" if lyrics_urls_text else "\n"
                             lyrics_section_html_fresh = f"<br>{lyrics_urls_html}<br>" if lyrics_urls_html else "<br>"
-                            m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify URL: {spotify_search_url}\nLast.fm URL: {lastfm_url}\nLast.fm album URL: {lastfm_album_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}{lyrics_section_text_fresh}{played_for_m_body}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: <a href=\"{lastfm_album_url}\">{escape(album)}</a><br><br>{secondary_url_label}: <a href=\"{secondary_url}\">{escape(artist)} - {escape(track)}</a><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a>{lyrics_section_html_fresh}{played_for_m_body_html}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                            m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}{music_section_text}{lyrics_section_text_fresh}{played_for_m_body}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+                            album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
+                            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html_fresh}{played_for_m_body_html}{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
                         if ACTIVE_NOTIFICATION:
                             print(f"Sending email notification to {RECEIVER_EMAIL}")
@@ -2294,8 +2372,13 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             track_url = spotify_search_url
                             secondary_url = lastfm_url
                             secondary_url_label = "Last.fm URL"
-                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify URL: {spotify_search_url}\nLast.fm URL: {lastfm_url}\nLast.fm album URL: {lastfm_album_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}{lyrics_section_text}{played_for_m_body}{timespan_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: <a href=\"{lastfm_album_url}\">{escape(album)}</a><br><br>{secondary_url_label}: <a href=\"{secondary_url}\">{escape(artist)} - {escape(track)}</a><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a>{lyrics_section_html}{played_for_m_body_html}{timespan_str_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                        music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
+                        music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, artist, track, secondary_url, secondary_url_label)
+                        music_section_text = f"\n{music_urls_text}" if music_urls_text else ""
+                        music_section_html = f"<br>{music_urls_html}" if music_urls_html else ""
+                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}{music_section_text}{lyrics_section_text}{played_for_m_body}{timespan_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                        album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
+                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html}{played_for_m_body_html}{timespan_str_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
 
                     if track.upper() in tracks_upper or album.upper() in tracks_upper:
                         print("\n*** Track/album matched with the list!")
@@ -2337,8 +2420,13 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             track_url = spotify_search_url
                             secondary_url = lastfm_url
                             secondary_url_label = "Last.fm URL"
-                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify URL: {spotify_search_url}\nLast.fm URL: {lastfm_url}\nLast.fm album URL: {lastfm_album_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}{lyrics_section_text}{played_for_m_body}\n\nUser plays song on LOOP ({song_on_loop} times){timespan_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: <a href=\"{lastfm_album_url}\">{escape(album)}</a><br><br>{secondary_url_label}: <a href=\"{secondary_url}\">{escape(artist)} - {escape(track)}</a><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a>{lyrics_section_html}{played_for_m_body_html}<br><br>User plays song on LOOP (<b>{song_on_loop}</b> times){timespan_str_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                        music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
+                        music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, artist, track, secondary_url, secondary_url_label)
+                        music_section_text = f"\n{music_urls_text}" if music_urls_text else ""
+                        music_section_html = f"<br>{music_urls_html}" if music_urls_html else ""
+                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}{music_section_text}{lyrics_section_text}{played_for_m_body}\n\nUser plays song on LOOP ({song_on_loop} times){timespan_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                        album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
+                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html}{played_for_m_body_html}<br><br>User plays song on LOOP (<b>{song_on_loop}</b> times){timespan_str_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
                         print(f"Sending email notification to {RECEIVER_EMAIL}")
                         send_email(m_subject, m_body, m_body_html, SMTP_SSL)
 
@@ -2548,8 +2636,13 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             last_played_url = spotify_search_url
                             secondary_url = lastfm_url
                             secondary_url_label = "Last.fm URL"
-                        m_body = f"Last played: {artist} - {track}{duration_m_body}\nAlbum: {album}\n\nSpotify URL: {spotify_search_url}\nLast.fm URL: {lastfm_url}\nLast.fm album URL: {lastfm_album_url}\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}{lyrics_section_text}User got inactive after listening to music for {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}\nUser played music from {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep=' to ')}{paused_mbody}{listened_songs_mbody}{played_for_m_body}{recent_songs_mbody}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}\nInactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{last_played_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: <a href=\"{lastfm_album_url}\">{escape(album)}</a><br><br>{secondary_url_label}: <a href=\"{secondary_url}\">{escape(artist)} - {escape(track)}</a><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(artist)} - {escape(track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(artist)} - {escape(track)}</a>{lyrics_section_html}User got inactive after listening to music for <b>{calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}</b><br>User played music from <b>{get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep='</b> to <b>')}</b>{paused_mbody_html}{listened_songs_mbody_html}{played_for_m_body_html}{recent_songs_mbody_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b><br>Inactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                        music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
+                        music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, artist, track, secondary_url, secondary_url_label)
+                        music_section_text = f"\n{music_urls_text}\n" if music_urls_text else "\n"
+                        music_section_html = f"<br>{music_urls_html}<br>" if music_urls_html else "<br>"
+                        m_body = f"Last played: {artist} - {track}{duration_m_body}\nAlbum: {album}{music_section_text}{lyrics_section_text}User got inactive after listening to music for {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}\nUser played music from {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep=' to ')}{paused_mbody}{listened_songs_mbody}{played_for_m_body}{recent_songs_mbody}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}\nInactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+                        album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
+                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{last_played_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html}User got inactive after listening to music for <b>{calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}</b><br>User played music from <b>{get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep='</b> to <b>')}</b>{paused_mbody_html}{listened_songs_mbody_html}{played_for_m_body_html}{recent_songs_mbody_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b><br>Inactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
                         print(f"Sending email notification to {RECEIVER_EMAIL}")
                         send_email(m_subject, m_body, m_body_html, SMTP_SSL)
