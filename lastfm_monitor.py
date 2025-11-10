@@ -1803,7 +1803,13 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
             music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, artist, track, secondary_url, secondary_url_label)
             music_section_text = f"\n\n{music_urls_text}\n" if music_urls_text else "\n"
-            music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else "<br>"
+            music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else ""
+            # When both music and lyrics are empty, use single <br><br> instead of <br> + <br><br>
+            if not music_urls_html and not lyrics_urls_html:
+                music_section_html = "<br><br>"
+                lyrics_section_html = ""
+            elif not music_urls_html:
+                music_section_html = "<br>"
             m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}{music_section_text}{lyrics_section_text}Last activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
             album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
             m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html}Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
@@ -1873,6 +1879,10 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                 print(music_urls_output)
             if lyrics_output:
                 print(f"{lyrics_output}\n")
+            elif not music_urls_output:
+                print()  # Add newline before "User is OFFLINE" when both music and lyrics are disabled
+            elif music_urls_output:
+                print()  # Add newline after music URLs when lyrics are disabled
 
             print(f"*** User is OFFLINE for {calculate_timespan(int(time.time()), lf_active_ts_last, show_seconds=False)} !")
 
@@ -1955,7 +1965,13 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
             music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, artist, track, secondary_url, secondary_url_label)
             music_section_text = f"\n\n{music_urls_text}\n" if music_urls_text else "\n"
-            music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else "<br>"
+            music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else ""
+            # When both music and lyrics are empty, use single <br><br> instead of <br> + <br><br>
+            if not music_urls_html and not lyrics_urls_html:
+                music_section_html = "<br><br>"
+                lyrics_section_html = ""
+            elif not music_urls_html:
+                music_section_html = "<br>"
             m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}{music_section_text}{lyrics_section_text}Last activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
             album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
             m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html}Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
@@ -2341,7 +2357,13 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                         music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
                         music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, artist, track, secondary_url, secondary_url_label)
                         music_section_text = f"\n\n{music_urls_text}\n" if music_urls_text else "\n"
-                        music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else "<br>"
+                        music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else ""
+                        # When both music and lyrics are empty, don't add <br><br> here because there's a hardcoded <br><br> after played_for_m_body_html
+                        if not music_urls_html and not lyrics_urls_html:
+                            music_section_html = ""
+                            lyrics_section_html = ""
+                        elif not music_urls_html:
+                            music_section_html = "<br>"
                         if lf_active_ts_last > 0:
                             m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}{music_section_text}{lyrics_section_text}{played_for_m_body}\n\nFriend got active after being offline for {offline_timespan}{last_track_start_changed}{private_mode}{last_activity_text}{get_cur_ts(nl_ch + 'Timestamp: ')}"
                             album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
@@ -2349,6 +2371,16 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                         else:
                             lyrics_section_text_fresh = f"\n{lyrics_urls_text}\n" if lyrics_urls_text else "\n"
                             lyrics_section_html_fresh = f"<br>{lyrics_urls_html}<br>" if lyrics_urls_html else "<br>"
+                            # When both music and lyrics are empty, check if played_for_m_body_html is empty
+                            # If it's empty, we need <br><br> before timestamp; if not, it already starts with <br><br>
+                            if not music_urls_html and not lyrics_urls_html:
+                                if not played_for_m_body_html:
+                                    music_section_html = "<br><br>"
+                                else:
+                                    music_section_html = ""
+                                lyrics_section_html_fresh = ""
+                            elif not music_urls_html:
+                                music_section_html = "<br>"
                             m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}{music_section_text}{lyrics_section_text_fresh}{played_for_m_body}{get_cur_ts(nl_ch + 'Timestamp: ')}"
                             album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
                             m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html_fresh}{played_for_m_body_html}{get_cur_ts('<br>Timestamp: ')}</body></html>"
@@ -2381,9 +2413,15 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                         music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
                         music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, artist, track, secondary_url, secondary_url_label)
                         music_section_text = f"\n\n{music_urls_text}\n" if music_urls_text else "\n"
-                        music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else "<br>"
+                        music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else ""
                         lyrics_section_text = f"\n{lyrics_urls_text}" if lyrics_urls_text else ""
                         lyrics_section_html = f"<br>{lyrics_urls_html}" if lyrics_urls_html else ""
+                        # When both music and lyrics are empty, don't add <br><br> here because there's a hardcoded <br><br> in get_cur_ts
+                        if not music_urls_html and not lyrics_urls_html:
+                            music_section_html = ""
+                            lyrics_section_html = ""
+                        elif not music_urls_html:
+                            music_section_html = "<br>"
                         m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}{music_section_text}{lyrics_section_text}{played_for_m_body}{timespan_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                         album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
                         m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html}{played_for_m_body_html}{timespan_str_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
@@ -2429,9 +2467,15 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                         music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
                         music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, artist, track, secondary_url, secondary_url_label)
                         music_section_text = f"\n\n{music_urls_text}\n" if music_urls_text else "\n"
-                        music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else "<br>"
+                        music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else ""
                         lyrics_section_text = f"\n{lyrics_urls_text}" if lyrics_urls_text else ""
                         lyrics_section_html = f"<br>{lyrics_urls_html}" if lyrics_urls_html else ""
+                        # When both music and lyrics are empty, don't add <br><br> here because there's a hardcoded <br><br> before "User plays song on LOOP"
+                        if not music_urls_html and not lyrics_urls_html:
+                            music_section_html = ""
+                            lyrics_section_html = ""
+                        elif not music_urls_html:
+                            music_section_html = "<br>"
                         m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}{music_section_text}{lyrics_section_text}{played_for_m_body}\n\nUser plays song on LOOP ({song_on_loop} times){timespan_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                         album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
                         m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html}{played_for_m_body_html}<br><br>User plays song on LOOP (<b>{song_on_loop}</b> times){timespan_str_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
@@ -2647,7 +2691,13 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                         music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url)
                         music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, artist, track, secondary_url, secondary_url_label)
                         music_section_text = f"\n\n{music_urls_text}\n" if music_urls_text else "\n"
-                        music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else "<br>"
+                        music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else ""
+                        # When both music and lyrics are empty, use single <br><br> instead of <br> + <br><br>
+                        if not music_urls_html and not lyrics_urls_html:
+                            music_section_html = "<br><br>"
+                            lyrics_section_html = ""
+                        elif not music_urls_html:
+                            music_section_html = "<br>"
                         m_body = f"Last played: {artist} - {track}{duration_m_body}\nAlbum: {album}{music_section_text}{lyrics_section_text}User got inactive after listening to music for {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}\nUser played music from {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep=' to ')}{paused_mbody}{listened_songs_mbody}{played_for_m_body}{recent_songs_mbody}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}\nInactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
                         album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
                         m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{last_played_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html}User got inactive after listening to music for <b>{calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}</b><br>User played music from <b>{get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep='</b> to <b>')}</b>{paused_mbody_html}{listened_songs_mbody_html}{played_for_m_body_html}{recent_songs_mbody_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b><br>Inactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
