@@ -920,7 +920,7 @@ def get_spotify_apple_genius_search_urls(artist, track, album=None, network=None
     amazon_music_search_url = f"https://music.amazon.com/search/{spotify_search_string}"
     deezer_search_url = f"https://www.deezer.com/search/{spotify_search_string}"
     tidal_search_url = f"https://tidal.com/search?q={spotify_search_string}"
-    
+
     # Get Last.fm URL - use track object if available, otherwise construct manually
     lastfm_url = ""
     if track_obj and hasattr(track_obj, 'get_url'):
@@ -1724,6 +1724,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
     last_activity_ts = 0
     last_activity_artist = ""
     last_activity_track = ""
+    last_activity_album = ""
 
     if os.path.isfile(lastfm_last_activity_file):
         try:
@@ -1735,6 +1736,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             last_activity_ts = last_activity_read[0]
             last_activity_artist = last_activity_read[1]
             last_activity_track = last_activity_read[2]
+            # Album is stored at index 3 if available
+            if len(last_activity_read) > 3:
+                last_activity_album = last_activity_read[3]
             lastfm_last_activity_file_mdate_dt = datetime.fromtimestamp(int(os.path.getmtime(lastfm_last_activity_file)))
             lastfm_last_activity_file_mdate = lastfm_last_activity_file_mdate_dt.strftime("%d %b %Y, %H:%M:%S")
             lastfm_last_activity_file_mdate_weekday = str(calendar.day_abbr[(lastfm_last_activity_file_mdate_dt).weekday()])
@@ -1753,7 +1757,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
         last_track_start_ts_old2 = 0
         lf_track_ts_start_old = 0
         last_track_start_ts_old = 0
-        
+
         # If user is currently playing music but has no history yet, handle it
         if new_track is not None:
             app_started_and_user_offline = False
@@ -1886,6 +1890,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             if lf_active_ts_last >= last_activity_ts:
                 last_activity_artist = recent_tracks[0].track.artist
                 last_activity_track = recent_tracks[0].track.title
+                if recent_tracks[0].album:
+                    last_activity_album = str(recent_tracks[0].album)
             elif lf_active_ts_last < last_activity_ts and last_activity_ts > 0:
                 lf_active_ts_last = last_activity_ts
 
@@ -1897,13 +1903,15 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
 
             print(f"* Last activity:\t\t{last_activity_ts_weekday} {last_activity_dt}")
             print(f"* Last track:\t\t\t{last_activity_artist} - {last_activity_track}")
+            if last_activity_album:
+                print(f"* Last album:\t\t\t{last_activity_album}")
 
-            track_duration, sp_track_uri_id, duration_mark = get_track_info(last_activity_artist, last_activity_track, "", network, silent=False)
+            track_duration, sp_track_uri_id, duration_mark = get_track_info(last_activity_artist, last_activity_track, last_activity_album, network, silent=False)
 
             if track_duration > 0:
                 print(f"* Last track duration:\t\t{display_time(track_duration)}{duration_mark}")
 
-            spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(last_activity_artist), str(last_activity_track), "", network)
+            spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(last_activity_artist), str(last_activity_track), last_activity_album, network)
 
             music_urls_output = format_music_urls_console(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url)
             lyrics_output = format_lyrics_urls_console(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
