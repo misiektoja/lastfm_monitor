@@ -11,8 +11,8 @@ lastfm_monitor is a tool for real-time monitoring of Last.fm users' music activi
 - Information about how long the user listened to a song, whether it was shorter or longer than the track duration and if the song was skipped
 - Email notifications for various events (user becomes active or inactive, specific or all songs, songs on loop, new entries appearing while user was offline, errors)
 - Saving all listened songs with timestamps to the CSV file
-- Clickable Spotify, Apple Music, YouTube Music and Genius Lyrics search URLs printed in the console & included in email notifications
-- Displaying basic statistics for the user's playing session (duration, time span, number of listened and skipped songs, songs on loop, paused playback time and number of pauses)
+- Clickable Last.fm, Spotify, Apple Music, YouTube Music, Amazon Music, Deezer, Tidal, Genius Lyrics, AZLyrics, Tekstowo.pl, Musixmatch and Lyrics.com search URLs printed in the console and included in email notifications (configurable per service)
+- Displaying basic statistics for the user's playing session (duration, time span, number of listened and skipped songs, songs on loop, paused playback time and number of pauses, songs played count)
 - Support for detecting offline mode
 - Support for detecting Spotify's private mode (not 100% accurate)
 - Ability to control the running copy of the script via signals
@@ -143,6 +143,8 @@ lastfm_monitor --generate-config > lastfm_monitor.conf
 ```
 
 Edit the `lastfm_monitor.conf` file and change any desired configuration options (detailed comments are provided for each).
+
+**New in v2.3:** The configuration file includes options to enable/disable music service URLs (Last.fm, Spotify, Apple Music, YouTube Music, Amazon Music, Deezer, Tidal) and lyrics service URLs (Genius, AZLyrics, Tekstowo.pl, Musixmatch, Lyrics.com) in console and email outputs. 
 
 <a id="lastfm-api-key-and-shared-secret"></a>
 ### Last.fm API Key and Shared Secret
@@ -394,6 +396,10 @@ To disable sending an email on errors (enabled by default):
 ```sh
 lastfm_monitor <lastfm_username> -e
 ```
+
+Inactivity emails include recent songs from the session with skipped and continued track status. Configure the number of recent songs to include via the `INACTIVE_EMAIL_RECENT_SONGS_COUNT` configuration option.
+
+You can also decide to use Last.fm or Spotify URL in "Last played:" / "Track:" field in HTML email notifications (see `USE_LASTFM_URL_IN_LAST_PLAYED` config option).
 
 Make sure you defined your SMTP settings earlier (see [SMTP settings](#smtp-settings)).
 
