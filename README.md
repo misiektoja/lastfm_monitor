@@ -1,6 +1,6 @@
 # lastfm_monitor
 
-lastfm_monitor is a tool for real-time monitoring of Last.fm users' music activity.
+lastfm_monitor is a tool for real-time monitoring of **Last.fm users' music activity**.
 
 <a id="features"></a>
 ## Features
@@ -341,6 +341,8 @@ To be informed when a user gets inactive:
 lastfm_monitor <lastfm_username> -i
 ```
 
+Inactivity emails include recent songs from the session with skipped and continued track status. Configure the number of recent songs to include via the `INACTIVE_EMAIL_RECENT_SONGS_COUNT` configuration option.
+
 To be notified when new entries appear when the user is offline:
 - set `OFFLINE_ENTRIES_NOTIFICATION` to `True`
 - or use the `-f` flag
@@ -396,8 +398,6 @@ To disable sending an email on errors (enabled by default):
 ```sh
 lastfm_monitor <lastfm_username> -e
 ```
-
-Inactivity emails include recent songs from the session with skipped and continued track status. Configure the number of recent songs to include via the `INACTIVE_EMAIL_RECENT_SONGS_COUNT` configuration option.
 
 You can also decide to use Last.fm or Spotify URL in "Last played:" / "Track:" field in HTML email notifications (see `USE_LASTFM_URL_IN_LAST_PLAYED` config option).
 
