@@ -6,8 +6,8 @@ This is a high-level summary of the most important changes.
 
 **Features and Improvements**:
 
-- **NEW:** Added support for Amazon Music, Deezer and Tidal URLs in console and email outputs
-- **NEW:** Added support for AZLyrics, Tekstowo.pl, Musixmatch and Lyrics.com lyrics services
+- **NEW:** Added support for **Amazon Music**, **Deezer** and **Tidal** URLs in console and email outputs
+- **NEW:** Added support for **AZLyrics**, **Tekstowo.pl**, **Musixmatch** and **Lyrics.com** lyrics services
 - **NEW:** Added Last.fm track and album URLs in email notifications and console output
 - **NEW:** Added configuration options to enable/disable music service URLs in console and email outputs (see `ENABLE_SPOTIFY_URL`, `ENABLE_LASTFM_URL`, `ENABLE_LASTFM_ALBUM_URL`, `ENABLE_APPLE_MUSIC_URL`, `ENABLE_YOUTUBE_MUSIC_URL`, `ENABLE_AMAZON_MUSIC_URL`, `ENABLE_DEEZER_URL` and `ENABLE_TIDAL_URL` config options)
 - **NEW:** Added configuration options to enable/disable lyrics service URLs in console and email outputs (see `ENABLE_GENIUS_LYRICS_URL`, `ENABLE_AZLYRICS_URL`, `ENABLE_TEKSTOWO_URL`, `ENABLE_MUSIXMATCH_URL` and `ENABLE_LYRICS_COM_URL` config options)
