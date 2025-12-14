@@ -11,6 +11,7 @@ lastfm_monitor is a tool for real-time monitoring of **Last.fm users' music acti
 - Information about the **duration** the user listened to a song and whether the **song was skipped** and if it was **shorter or longer than the track duration**
 - **Email notifications** for various events (user becomes active or inactive, specific or all songs, songs on loop, new entries appearing while user was offline, errors)
 - **Saving all listened songs** with timestamps to the **CSV file**
+- **Last.fm Wrapped tool** for generating Spotify Wrapped-style statistics (top artists, tracks, albums) from CSV data
 - **Clickable** **Last.fm**, **Apple Music**, **YouTube Music**, **Amazon Music**, **Deezer**, **Tidal**, **Genius Lyrics**, **AZLyrics**, **Tekstowo.pl**, **Musixmatch** and **Lyrics.com** search URLs printed in the console and included in email notifications (configurable per service)
 - Displaying **basic statistics for the user's playing session** (duration, time span, number of listened and skipped songs, songs on loop, paused playback time and number of pauses, songs played count)
 - Support for detecting **offline mode**
@@ -43,6 +44,7 @@ lastfm_monitor is a tool for real-time monitoring of **Last.fm users' music acti
    * [Listing Mode](#listing-mode)
    * [Email Notifications](#email-notifications)
    * [CSV Export](#csv-export)
+   * [Last.fm Wrapped Tool](#lastfm-wrapped-tool)
    * [Automatic Playback of Listened Tracks in the Spotify Client](#automatic-playback-of-listened-tracks-in-the-spotify-client)
    * [Progress Indicator](#progress-indicator)
    * [Getting Track Duration from Spotify](#getting-track-duration-from-spotify)
@@ -144,7 +146,7 @@ lastfm_monitor --generate-config > lastfm_monitor.conf
 
 Edit the `lastfm_monitor.conf` file and change any desired configuration options (detailed comments are provided for each).
 
-**New in v2.3:** The configuration file includes options to enable/disable music service URLs (Last.fm, Spotify, Apple Music, YouTube Music, Amazon Music, Deezer, Tidal) and lyrics service URLs (Genius, AZLyrics, Tekstowo.pl, Musixmatch, Lyrics.com) in console and email outputs. 
+**New in v2.3:** The configuration file includes options to enable/disable music service URLs (Last.fm, Spotify, Apple Music, YouTube Music, Amazon Music, Deezer, Tidal) and lyrics service URLs (Genius, AZLyrics, Tekstowo.pl, Musixmatch, Lyrics.com) in console and email outputs.
 
 <a id="lastfm-api-key-and-shared-secret"></a>
 ### Last.fm API Key and Shared Secret
@@ -167,7 +169,7 @@ In order to monitor Last.fm user activity, proper privacy settings need to be en
 
 The user should go to [Last.fm Privacy Settings](https://www.last.fm/settings/privacy).
 
-The **Hide recent listening information** setting should be disabled. 
+The **Hide recent listening information** setting should be disabled.
 
 Otherwise you will get this error message returned by the `pyLast` library: *'Login: User required to be logged in'*.
 
@@ -206,7 +208,7 @@ If you store the `SP_CLIENT_ID` and `SP_CLIENT_SECRET` in a dotenv file you can 
 <a id="smtp-settings"></a>
 ### SMTP Settings
 
-If you want to use email notifications functionality, configure SMTP settings in the `lastfm_monitor.conf` file. 
+If you want to use email notifications functionality, configure SMTP settings in the `lastfm_monitor.conf` file.
 
 Verify your SMTP settings by using `--send-test-email` flag (the tool will try to send a test email notification):
 
@@ -241,7 +243,7 @@ SP_CLIENT_SECRET="your_spotify_app_client_secret"
 SMTP_PASSWORD="your_smtp_password"
 ```
 
-By default the tool will auto-search for dotenv file named `.env` in current directory and then upward from it. 
+By default the tool will auto-search for dotenv file named `.env` in current directory and then upward from it.
 
 You can specify a custom file with `DOTENV_FILE` or `--env-file` flag:
 
@@ -282,9 +284,9 @@ lastfm_monitor <lastfm_username> -z "your_spotify_app_client_id:your_spotify_app
 ```
 
 By default, the tool looks for a configuration file named `lastfm_monitor.conf` in:
- - current directory 
+ - current directory
  - home directory (`~`)
- - script directory 
+ - script directory
 
  If you generated a configuration file as described in [Configuration](#configuration), but saved it under a different name or in a different directory, you can specify its location using the `--config-file` flag:
 
@@ -304,7 +306,7 @@ The tool also saves the last activity information (artist, track, timestamp) to 
 <a id="listing-mode"></a>
 ### Listing Mode
 
-There is another mode of the tool that prints the recently listened tracks for the user (`-l` flag). 
+There is another mode of the tool that prints the recently listened tracks for the user (`-l` flag).
 
 You can also add the `-n` flag to specify how many tracks should be displayed, by default it shows the last 30 tracks:
 
@@ -420,6 +422,45 @@ lastfm_monitor <lastfm_username> -b lastfm_tracks_username.csv
 
 The file will be automatically created if it does not exist.
 
+<a id="lastfm-wrapped-tool"></a>
+### Last.fm Wrapped Tool
+
+The *[lastfm_wrapped.py](https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/tools/lastfm_wrapped.py)* script generates Spotify Wrapped-style statistics from CSV files created by `lastfm_monitor.py`.
+
+It analyzes your listening data and provides insights including top artists, tracks and albums for a specified time period.
+
+**Basic Usage:**
+
+By default, it generates statistics for the current year (January 1 to November 15, similar to Spotify Wrapped):
+
+```sh
+python3 tools/lastfm_wrapped.py lastfm_tracks_username.csv
+```
+
+**Custom Date Range:**
+
+You can specify a custom date range using `--from` and `--to` flags:
+
+```sh
+python3 tools/lastfm_wrapped.py lastfm_tracks_username.csv --from 2024-01-01 --to 2024-12-31
+```
+
+**Top N Items:**
+
+By default, it shows the top 5 items in each category, just like Spotify Wrapped. You can change this with the `--top-n` flag:
+
+```sh
+python3 tools/lastfm_wrapped.py lastfm_tracks_username.csv --top-n 10
+```
+
+**Example Output:**
+
+The tool displays:
+- Total scrobbles for the period
+- Top artists (by play count)
+- Top tracks (by play count)
+- Top albums (by play count)
+
 <a id="automatic-playback-of-listened-tracks-in-the-spotify-client"></a>
 ### Automatic Playback of Listened Tracks in the Spotify Client
 
@@ -437,7 +478,7 @@ In order to use this functionality you need to have Spotipy installed as describ
 
 The tool fully supports automatic playback on **Linux** and **macOS**. This means it will automatically play the changed track. It will also automatically pause and resume playback following the tracked user's actions. Additionally, it can pause or play an indicated track once the user becomes inactive (see the `SP_USER_GOT_OFFLINE_TRACK_ID` configuration option).
 
-For **Windows**, it works in a semi-automatic way: if you have the Spotify client running and you are not listening to any song, then the first track will play automatically. However, subsequent tracks will be located in the client, but you will need to press the play button manually. 
+For **Windows**, it works in a semi-automatic way: if you have the Spotify client running and you are not listening to any song, then the first track will play automatically. However, subsequent tracks will be located in the client, but you will need to press the play button manually.
 
 You can change the playback method per platform using the corresponding configuration option.
 
@@ -518,7 +559,7 @@ However, keep in mind that this is not 100% accurate. I have observed duplicate 
 If you want to customize polling intervals, use `-k` and `-c` flags (or corresponding configuration options):
 
 ```sh
-lastfm_monitor <lastfm_username> -k 2 -c 10 
+lastfm_monitor <lastfm_username> -k 2 -c 10
 ```
 
 * `LASTFM_ACTIVE_CHECK_INTERVAL`, `-k`: check interval when the user is online, i.e. currently playing (seconds)
