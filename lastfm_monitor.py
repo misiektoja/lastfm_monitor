@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.3
+v2.4
 
 Tool implementing real-time tracking of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -15,7 +15,7 @@ spotipy (optional, only for Spotify-related features)
 python-dotenv (optional)
 """
 
-VERSION = "2.3"
+VERSION = "2.4"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -677,7 +677,7 @@ def write_csv_entry(csv_file_name, timestamp, artist, track, album):
 
 # Returns the current date/time in human readable format; eg. Sun 21 Apr 2024, 15:08:45
 def get_cur_ts(ts_str=""):
-    return (f'{ts_str}{calendar.day_abbr[(datetime.fromtimestamp(int(time.time()))).weekday()]}, {datetime.fromtimestamp(int(time.time())).strftime("%d %b %Y, %H:%M:%S")}')
+    return (f'{ts_str}{calendar.day_abbr[(datetime.fromtimestamp(int(time.time()))).weekday()]} {datetime.fromtimestamp(int(time.time())).strftime("%d %b %Y, %H:%M:%S")}')
 
 
 # Prints the current date/time in human readable format with separator; eg. Sun 21 Apr 2024, 15:08:45
