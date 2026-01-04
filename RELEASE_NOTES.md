@@ -7,6 +7,7 @@ This is a high-level summary of the most important changes.
 **Features and Improvements**:
 
 - **NEW:** Added support for **tracking changes** in Last.fm user's **followers** and **followings** with console and email notifications (see `TRACK_FOLLOWINGS` / `--track-followings` and `TRACK_FOLLOWERS` / `--track-followers`)
+- **NEW:** Added **Last.fm Wrapped tool** for generating Spotify Wrapped-style statistics (top artists, tracks, albums) from CSV data
 - **NEW:** Separate check intervals for followers/followings tracking (independent from music polling intervals, see `FRIENDS_CHECK_INTERVAL` config option and `--friends-check-interval` flag)
 - **NEW:** **Persistent state storage** in JSON files (`lastfm_{username}_followings.json` and `lastfm_{username}_followers.json`) to **track changes across restarts**
 - **NEW:** **Web scraping implementation** for retrieving followers and followings (Last.fm API doesn't provide direct endpoints)
