@@ -13,6 +13,7 @@ requests
 python-dateutil
 spotipy (optional, only for Spotify-related features)
 python-dotenv (optional)
+beautifulsoup4 (optional, only for followers/followings tracking)
 """
 
 VERSION = "2.4"
@@ -297,6 +298,26 @@ ENABLE_LYRICS_COM_URL = False
 # When True: "Last played:" uses Last.fm URL and the secondary URL field shows Spotify URL
 # When False: "Last played:" uses Spotify URL and the secondary URL field shows Last.fm URL (old behavior)
 USE_LASTFM_URL_IN_LAST_PLAYED = True
+
+# Whether to track user's followings (friends) changes
+# Can also be enabled via the --track-followings flag
+TRACK_FOLLOWINGS = False
+
+# Whether to track user's followers changes
+# Can also be enabled via the --track-followers flag
+TRACK_FOLLOWERS = False
+
+# How often to check for followers/followings changes; in seconds
+# Can also be set using the --friends-check-interval flag
+FRIENDS_CHECK_INTERVAL = 300  # 5 minutes
+
+# Whether to send an email when followers change
+# Can also be enabled via the --notify-followers flag
+FOLLOWERS_NOTIFICATION = False
+
+# Whether to send an email when followings change
+# Can also be enabled via the --notify-followings flag
+FOLLOWINGS_NOTIFICATION = False
 """
 
 # -------------------------
@@ -373,6 +394,11 @@ ENABLE_YOUTUBE_MUSIC_URL = False
 ENABLE_AMAZON_MUSIC_URL = False
 ENABLE_DEEZER_URL = False
 ENABLE_TIDAL_URL = False
+TRACK_FOLLOWINGS = False
+TRACK_FOLLOWERS = False
+FRIENDS_CHECK_INTERVAL = 0
+FOLLOWERS_NOTIFICATION = False
+FOLLOWINGS_NOTIFICATION = False
 
 exec(CONFIG_BLOCK, globals())
 
@@ -1102,6 +1128,471 @@ def lastfm_get_recent_tracks(username, network, number):
         raise
 
 
+# Returns a set of usernames that the user is following (friends) - scraped from web
+def lastfm_get_friends(username):
+    from bs4 import BeautifulSoup  # type: ignore
+
+    url = f"https://www.last.fm/user/{quote_plus(username)}/following"
+    pylast_version = getattr(pylast, '__version__', 'unknown')
+    headers = {'User-Agent': f'pylast/{pylast_version} lastfm_monitor'}
+
+    try:
+        response = req.get(url, headers=headers, timeout=FUNCTION_TIMEOUT * 2)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+
+        # Check if user has no followings
+        page_text = soup.get_text()
+        if "doesn't follow anyone" in page_text.lower() or "not following anyone" in page_text.lower() or "no followings" in page_text.lower():
+            return set()
+
+        followings = set()
+        # Navigation links to exclude (these are page navigation, not actual followings)
+        excluded_paths = {
+            'overview', 'reports', 'library', 'playlists', 'following', 'followers',
+            'loved', 'obsessions', 'events', 'neighbours', 'tags', 'shouts',
+            'charts', 'music', 'events', 'search', 'upgrade', 'pro', 'log', 'sign'
+        }
+
+        # Look for the main content area that contains followings list
+        followings_container = None
+        container_selectors = [
+            'main',
+            '.content',
+            '#content',
+            '.user-list',
+            '.friends-list',
+            '[class*="following"]',
+            '[id*="following"]'
+        ]
+
+        for container_selector in container_selectors:
+            container = soup.select_one(container_selector)
+            if container:
+                # Check if this container has following-related content
+                container_text = container.get_text().lower()
+                if 'following' in container_text or 'follows' in container_text:
+                    followings_container = container
+                    break
+
+        # If we found a container, search within it; otherwise search the whole page
+        search_area = followings_container if followings_container else soup
+
+        # Look for user profile links - these should be in the format /user/username (not /user/username/something)
+        for link in search_area.find_all('a', href=True):
+            href = link.get('href', '')
+
+            # Only process links that match /user/username pattern (exactly 2 path segments)
+            if href.startswith('/user/'):
+                parts = href.split('/')
+                # href should be like /user/username or /user/username?something
+                if len(parts) >= 3 and parts[1] == 'user':
+                    user_from_href = parts[2].split('?')[0].split('#')[0]
+
+                    # Exclude navigation items and the user themselves
+                    if (user_from_href and user_from_href.lower() not in excluded_paths and user_from_href != username and user_from_href.lower() != username.lower()):
+                        # Additional validation: check if the link text looks like a username
+                        link_text = link.get_text(strip=True)
+                        if link_text and link_text.lower() not in excluded_paths:
+                            # Make sure it's not a navigation link by checking parent classes
+                            parent_classes = []
+                            parent = link.parent
+                            for _ in range(3):  # Check up to 3 levels up
+                                if parent and hasattr(parent, 'get'):
+                                    classes = parent.get('class', [])
+                                    if classes:
+                                        parent_classes.extend([c.lower() for c in classes])
+                                    parent = parent.parent if hasattr(parent, 'parent') else None
+
+                            # Exclude if it's in navigation-related containers
+                            nav_indicators = ['nav', 'menu', 'sidebar', 'header', 'footer', 'tab']
+                            if not any(indicator in ' '.join(parent_classes) for indicator in nav_indicators):
+                                followings.add(user_from_href)
+
+        return followings
+    except req.RequestException as e:
+        raise RuntimeError(f"Failed to scrape followings from Last.fm: {e}")
+    except Exception as e:
+        raise RuntimeError(f"Failed to parse followings page: {e}")
+
+
+# Returns a set of usernames that are following the user (scraped from web)
+def lastfm_get_followers(username):
+    from bs4 import BeautifulSoup  # type: ignore
+
+    url = f"https://www.last.fm/user/{quote_plus(username)}/followers"
+    pylast_version = getattr(pylast, '__version__', 'unknown')
+    headers = {'User-Agent': f'pylast/{pylast_version} lastfm_monitor'}
+
+    try:
+        response = req.get(url, headers=headers, timeout=FUNCTION_TIMEOUT * 2)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+
+        # Check if user has no followers
+        page_text = soup.get_text()
+        if "doesn't have any followers" in page_text.lower() or "no followers" in page_text.lower():
+            return set()
+
+        followers = set()
+        # Navigation links to exclude (these are page navigation, not actual followers)
+        excluded_paths = {
+            'overview', 'reports', 'library', 'playlists', 'following', 'followers',
+            'loved', 'obsessions', 'events', 'neighbours', 'tags', 'shouts',
+            'charts', 'music', 'events', 'search', 'upgrade', 'pro', 'log', 'sign'
+        }
+
+        # Look for the main content area that contains followers list
+        # Try to find the followers container first
+        followers_container = None
+        container_selectors = [
+            'main',
+            '.content',
+            '#content',
+            '.user-list',
+            '.friends-list',
+            '[class*="followers"]',
+            '[id*="followers"]'
+        ]
+
+        for container_selector in container_selectors:
+            container = soup.select_one(container_selector)
+            if container:
+                # Check if this container has follower-related content
+                container_text = container.get_text().lower()
+                if 'followers' in container_text or 'following' in container_text:
+                    followers_container = container
+                    break
+
+        # If we found a container, search within it; otherwise search the whole page
+        search_area = followers_container if followers_container else soup
+
+        # Look for user profile links - these should be in the format /user/username (not /user/username/something)
+        for link in search_area.find_all('a', href=True):
+            href = link.get('href', '')
+
+            # Only process links that match /user/username pattern (exactly 2 path segments)
+            if href.startswith('/user/'):
+                parts = href.split('/')
+                # href should be like /user/username or /user/username?something
+                if len(parts) >= 3 and parts[1] == 'user':
+                    user_from_href = parts[2].split('?')[0].split('#')[0]
+
+                    # Exclude navigation items and the user themselves
+                    if (user_from_href and user_from_href.lower() not in excluded_paths and user_from_href != username and user_from_href.lower() != username.lower()):
+                        # Additional validation: check if the link text looks like a username
+                        # (not like "Overview", "Following", etc. which are navigation)
+                        link_text = link.get_text(strip=True)
+                        if link_text and link_text.lower() not in excluded_paths:
+                            # Make sure it's not a navigation link by checking parent classes
+                            parent_classes = []
+                            parent = link.parent
+                            for _ in range(3):  # Check up to 3 levels up
+                                if parent and hasattr(parent, 'get'):
+                                    classes = parent.get('class', [])
+                                    if classes:
+                                        parent_classes.extend([c.lower() for c in classes])
+                                    parent = parent.parent if hasattr(parent, 'parent') else None
+
+                            # Exclude if it's in navigation-related containers
+                            nav_indicators = ['nav', 'menu', 'sidebar', 'header', 'footer', 'tab']
+                            if not any(indicator in ' '.join(parent_classes) for indicator in nav_indicators):
+                                followers.add(user_from_href)
+
+        return followers
+    except req.RequestException as e:
+        raise RuntimeError(f"Failed to scrape followers from Last.fm: {e}")
+    except Exception as e:
+        raise RuntimeError(f"Failed to parse followers page: {e}")
+
+
+# Loads previous friends/followers state from JSON file
+def load_friends_state(username, friends_type):
+    filename = f"lastfm_{username}_{friends_type}.json"
+    if os.path.isfile(filename):
+        try:
+            with open(filename, 'r', encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return set(data)
+                elif isinstance(data, dict) and 'users' in data:
+                    return set(data['users'])
+                else:
+                    return set()
+        except Exception as e:
+            print(f"* Warning: Cannot load {friends_type} state from '{filename}': {e}")
+            return set()
+    return set()
+
+
+# Saves current friends/followers state to JSON file
+def save_friends_state(username, friends_type, users_set):
+    filename = f"lastfm_{username}_{friends_type}.json"
+    try:
+        data = {
+            'users': sorted(list(users_set)),
+            'count': len(users_set),
+            'last_updated': int(time.time())
+        }
+        with open(filename, 'w', encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        print(f"* Warning: Cannot save {friends_type} state to '{filename}': {e}")
+
+
+# Checks for changes in friends/followers and returns change information
+def check_friends_changes(username, track_followings, track_followers):
+    changes = {}
+
+    if track_followings:
+        try:
+            previous_friends = load_friends_state(username, 'followings')
+            current_friends = lastfm_get_friends(username)
+
+            added_friends = current_friends - previous_friends
+            removed_friends = previous_friends - current_friends
+
+            if added_friends or removed_friends:
+                changes['followings'] = {
+                    'added': sorted(list(added_friends)),
+                    'removed': sorted(list(removed_friends)),
+                    'current_count': len(current_friends),
+                    'previous_count': len(previous_friends)
+                }
+                save_friends_state(username, 'followings', current_friends)
+            else:
+                # Still save to update timestamp even if no changes
+                save_friends_state(username, 'followings', current_friends)
+        except Exception as e:
+            print(f"* Error checking followings: {e}")
+
+    if track_followers:
+        try:
+            previous_followers = load_friends_state(username, 'followers')
+            current_followers = lastfm_get_followers(username)
+
+            added_followers = current_followers - previous_followers
+            removed_followers = previous_followers - current_followers
+
+            if added_followers or removed_followers:
+                changes['followers'] = {
+                    'added': sorted(list(added_followers)),
+                    'removed': sorted(list(removed_followers)),
+                    'current_count': len(current_followers),
+                    'previous_count': len(previous_followers)
+                }
+                save_friends_state(username, 'followers', current_followers)
+            else:
+                # Still save to update timestamp even if no changes
+                save_friends_state(username, 'followers', current_followers)
+        except Exception as e:
+            print(f"* Error checking followers: {e}")
+
+    return changes
+
+
+# Sends notification about friends/followers changes
+def notify_friends_changes(username, changes, skip_initial_line=False):
+    if not changes:
+        return
+
+    current_time = int(time.time())
+    check_interval_str = display_time(FRIENDS_CHECK_INTERVAL) if FRIENDS_CHECK_INTERVAL > 0 else "N/A"
+    check_range = get_range_of_dates_from_tss(current_time - FRIENDS_CHECK_INTERVAL, current_time, short=True) if FRIENDS_CHECK_INTERVAL > 0 else ""
+
+    # Handle followings changes
+    if 'followings' in changes:
+        f_changes = changes['followings']
+        added = f_changes['added']
+        removed = f_changes['removed']
+        current_count = f_changes['current_count']
+        previous_count = f_changes['previous_count']
+        change_count = len(added) - len(removed)
+
+        if not skip_initial_line:
+            print("─" * HORIZONTAL_LINE)
+        change_str = f"{change_count:+d}" if change_count != 0 else "0"
+        print(f"* Followings number changed by user {username} from {previous_count} to {current_count} ({change_str})")
+
+        if added:
+            print(f"\nAdded followings:")
+            print()
+            for user in added:
+                user_url = f"https://www.last.fm/user/{quote_plus(user)}"
+                print(f"- {user} [ {user_url} ]")
+
+        if removed:
+            if not added:
+                print()
+            elif added:
+                print()
+            print(f"Removed followings:")
+            print()
+            for user in removed:
+                user_url = f"https://www.last.fm/user/{quote_plus(user)}"
+                print(f"- {user} [ {user_url} ]")
+
+        if FOLLOWINGS_NOTIFICATION:
+            change_str = f"{change_count:+d}" if change_count != 0 else "0"
+            subject = f"Last.fm user {username} followings number has changed! ({change_str}, {previous_count} -> {current_count})"
+
+            body_parts = []
+            body_parts.append(f"Followings number changed by user {username} from {previous_count} to {current_count} ({change_str})")
+            body_parts.append("")
+
+            if added:
+                body_parts.append("Added followings:")
+                body_parts.append("")
+                for user in added:
+                    body_parts.append(f"- {user}")
+
+            if removed:
+                if added:
+                    body_parts.append("")
+                body_parts.append("Removed followings:")
+                body_parts.append("")
+                for user in removed:
+                    body_parts.append(f"- {user}")
+
+            body_parts.append("")
+            if check_range:
+                body_parts.append(f"Check interval: {check_interval_str} ({check_range})")
+            body_parts.append(f"Timestamp: {get_cur_ts('')}")
+
+            html_parts = []
+            html_parts.append(f"Followings number changed by user <b>{escape(username)}</b> from <b>{previous_count}</b> to <b>{current_count}</b> (<b>{change_str}</b>)")
+            html_parts.append("<br><br>")
+
+            if added:
+                html_parts.append("<b>Added followings:</b>")
+                html_parts.append("<br><br>")
+                for user in added:
+                    user_url = f"https://www.last.fm/user/{quote_plus(user)}"
+                    html_parts.append(f'- <a href="{user_url}">{escape(user)}</a>')
+                html_parts.append("<br>")
+
+            if removed:
+                if added:
+                    html_parts.append("<br>")
+                html_parts.append("<b>Removed followings:</b>")
+                html_parts.append("<br><br>")
+                for user in removed:
+                    user_url = f"https://www.last.fm/user/{quote_plus(user)}"
+                    html_parts.append(f'- <a href="{user_url}">{escape(user)}</a>')
+                html_parts.append("<br>")
+
+            html_parts.append("<br>")
+            if check_range:
+                html_parts.append(f"Check interval: <b>{check_interval_str}</b> (<b>{check_range}</b>)")
+            html_parts.append(f"<br>Timestamp: <b>{get_cur_ts('')}</b>")
+
+            body = "\n".join(body_parts)
+            body_html = f"<html><head></head><body>{''.join(html_parts)}</body></html>"
+
+            print(f"\nSending email notification to {RECEIVER_EMAIL}")
+            send_email(subject, body, body_html, SMTP_SSL)
+
+        if check_range:
+            print(f"\nCheck interval:\t\t\t{check_interval_str} ({check_range})")
+        print_cur_ts("Timestamp:\t\t\t")
+
+    # Handle followers changes
+    if 'followers' in changes:
+        f_changes = changes['followers']
+        added = f_changes['added']
+        removed = f_changes['removed']
+        current_count = f_changes['current_count']
+        previous_count = f_changes['previous_count']
+        change_count = len(added) - len(removed)
+
+        if not skip_initial_line:
+            print("─" * HORIZONTAL_LINE)
+        change_str = f"{change_count:+d}" if change_count != 0 else "0"
+        print(f"* Followers number changed for user {username} from {previous_count} to {current_count} ({change_str})")
+
+        if added:
+            print(f"\nAdded followers:")
+            print()
+            for user in added:
+                user_url = f"https://www.last.fm/user/{quote_plus(user)}"
+                print(f"- {user} [ {user_url} ]")
+
+        if removed:
+            if not added:
+                print()
+            elif added:
+                print()
+            print(f"Removed followers:")
+            print()
+            for user in removed:
+                user_url = f"https://www.last.fm/user/{quote_plus(user)}"
+                print(f"- {user} [ {user_url} ]")
+
+        if FOLLOWERS_NOTIFICATION:
+            change_str = f"{change_count:+d}" if change_count != 0 else "0"
+            subject = f"Last.fm user {username} followers number has changed! ({change_str}, {previous_count} -> {current_count})"
+
+            body_parts = []
+            body_parts.append(f"Followers number changed for user {username} from {previous_count} to {current_count} ({change_str})")
+            body_parts.append("")
+
+            if added:
+                body_parts.append("Added followers:")
+                body_parts.append("")
+                for user in added:
+                    body_parts.append(f"- {user}")
+
+            if removed:
+                if added:
+                    body_parts.append("")
+                body_parts.append("Removed followers:")
+                body_parts.append("")
+                for user in removed:
+                    body_parts.append(f"- {user}")
+
+            body_parts.append("")
+            if check_range:
+                body_parts.append(f"Check interval: {check_interval_str} ({check_range})")
+            body_parts.append(f"Timestamp: {get_cur_ts('')}")
+
+            html_parts = []
+            html_parts.append(f"Followers number changed for user <b>{escape(username)}</b> from <b>{previous_count}</b> to <b>{current_count}</b> (<b>{change_str}</b>)")
+            html_parts.append("<br><br>")
+
+            if added:
+                html_parts.append("<b>Added followers:</b>")
+                html_parts.append("<br><br>")
+                for user in added:
+                    user_url = f"https://www.last.fm/user/{quote_plus(user)}"
+                    html_parts.append(f'- <a href="{user_url}">{escape(user)}</a>')
+                html_parts.append("<br>")
+
+            if removed:
+                if added:
+                    html_parts.append("<br>")
+                html_parts.append("<b>Removed followers:</b>")
+                html_parts.append("<br><br>")
+                for user in removed:
+                    user_url = f"https://www.last.fm/user/{quote_plus(user)}"
+                    html_parts.append(f'- <a href="{user_url}">{escape(user)}</a>')
+                html_parts.append("<br>")
+
+            html_parts.append("<br>")
+            if check_range:
+                html_parts.append(f"Check interval: <b>{check_interval_str}</b> (<b>{check_range}</b>)")
+            html_parts.append(f"<br>Timestamp: <b>{get_cur_ts('')}</b>")
+
+            body = "\n".join(body_parts)
+            body_html = f"<html><head></head><body>{''.join(html_parts)}</body></html>"
+
+            print(f"\nSending email notification to {RECEIVER_EMAIL}")
+            send_email(subject, body, body_html, SMTP_SSL)
+
+        if check_range:
+            print(f"\nCheck interval:\t\t\t{check_interval_str} ({check_range})")
+        print_cur_ts("Timestamp:\t\t\t")
+
+
 # Displays the list of recently played Last.fm tracks
 def lastfm_list_tracks(username, user, network, number, csv_file_name):
 
@@ -1712,6 +2203,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
     error_500_start_ts = 0
     error_network_issue_counter = 0
     error_network_issue_start_ts = 0
+    friends_check_last_ts = 0
 
     try:
         if csv_file_name:
@@ -2067,9 +2559,92 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
 
     tracks_upper = {t.upper() for t in tracks}
 
+    # Initialize friends/followers tracking if enabled
+    if TRACK_FOLLOWINGS or TRACK_FOLLOWERS:
+        print(f"* Friends/followers tracking enabled")
+
+        # Do initial check
+        try:
+            followings_file_exists = os.path.isfile(f"lastfm_{username}_followings.json")
+            followers_file_exists = os.path.isfile(f"lastfm_{username}_followers.json")
+
+            if TRACK_FOLLOWINGS and followings_file_exists:
+                followings_loaded = load_friends_state(username, 'followings')
+                followings_count = len(followings_loaded)
+                print(f"* Loading followings for user {username} from file lastfm_{username}_followings.json ({followings_count})")
+
+            if TRACK_FOLLOWERS and followers_file_exists:
+                followers_loaded = load_friends_state(username, 'followers')
+                followers_count = len(followers_loaded)
+                print(f"* Loading followers for user {username} from file lastfm_{username}_followers.json ({followers_count})")
+
+            initial_changes = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS)
+            if initial_changes:
+                followings_is_initial = 'followings' in initial_changes and initial_changes['followings']['previous_count'] == 0 and not followings_file_exists
+                followers_is_initial = 'followers' in initial_changes and initial_changes['followers']['previous_count'] == 0 and not followers_file_exists
+
+                if followings_is_initial:
+                    if os.path.isfile(f"lastfm_{username}_followings.json"):
+                        followings_count = initial_changes['followings']['current_count']
+                        print(f"* Saving followings for user {username} to file lastfm_{username}_followings.json ({followings_count})")
+                    # Don't notify on initial fetch - this is just baseline
+                    if 'followings' in initial_changes:
+                        del initial_changes['followings']
+
+                if followers_is_initial:
+                    if os.path.isfile(f"lastfm_{username}_followers.json"):
+                        followers_count = initial_changes['followers']['current_count']
+                        print(f"* Saving followers for user {username} to file lastfm_{username}_followers.json ({followers_count})")
+                    # Don't notify on initial fetch - this is just baseline
+                    if 'followers' in initial_changes:
+                        del initial_changes['followers']
+
+                # Only notify if there are real changes (not initial fetch)
+                if initial_changes:
+                    notify_friends_changes(username, initial_changes, skip_initial_line=True)
+                else:
+                    # No changes, just print timestamp
+                    print_cur_ts("\nTimestamp:\t\t\t")
+            else:
+                # No changes detected - show initial counts only if files didn't exist before
+                if not followings_file_exists and not followers_file_exists:
+                    if TRACK_FOLLOWINGS or TRACK_FOLLOWERS:
+                        print()
+                if TRACK_FOLLOWINGS:
+                    if not followings_file_exists:
+                        followings_count = len(load_friends_state(username, 'followings'))
+                        if os.path.isfile(f"lastfm_{username}_followings.json"):
+                            print(f"* Saving followings for user {username} to file lastfm_{username}_followings.json ({followings_count})")
+                if TRACK_FOLLOWERS:
+                    if not followers_file_exists:
+                        followers_count = len(load_friends_state(username, 'followers'))
+                        if os.path.isfile(f"lastfm_{username}_followers.json"):
+                            print(f"* Saving followers for user {username} to file lastfm_{username}_followers.json ({followers_count})")
+
+                print_cur_ts("\nTimestamp:\t\t\t")
+        except Exception as e:
+            print(f"* Warning: Initial friends check failed: {e}")
+
+        friends_check_last_ts = int(time.time())
+
     # Main loop
     while True:
         try:
+            # Check for friends/followers changes if enabled and interval has passed
+            if (TRACK_FOLLOWINGS or TRACK_FOLLOWERS) and FRIENDS_CHECK_INTERVAL > 0:
+                current_ts = int(time.time())
+                if (current_ts - friends_check_last_ts) >= FRIENDS_CHECK_INTERVAL:
+                    try:
+                        changes = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS)
+                        if changes:
+                            notify_friends_changes(username, changes, skip_initial_line=not PROGRESS_INDICATOR)
+                    except Exception as e:
+                        print(f"* Error during friends check: {e}")
+                        print_cur_ts("Timestamp:\t\t\t")
+                    finally:
+                        # Update timestamp even on error to avoid rapid retries
+                        friends_check_last_ts = current_ts
+
             recent_tracks = lastfm_get_recent_tracks(username, network, 1)
             # Handle case where user still has no tracks
             if not recent_tracks or len(recent_tracks) == 0:
@@ -2837,7 +3412,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
 
 
 def main():
-    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, SP_TOKENS_FILE
+    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, SP_TOKENS_FILE, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION
 
     if "--generate-config" in sys.argv:
         print(CONFIG_BLOCK.strip("\n"))
@@ -2962,6 +3537,20 @@ def main():
         help="Email when user plays a song on loop"
     )
     notify.add_argument(
+        "--notify-followers",
+        dest="notify_followers",
+        action="store_true",
+        default=None,
+        help="Email when followers change"
+    )
+    notify.add_argument(
+        "--notify-followings",
+        dest="notify_followings",
+        action="store_true",
+        default=None,
+        help="Email when followings (friends) change"
+    )
+    notify.add_argument(
         "-e", "--no-error-notify",
         action="store_false",
         dest="notify_errors",
@@ -3004,6 +3593,13 @@ def main():
         metavar="N",
         type=int,
         help="Detect play breaks as N×active-interval"
+    )
+    times.add_argument(
+        "--friends-check-interval",
+        dest="friends_check_interval",
+        metavar="SECONDS",
+        type=int,
+        help="How often to check for followers/followings changes"
     )
 
     # Listing mode
@@ -3067,7 +3663,20 @@ def main():
         type=str,
         help="Filename with tracks/albums to alert on"
     )
-
+    opts.add_argument(
+        "--track-followings",
+        dest="track_followings",
+        action="store_true",
+        default=None,
+        help="Track changes in user's followings (friends)"
+    )
+    opts.add_argument(
+        "--track-followers",
+        dest="track_followers",
+        action="store_true",
+        default=None,
+        help="Track changes in user's followers"
+    )
     opts.add_argument(
         "-d", "--disable-logging",
         dest="disable_logging",
@@ -3280,6 +3889,30 @@ def main():
     if args.notify_errors is False:
         ERROR_NOTIFICATION = False
 
+    if args.notify_followers is True:
+        FOLLOWERS_NOTIFICATION = True
+
+    if args.notify_followings is True:
+        FOLLOWINGS_NOTIFICATION = True
+
+    if args.track_followings is True:
+        TRACK_FOLLOWINGS = True
+
+    if args.track_followers is True:
+        TRACK_FOLLOWERS = True
+
+    # Check for beautifulsoup4 if followers/followings tracking is enabled
+    if TRACK_FOLLOWINGS or TRACK_FOLLOWERS:
+        try:
+            import bs4  # type: ignore
+        except ImportError:
+            print("* Error: beautifulsoup4 is required for followers/followings tracking")
+            print("* Install it with: pip install beautifulsoup4")
+            sys.exit(1)
+
+    if args.friends_check_interval:
+        FRIENDS_CHECK_INTERVAL = args.friends_check_interval
+
     if args.track_in_spotify is True:
         TRACK_SONGS = True
 
@@ -3305,7 +3938,9 @@ def main():
         ERROR_NOTIFICATION = False
 
     print(f"* Last.fm polling intervals:\t[offline check: {display_time(LASTFM_CHECK_INTERVAL)}] [active check: {display_time(LASTFM_ACTIVE_CHECK_INTERVAL)}]\n*\t\t\t\t[inactivity: {display_time(LASTFM_INACTIVITY_CHECK)}]")
-    print(f"* Email notifications:\t\t[active = {ACTIVE_NOTIFICATION}] [inactive = {INACTIVE_NOTIFICATION}] [tracked = {TRACK_NOTIFICATION}] [every song = {SONG_NOTIFICATION}]\n*\t\t\t\t[songs on loop = {SONG_ON_LOOP_NOTIFICATION}] [offline entries = {OFFLINE_ENTRIES_NOTIFICATION}] [errors = {ERROR_NOTIFICATION}]")
+    if TRACK_FOLLOWINGS or TRACK_FOLLOWERS:
+        print(f"* Friends/followers tracking:\t[followings = {TRACK_FOLLOWINGS}] [followers = {TRACK_FOLLOWERS}]" + (f" [interval: {display_time(FRIENDS_CHECK_INTERVAL)}]" if FRIENDS_CHECK_INTERVAL > 0 else ""))
+    print(f"* Email notifications:\t\t[active = {ACTIVE_NOTIFICATION}] [inactive = {INACTIVE_NOTIFICATION}] [tracked = {TRACK_NOTIFICATION}] [every song = {SONG_NOTIFICATION}]\n*\t\t\t\t[songs on loop = {SONG_ON_LOOP_NOTIFICATION}] [offline entries = {OFFLINE_ENTRIES_NOTIFICATION}] [errors = {ERROR_NOTIFICATION}]\n*\t\t\t\t[followers = {FOLLOWERS_NOTIFICATION}] [followings = {FOLLOWINGS_NOTIFICATION}]")
     print(f"* Progress indicator:\t\t{PROGRESS_INDICATOR}")
     print(f"* Track listened songs:\t\t{TRACK_SONGS}")
     print(f"* Track duration (Spotify):\t{USE_TRACK_DURATION_FROM_SPOTIFY}")
