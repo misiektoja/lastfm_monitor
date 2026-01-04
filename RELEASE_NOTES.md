@@ -1,6 +1,20 @@
 # lastfm_monitor release notes
 
-This is a high-level summary of the most important changes. 
+This is a high-level summary of the most important changes.
+
+# Changes in 2.4 (04 Jan 2026)
+
+**Features and Improvements**:
+
+- **NEW:** Added support for **tracking changes** in Last.fm user's **followers** and **followings** with console and email notifications (see `TRACK_FOLLOWINGS` / `--track-followings` and `TRACK_FOLLOWERS` / `--track-followers`)
+- **NEW:** Separate check intervals for followers/followings tracking (independent from music polling intervals, see `FRIENDS_CHECK_INTERVAL` config option and `--friends-check-interval` flag)
+- **NEW:** **Persistent state storage** in JSON files (`lastfm_{username}_followings.json` and `lastfm_{username}_followers.json`) to **track changes across restarts**
+- **NEW:** **Web scraping implementation** for retrieving followers and followings (Last.fm API doesn't provide direct endpoints)
+- **NEW:** Added **clickable Last.fm profile links** for added/removed users
+
+**Dependencies**:
+
+- **NEW:** Added **beautifulsoup4** dependency for **followers/followings tracking** functionality
 
 # Changes in 2.3 (11 Nov 2025)
 
