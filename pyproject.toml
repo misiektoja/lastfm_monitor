@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lastfm_monitor"
-version = "2.3"
+version = "2.4"
 description = "Tool implementing real-time tracking of Last.fm users music activity"
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -17,6 +17,7 @@ dependencies = [
   "python-dateutil>=2.8",
   "spotipy>=2.24.0",
   "python-dotenv>=0.19",
+  "beautifulsoup4>=4.9.0",
 ]
 classifiers = [
   "Programming Language :: Python :: 3",
