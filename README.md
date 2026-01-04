@@ -9,13 +9,16 @@ lastfm_monitor is a tool for real-time monitoring of **Last.fm users' music acti
 - Possibility to **automatically play songs** listened by the tracked user in your local Spotify client
 - Information about when a **user pauses or resumes playback** with the option to show a **track progress indicator**
 - Information about the **duration** the user listened to a song and whether the **song was skipped** and if it was **shorter or longer than the track duration**
-- **Email notifications** for various events (user becomes active or inactive, specific or all songs, songs on loop, new entries appearing while user was offline, errors)
+- **Tracking** of Last.fm user's **followers and followings** with notifications when users are added or removed
+- **Email notifications** for various events (user becomes active or inactive, specific or all songs, songs on loop, new entries appearing while user was offline, followers/followings changes, errors)
 - **Saving all listened songs** with timestamps to the **CSV file**
 - **Last.fm Wrapped tool** for generating Spotify Wrapped-style statistics (top artists, tracks, albums) from CSV data
 - **Clickable** **Last.fm**, **Apple Music**, **YouTube Music**, **Amazon Music**, **Deezer**, **Tidal**, **Genius Lyrics**, **AZLyrics**, **Tekstowo.pl**, **Musixmatch** and **Lyrics.com** search URLs printed in the console and included in email notifications (configurable per service)
 - Displaying **basic statistics for the user's playing session** (duration, time span, number of listened and skipped songs, songs on loop, paused playback time and number of pauses, songs played count)
 - Support for detecting **offline mode**
 - Support for detecting **Spotify's private mode** (not 100% accurate)
+- **Status persistence** - automatically saves the last activity status and the number and list of followings/followers to JSON files to track changes across restarts
+- **Flexible configuration** - support for config files, dotenv files, environment variables and command-line arguments
 - Possibility to **control the running copy** of the script via signals
 - **Functional, procedural Python** (minimal OOP)
 
@@ -59,7 +62,7 @@ lastfm_monitor is a tool for real-time monitoring of **Last.fm users' music acti
 ## Requirements
 
 * Python 3.9 or higher
-* Libraries: [pyLast](https://github.com/pylast/pylast), `requests`, `python-dateutil`, [Spotipy](https://github.com/spotipy-dev/spotipy), `python-dotenv`
+* Libraries: [pyLast](https://github.com/pylast/pylast), `requests`, `python-dateutil`, [Spotipy](https://github.com/spotipy-dev/spotipy), `python-dotenv`, `beautifulsoup4`
 
 Tested on:
 
@@ -87,7 +90,7 @@ Download the *[lastfm_monitor.py](https://raw.githubusercontent.com/misiektoja/l
 Install dependencies via pip:
 
 ```sh
-pip install pylast requests python-dateutil spotipy python-dotenv
+pip install pylast requests python-dateutil spotipy python-dotenv beautifulsoup4
 ```
 
 Alternatively, from the downloaded *[requirements.txt](https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/requirements.txt)*:
@@ -295,13 +298,21 @@ By default, the tool looks for a configuration file named `lastfm_monitor.conf` 
 lastfm_monitor <lastfm_username> --config-file /path/lastfm_monitor_new.conf
 ```
 
+To enable tracking of followers and/or followings changes:
+- set `TRACK_FOLLOWERS` and/or `TRACK_FOLLOWINGS` to `True`
+- or use the `--track-followers` and/or `--track-followings` flags
+
+```sh
+lastfm_monitor <lastfm_username> --track-followers --track-followings
+```
+
 The tool runs until interrupted (`Ctrl+C`). Use `tmux` or `screen` for persistence.
 
 You can monitor multiple Last.fm users by running multiple copies of the script.
 
 The tool automatically saves its output to `lastfm_monitor_<username>.log` file. It can be changed in the settings via `LF_LOGFILE` configuration option or disabled completely via `DISABLE_LOGGING` / `-d` flag.
 
-The tool also saves the last activity information (artist, track, timestamp) to `lastfm_<username>_last_activity.json file`, so it can be reused in case the tool needs to be restarted.
+The tool also saves the last activity information (artist, track, timestamp) to `lastfm_<username>_last_activity.json` file and the number and list of followings and followers to `lastfm_<username>_followings.json` and `lastfm_<username>_followers.json` files (if tracking is enabled), so this data can be reused if the tool is restarted.
 
 <a id="listing-mode"></a>
 ### Listing Mode
@@ -400,6 +411,24 @@ To disable sending an email on errors (enabled by default):
 ```sh
 lastfm_monitor <lastfm_username> -e
 ```
+
+To be notified when a user's followers change:
+- set `FOLLOWERS_NOTIFICATION` to `True`
+- or use the `--notify-followers` flag
+
+```sh
+lastfm_monitor <lastfm_username> --track-followers --notify-followers
+```
+
+To be notified when a user's followings (friends) change:
+- set `FOLLOWINGS_NOTIFICATION` to `True`
+- or use the `--notify-followings` flag
+
+```sh
+lastfm_monitor <lastfm_username> --track-followings --notify-followings
+```
+
+Notifications for changed followers and/or followings are only sent if tracking functionality is enabled (`--track-followers` and/or `--track-followings` flags).
 
 You can also decide to use Last.fm or Spotify URL in "Last played:" / "Track:" field in HTML email notifications (see `USE_LASTFM_URL_IN_LAST_PLAYED` config option).
 
@@ -556,7 +585,7 @@ However, keep in mind that this is not 100% accurate. I have observed duplicate 
 <a id="check-intervals"></a>
 ### Check Intervals
 
-If you want to customize polling intervals, use `-k` and `-c` flags (or corresponding configuration options):
+If you want to customize music polling intervals, use `-k` and `-c` flags (or corresponding configuration options):
 
 ```sh
 lastfm_monitor <lastfm_username> -k 2 -c 10
@@ -570,6 +599,8 @@ If you want to change the time required to mark the user as inactive (the timer 
 ```sh
 lastfm_monitor <lastfm_username> -o 120
 ```
+
+Followers/followings tracking functionality uses a separate check interval which you can set via `FRIENDS_CHECK_INTERVAL` configuration option or `--friends-check-interval` flag. This is independent from the music polling intervals.
 
 <a id="signal-controls-macoslinuxunix"></a>
 ### Signal Controls (macOS/Linux/Unix)
