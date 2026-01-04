@@ -9,7 +9,7 @@ lastfm_monitor is a tool for real-time monitoring of **Last.fm users' music acti
 - Possibility to **automatically play songs** listened by the tracked user in your local Spotify client
 - Information about when a **user pauses or resumes playback** with the option to show a **track progress indicator**
 - Information about the **duration** the user listened to a song and whether the **song was skipped** and if it was **shorter or longer than the track duration**
-- **Tracking** of Last.fm user's **followers and followings** with notifications when users are added or removed
+- **Tracking** of Last.fm user's **followers** and **followings** with notifications when users are added or removed
 - **Email notifications** for various events (user becomes active or inactive, specific or all songs, songs on loop, new entries appearing while user was offline, followers/followings changes, errors)
 - **Saving all listened songs** with timestamps to the **CSV file**
 - **Last.fm Wrapped tool** for generating Spotify Wrapped-style statistics (top artists, tracks, albums) from CSV data
