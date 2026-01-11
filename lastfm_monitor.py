@@ -1196,7 +1196,7 @@ def lastfm_get_friends(username):
             href = link.get('href', '')
 
             # Only process links that match /user/username pattern (exactly 2 path segments)
-            if href.startswith('/user/'):
+            if isinstance(href, str) and href.startswith('/user/'):
                 parts = href.split('/')
                 # href should be like /user/username or /user/username?something
                 if len(parts) >= 3 and parts[1] == 'user':
@@ -1212,9 +1212,9 @@ def lastfm_get_friends(username):
                             parent = link.parent
                             for _ in range(3):  # Check up to 3 levels up
                                 if parent and hasattr(parent, 'get'):
-                                    classes = parent.get('class', [])
-                                    if classes:
-                                        parent_classes.extend([c.lower() for c in classes])
+                                    classes = parent.get('class')
+                                    if classes and isinstance(classes, list):
+                                        parent_classes.extend([str(c).lower() for c in classes])
                                     parent = parent.parent if hasattr(parent, 'parent') else None
 
                             # Exclude if it's in navigation-related containers
@@ -1291,7 +1291,7 @@ def lastfm_get_followers(username):
             href = link.get('href', '')
 
             # Only process links that match /user/username pattern (exactly 2 path segments)
-            if href.startswith('/user/'):
+            if isinstance(href, str) and href.startswith('/user/'):
                 parts = href.split('/')
                 # href should be like /user/username or /user/username?something
                 if len(parts) >= 3 and parts[1] == 'user':
@@ -1308,9 +1308,9 @@ def lastfm_get_followers(username):
                             parent = link.parent
                             for _ in range(3):  # Check up to 3 levels up
                                 if parent and hasattr(parent, 'get'):
-                                    classes = parent.get('class', [])
-                                    if classes:
-                                        parent_classes.extend([c.lower() for c in classes])
+                                    classes = parent.get('class')
+                                    if classes and isinstance(classes, list):
+                                        parent_classes.extend([str(c).lower() for c in classes])
                                     parent = parent.parent if hasattr(parent, 'parent') else None
 
                             # Exclude if it's in navigation-related containers
