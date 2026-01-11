@@ -1226,7 +1226,15 @@ def lastfm_get_friends(username):
         if not followings:
             # If we found 0 followings, check if the "no followings" text was present
             # If not, it might be a scraping error/API glitch
-            if not ("doesn't follow anyone" in page_text.lower() or "not following anyone" in page_text.lower() or "no followings" in page_text.lower()):
+            page_lower = page_text.lower()
+            empty_indicators = [
+                "doesn't follow anyone",
+                "not following anyone",
+                "no followings",
+                "follow anyone yet",
+                "is not following"
+            ]
+            if not any(indicator in page_lower for indicator in empty_indicators):
                 raise RuntimeError("No followings found and no 'empty followings' indicator detected (possible scraping error or transient API issue)")
 
         return followings
@@ -1322,7 +1330,14 @@ def lastfm_get_followers(username):
         if not followers:
             # If we found 0 followers, check if the "no followers" text was present
             # If not, it might be a scraping error/API glitch
-            if not ("doesn't have any followers" in page_text.lower() or "no followers" in page_text.lower()):
+            page_lower = page_text.lower()
+            empty_indicators = [
+                "doesn't have any followers",
+                "no followers",
+                "any followers yet",
+                "no one is following"
+            ]
+            if not any(indicator in page_lower for indicator in empty_indicators):
                 raise RuntimeError("No followers found and no 'empty followers' indicator detected (possible scraping error or transient API issue)")
 
         return followers
