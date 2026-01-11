@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.4
+v2.4.1
 
 Tool implementing real-time tracking of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -16,7 +16,7 @@ python-dotenv (optional)
 beautifulsoup4 (optional, only for followers/followings tracking)
 """
 
-VERSION = "2.4"
+VERSION = "2.4.1"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -318,6 +318,17 @@ FOLLOWERS_NOTIFICATION = False
 # Whether to send an email when followings change
 # Can also be enabled via the --notify-followings flag
 FOLLOWINGS_NOTIFICATION = False
+
+# Number of consecutive checks required to confirm a change in followers/followings
+# to avoid false notifications caused by transient API glitches
+# Can also be set using the --friends-change-counter flag
+FRIENDS_CHANGE_COUNTER = 3
+
+# Timeout used when confirming transient changes; in seconds
+# If this is set higher than FRIENDS_CHECK_INTERVAL, it effectively throttles the checks
+# during the confirmation phase
+# Can also be set using the --friends-retry-interval flag
+FRIENDS_RETRY_INTERVAL = 60
 """
 
 # -------------------------
@@ -399,6 +410,8 @@ TRACK_FOLLOWERS = False
 FRIENDS_CHECK_INTERVAL = 0
 FOLLOWERS_NOTIFICATION = False
 FOLLOWINGS_NOTIFICATION = False
+FRIENDS_CHANGE_COUNTER = 0
+FRIENDS_RETRY_INTERVAL = 0
 
 exec(CONFIG_BLOCK, globals())
 
@@ -1209,6 +1222,12 @@ def lastfm_get_friends(username):
                             if not any(indicator in ' '.join(parent_classes) for indicator in nav_indicators):
                                 followings.add(user_from_href)
 
+        if not followings:
+            # If we found 0 followings, check if the "no followings" text was present
+            # If not, it might be a scraping error/API glitch
+            if not ("doesn't follow anyone" in page_text.lower() or "not following anyone" in page_text.lower() or "no followings" in page_text.lower()):
+                raise RuntimeError("No followings found and no 'empty followings' indicator detected (possible scraping error or transient API issue)")
+
         return followings
     except req.RequestException as e:
         raise RuntimeError(f"Failed to scrape followings from Last.fm: {e}")
@@ -1299,6 +1318,12 @@ def lastfm_get_followers(username):
                             if not any(indicator in ' '.join(parent_classes) for indicator in nav_indicators):
                                 followers.add(user_from_href)
 
+        if not followers:
+            # If we found 0 followers, check if the "no followers" text was present
+            # If not, it might be a scraping error/API glitch
+            if not ("doesn't have any followers" in page_text.lower() or "no followers" in page_text.lower()):
+                raise RuntimeError("No followers found and no 'empty followers' indicator detected (possible scraping error or transient API issue)")
+
         return followers
     except req.RequestException as e:
         raise RuntimeError(f"Failed to scrape followers from Last.fm: {e}")
@@ -1341,7 +1366,7 @@ def save_friends_state(username, friends_type, users_set):
 
 
 # Checks for changes in friends/followers and returns change information
-def check_friends_changes(username, track_followings, track_followers):
+def check_friends_changes(username, track_followings, track_followers, save_state=True, raise_on_error=False):
     changes = {}
 
     if track_followings:
@@ -1359,11 +1384,15 @@ def check_friends_changes(username, track_followings, track_followers):
                     'current_count': len(current_friends),
                     'previous_count': len(previous_friends)
                 }
-                save_friends_state(username, 'followings', current_friends)
+                if save_state:
+                    save_friends_state(username, 'followings', current_friends)
             else:
                 # Still save to update timestamp even if no changes
-                save_friends_state(username, 'followings', current_friends)
+                if save_state:
+                    save_friends_state(username, 'followings', current_friends)
         except Exception as e:
+            if raise_on_error:
+                raise e
             print(f"* Error checking followings: {e}")
 
     if track_followers:
@@ -1381,11 +1410,15 @@ def check_friends_changes(username, track_followings, track_followers):
                     'current_count': len(current_followers),
                     'previous_count': len(previous_followers)
                 }
-                save_friends_state(username, 'followers', current_followers)
+                if save_state:
+                    save_friends_state(username, 'followers', current_followers)
             else:
                 # Still save to update timestamp even if no changes
-                save_friends_state(username, 'followers', current_followers)
+                if save_state:
+                    save_friends_state(username, 'followers', current_followers)
         except Exception as e:
+            if raise_on_error:
+                raise e
             print(f"* Error checking followers: {e}")
 
     return changes
@@ -2628,22 +2661,105 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
         friends_check_last_ts = int(time.time())
 
     # Main loop
+    friends_pending_changes = None
+    friends_streak = 0
+    friends_next_check_ts = 0
+
     while True:
         try:
             # Check for friends/followers changes if enabled and interval has passed
             if (TRACK_FOLLOWINGS or TRACK_FOLLOWERS) and FRIENDS_CHECK_INTERVAL > 0:
                 current_ts = int(time.time())
+
+                # Determine if it's time for a regular check or a retry check
+                do_check = False
+                is_retry = False
+
                 if (current_ts - friends_check_last_ts) >= FRIENDS_CHECK_INTERVAL:
+                    do_check = True
+                elif friends_streak > 0 and current_ts >= friends_next_check_ts:
+                    do_check = True
+                    is_retry = True
+
+                if do_check:
                     try:
-                        changes = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS)
+                        # Use save_state=False to avoid saving to file during suspected transient changes
+                        # Use raise_on_error=True to detect check failures and avoid resetting streak
+                        changes = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, save_state=False, raise_on_error=True)
+
                         if changes:
-                            notify_friends_changes(username, changes, skip_initial_line=not PROGRESS_INDICATOR)
+                            if changes == friends_pending_changes:
+                                friends_streak += 1
+                            else:
+                                friends_pending_changes = changes
+                                friends_streak = 1
+
+                            if friends_streak >= FRIENDS_CHANGE_COUNTER:
+                                # Final confirmation after enough checks
+                                # Now call it again with save_state=True to persist changes
+                                check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, save_state=True)
+                                notify_friends_changes(username, changes, skip_initial_line=not PROGRESS_INDICATOR)
+                                friends_streak = 0
+                                friends_pending_changes = None
+                                friends_check_last_ts = current_ts
+                            else:
+                                # Suspected transient change, schedule retry
+                                retry_interval = FRIENDS_RETRY_INTERVAL
+                                friends_next_check_ts = current_ts + retry_interval
+
+                                # Show streak info with details
+                                change_details = []
+                                for key in ['followings', 'followers']:
+                                    if key in changes:
+                                        c = changes[key]
+                                        diff = c['current_count'] - c['previous_count']
+                                        diff_str = f"{diff:+d}" if diff != 0 else "0"
+                                        change_details.append(f"{key}: {c['previous_count']} -> {c['current_count']} ({diff_str})")
+
+                                detail_str = "; ".join(change_details)
+                                print(f"* Suspected transient change ({detail_str}) (streak {friends_streak}/{FRIENDS_CHANGE_COUNTER}); will confirm in {display_time(retry_interval)}")
+                                print_cur_ts("Timestamp:\t\t\t")
+                        else:
+                            # No changes or back to baseline
+                            if friends_streak > 0:
+                                # Recovered from a suspected change
+                                print(f"* Friend/follower count recovered back to normal baseline after {friends_streak} suspected transient checks")
+                                print_cur_ts("Timestamp:\t\t\t")
+
+                            friends_streak = 0
+                            friends_pending_changes = None
+                            if not is_retry:
+                                friends_check_last_ts = current_ts
+                                # If it wasn't a retry, we update the timestamp to update lastfm baseline file
+                                check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, save_state=True)
                     except Exception as e:
-                        print(f"* Error during friends check: {e}")
-                        print_cur_ts("Timestamp:\t\t\t")
-                    finally:
-                        # Update timestamp even on error to avoid rapid retries
-                        friends_check_last_ts = current_ts
+                        if friends_streak == 0:
+                            # Start measuring error streak
+                            # We use negative streak values to indicate error streak
+                            friends_streak = -1
+                        elif friends_streak < 0:
+                            # Continue error streak
+                            friends_streak -= 1
+
+                        # Only print error if streak is long enough (absolute value >= FRIENDS_CHANGE_COUNTER)
+                        # or if we were tracking positive changes (friends_streak > 0)
+                        if friends_streak > 0:
+                            # We were tracking a change but hit an error
+                            retry_interval = FRIENDS_RETRY_INTERVAL
+                            friends_next_check_ts = current_ts + retry_interval
+                            print(f"* Error during friends check: {e}")
+                            print(f"* Preserving confirmation streak ({friends_streak}/{FRIENDS_CHANGE_COUNTER}) despite error; will retry in {display_time(retry_interval)}")
+                            print_cur_ts("Timestamp:\t\t\t")
+                        else:
+                            # Error streak logic
+                            current_error_streak = abs(friends_streak)
+
+                            if current_error_streak >= FRIENDS_CHANGE_COUNTER:
+                                print(f"* Error confirming friends (attempt {current_error_streak}): {e}")
+                                print_cur_ts("Timestamp:\t\t\t")
+
+                            retry_interval = FRIENDS_RETRY_INTERVAL
+                            friends_next_check_ts = current_ts + retry_interval
 
             recent_tracks = lastfm_get_recent_tracks(username, network, 1)
             # Handle case where user still has no tracks
@@ -3412,7 +3528,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
 
 
 def main():
-    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, SP_TOKENS_FILE, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION
+    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, SP_TOKENS_FILE, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL
 
     if "--generate-config" in sys.argv:
         print(CONFIG_BLOCK.strip("\n"))
@@ -3600,6 +3716,20 @@ def main():
         metavar="SECONDS",
         type=int,
         help="How often to check for followers/followings changes"
+    )
+    times.add_argument(
+        "--friends-change-counter",
+        dest="friends_change_counter",
+        metavar="N",
+        type=int,
+        help="Number of consecutive checks to confirm friend changes"
+    )
+    times.add_argument(
+        "--friends-retry-interval",
+        dest="friends_retry_interval",
+        metavar="SECONDS",
+        type=int,
+        help="Retry timeout for friend change confirmation"
     )
 
     # Listing mode
@@ -3912,6 +4042,12 @@ def main():
 
     if args.friends_check_interval:
         FRIENDS_CHECK_INTERVAL = args.friends_check_interval
+
+    if args.friends_change_counter:
+        FRIENDS_CHANGE_COUNTER = args.friends_change_counter
+
+    if args.friends_retry_interval:
+        FRIENDS_RETRY_INTERVAL = args.friends_retry_interval
 
     if args.track_in_spotify is True:
         TRACK_SONGS = True
