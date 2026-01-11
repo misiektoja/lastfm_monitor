@@ -602,6 +602,10 @@ lastfm_monitor <lastfm_username> -o 120
 
 Followers/followings tracking functionality uses a separate check interval which you can set via `FRIENDS_CHECK_INTERVAL` configuration option or `--friends-check-interval` flag. This is independent from the music polling intervals.
 
+To avoid false notifications caused by transient API glitches, changes are only confirmed after a number of consecutive checks (default: 3). You can configure this via `FRIENDS_CHANGE_COUNTER` option or `--friends-change-counter` flag. This setting also controls the threshold for suppressing repeated error messages.
+
+You can also configure the retry timeout used when confirming transient changes or errors via `FRIENDS_RETRY_INTERVAL` configuration option or `--friends-retry-interval` flag.
+
 <a id="signal-controls-macoslinuxunix"></a>
 ### Signal Controls (macOS/Linux/Unix)
 
