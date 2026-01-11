@@ -2,6 +2,17 @@
 
 This is a high-level summary of the most important changes.
 
+# Changes in 2.4.1 (TBD)
+
+**Features and Improvements**:
+
+- **NEW:** Implement consecutive checks for confirming friend changes to reduce false notifications (configurable via `FRIENDS_CHANGE_COUNTER` and `FRIENDS_RETRY_INTERVAL`)
+- **IMPROVE:** Suppress repetitive error messages for followers/followings tracking during transient outages
+
+**Bug fixes**:
+
+- **BUGFIX:** Ensure href and class attributes are properly validated during web scraping
+
 # Changes in 2.4 (04 Jan 2026)
 
 **Features and Improvements**:
