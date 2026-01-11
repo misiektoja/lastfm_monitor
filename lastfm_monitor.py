@@ -321,6 +321,7 @@ FOLLOWINGS_NOTIFICATION = False
 
 # Number of consecutive checks required to confirm a change in followers/followings
 # to avoid false notifications caused by transient API glitches
+# Also used as the threshold for suppressing repeated error messages
 # Can also be set using the --friends-change-counter flag
 FRIENDS_CHANGE_COUNTER = 3
 
