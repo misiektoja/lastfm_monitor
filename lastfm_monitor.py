@@ -1394,7 +1394,6 @@ def check_friends_changes(username, track_followings, track_followers, save_stat
         except Exception as e:
             if raise_on_error:
                 raise e
-            print(f"* Error checking followings: {e}")
 
     if track_followers:
         try:
@@ -1420,7 +1419,6 @@ def check_friends_changes(username, track_followings, track_followers, save_stat
         except Exception as e:
             if raise_on_error:
                 raise e
-            print(f"* Error checking followers: {e}")
 
     return changes
 
@@ -2676,17 +2674,25 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                 do_check = False
                 is_retry = False
 
-                if (current_ts - friends_check_last_ts) >= FRIENDS_CHECK_INTERVAL:
+                if friends_streak != 0:
+                    # We are in a confirmation/retry streak (change or error)
+                    if current_ts >= friends_next_check_ts:
+                        do_check = True
+                        is_retry = True
+                elif (current_ts - friends_check_last_ts) >= FRIENDS_CHECK_INTERVAL:
+                    # Regular check interval reached
                     do_check = True
-                elif friends_streak > 0 and current_ts >= friends_next_check_ts:
-                    do_check = True
-                    is_retry = True
 
                 if do_check:
                     try:
-                        # Use save_state=False to avoid saving to file during suspected transient changes
+                        # Use save_state=False by default to avoid saving to file during suspected transient changes
                         # Use raise_on_error=True to detect check failures and avoid resetting streak
-                        changes = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, save_state=False, raise_on_error=True)
+                        changes = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS,
+                                                     save_state=False, raise_on_error=True)
+
+                        # Reset error streak on any successful check
+                        if friends_streak < 0:
+                            friends_streak = 0
 
                         if changes:
                             if changes == friends_pending_changes:
@@ -2698,7 +2704,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             if friends_streak >= FRIENDS_CHANGE_COUNTER:
                                 # Final confirmation after enough checks
                                 # Now call it again with save_state=True to persist changes
-                                check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, save_state=True)
+                                check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, save_state=True, raise_on_error=True)
                                 notify_friends_changes(username, changes, skip_initial_line=not PROGRESS_INDICATOR)
                                 friends_streak = 0
                                 friends_pending_changes = None
@@ -2732,18 +2738,15 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             if not is_retry:
                                 friends_check_last_ts = current_ts
                                 # If it wasn't a retry, we update the timestamp to update lastfm baseline file
-                                check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, save_state=True)
+                                check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, save_state=True, raise_on_error=True)
                     except Exception as e:
                         if friends_streak == 0:
-                            # Start measuring error streak
-                            # We use negative streak values to indicate error streak
+                            # Start measuring error streak (negative values)
                             friends_streak = -1
                         elif friends_streak < 0:
                             # Continue error streak
                             friends_streak -= 1
 
-                        # Only print error if streak is long enough (absolute value >= FRIENDS_CHANGE_COUNTER)
-                        # or if we were tracking positive changes (friends_streak > 0)
                         if friends_streak > 0:
                             # We were tracking a change but hit an error
                             retry_interval = FRIENDS_RETRY_INTERVAL
@@ -2752,10 +2755,11 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             print(f"* Preserving confirmation streak ({friends_streak}/{FRIENDS_CHANGE_COUNTER}) despite error; will retry in {display_time(retry_interval)}")
                             print_cur_ts("Timestamp:\t\t\t")
                         else:
-                            # Error streak logic
+                            # Error streak logic (negative streak)
                             current_error_streak = abs(friends_streak)
 
-                            if current_error_streak >= FRIENDS_CHANGE_COUNTER:
+                            # Throttling: Alert on threshold, then every 10 attempts
+                            if current_error_streak == FRIENDS_CHANGE_COUNTER or (current_error_streak > FRIENDS_CHANGE_COUNTER and (current_error_streak - FRIENDS_CHANGE_COUNTER) % 10 == 0):
                                 print(f"* Error confirming friends (attempt {current_error_streak}): {e}")
                                 print_cur_ts("Timestamp:\t\t\t")
 
