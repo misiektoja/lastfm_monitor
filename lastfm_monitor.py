@@ -115,7 +115,7 @@ LASTFM_CHECK_INTERVAL = 10  # 10 seconds
 
 # How often to check for user activity when the user is online (currently playing); in seconds
 # Can also be set using the -k flag
-LASTFM_ACTIVE_CHECK_INTERVAL = 3  # 3 seconds
+LASTFM_ACTIVE_CHECK_INTERVAL = 5  # 5 seconds
 
 # Time after which a user is considered inactive, based on the last activity; in seconds
 # Can also be set using the -o flag
@@ -313,7 +313,7 @@ TRACK_FOLLOWERS = False
 
 # How often to check for followers/followings changes; in seconds
 # Can also be set using the --friends-check-interval flag
-FRIENDS_CHECK_INTERVAL = 300  # 5 minutes
+FRIENDS_CHECK_INTERVAL = 900  # 15 minutes
 
 # Whether to send an email when followers change
 # Can also be enabled via the --notify-followers flag
@@ -333,7 +333,7 @@ FRIENDS_CHANGE_COUNTER = 3
 # If this is set higher than FRIENDS_CHECK_INTERVAL, it effectively throttles the checks
 # during the confirmation phase
 # Can also be set using the --friends-retry-interval flag
-FRIENDS_RETRY_INTERVAL = 60
+FRIENDS_RETRY_INTERVAL = 90
 """
 
 # -------------------------
@@ -2000,7 +2000,7 @@ def spotify_convert_uri_to_url(uri):
 
 
 # Processes track items returned by Spotify search Web API
-def spotify_search_process_track_items(track_items, original_artist, original_track, cleaned_track=None):
+def spotify_search_process_track_items(track_items, original_artist, original_track, cleaned_track=None, original_album=None):
     sp_track_uri_id = None
     sp_track_duration = 0
 
@@ -2011,9 +2011,10 @@ def spotify_search_process_track_items(track_items, original_artist, original_tr
         item_name = str(item.get("name"))
         item_artists_list = [a.get("name") for a in item.get("artists", [])]
         item_artists_str = ", ".join(item_artists_list)
+        item_album_name = item.get("album", {}).get("name", "")
         item_duration = int(item.get("duration_ms", 0) / 1000)
 
-        debug_print(f"  Found item: {item_artists_str} - {item_name} ({item_duration}s)")
+        debug_print(f"  Found item: {item_artists_str} - {item_name} [{item_album_name}] ({item_duration}s)")
 
         # Artist match check
         artist_match = any(original_artist.lower() in a.lower() for a in item_artists_list)
@@ -2028,6 +2029,11 @@ def spotify_search_process_track_items(track_items, original_artist, original_tr
             score = 80   # Match with cleaned name
         elif original_track.lower() in item_name.lower() or item_name.lower() in original_track.lower():
             score = 50   # Partial match
+
+        # Album match bonus (+20 points)
+        if original_album and item_album_name and item_album_name.lower() == original_album.lower():
+            score += 20
+            debug_print(f"    Album match! (+20 bonus)")
 
         if score > best_score:
             best_score = score
@@ -2048,46 +2054,71 @@ def spotify_search_song_trackid_duration(access_token, artist, track, album=""):
     artist, track = map(str, (artist, track))
     album = str(album) if album else ""
 
-    re_chars_to_remove = r'([\'])'
+    re_chars_to_remove = r'([\"\'])'
     artist_sanitized = re.sub(re_chars_to_remove, '', artist, flags=re.IGNORECASE)
     track_sanitized = re.sub(re_chars_to_remove, '', track, flags=re.IGNORECASE)
     album_sanitized = re.sub(re_chars_to_remove, '', album, flags=re.IGNORECASE)
 
-    url1 = f'https://api.spotify.com/v1/search?q={quote_plus(f"artist:{artist_sanitized} track:{track_sanitized} album:{album_sanitized}")}&type=track&limit=5'
-    url2 = f'https://api.spotify.com/v1/search?q={quote_plus(f"artist:{artist_sanitized} track:{track_sanitized}")}&type=track&limit=5'
+    debug_print(f"Checking Spotify for track duration. Strategy: URL_SPECIFIC_FULL -> URL_SPECIFIC_FIELD -> URL_SPECIFIC_PHRASE -> URL_CLEANED_FIELD -> URL_BROAD")
 
-    debug_print(f"Spotify search URL1: {url1}")
-    debug_print(f"Spotify search URL2: {url2}")
+    url_specific_full = f'https://api.spotify.com/v1/search?q={quote(f"artist:\"{artist_sanitized}\" track:\"{track_sanitized}\" album:\"{album_sanitized}\"")}&type=track&limit=5'
+    url_specific_field = f'https://api.spotify.com/v1/search?q={quote(f"artist:\"{artist_sanitized}\" track:\"{track_sanitized}\"")}&type=track&limit=5'
+    url_specific_phrase = f'https://api.spotify.com/v1/search?q={quote(f"\"{artist_sanitized}\" \"{track_sanitized}\"")}&type=track&limit=5'
+
+    debug_print(f"Spotify search URL_SPECIFIC_FULL: {url_specific_full}")
+    debug_print(f"Spotify search URL_SPECIFIC_FIELD: {url_specific_field}")
+    debug_print(f"Spotify search URL_SPECIFIC_PHRASE: {url_specific_phrase}")
 
     pylast_version = getattr(pylast, '__version__', 'unknown')
-    headers = {"Authorization": "Bearer " + access_token, "User-Agent": f"pylast/{pylast_version}"}
+    # Using a browser-like User-Agent to avoid potential API filtering/limitations
+    user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+    headers = {"Authorization": "Bearer " + access_token, "User-Agent": user_agent}
 
     sp_track_uri_id = None
     sp_track_duration = 0
 
     if album:
         try:
-            response = req.get(url1, headers=headers, timeout=FUNCTION_TIMEOUT)
+            response = req.get(url_specific_full, headers=headers, timeout=FUNCTION_TIMEOUT)
             response.raise_for_status()
             json_response = response.json()
             if json_response.get("tracks"):
                 total = json_response["tracks"].get("total", 0)
-                debug_print(f"URL1 found {total} tracks")
+                debug_print(f"URL_SPECIFIC_FULL found {total} tracks")
                 if total > 0:
-                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track)
+                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, original_album=album)
+                    if sp_track_uri_id:
+                        debug_print(f"Match found via URL_SPECIFIC_FULL")
         except Exception:
             pass
 
     if not sp_track_uri_id:
         try:
-            response = req.get(url2, headers=headers, timeout=FUNCTION_TIMEOUT)
+            response = req.get(url_specific_field, headers=headers, timeout=FUNCTION_TIMEOUT)
             response.raise_for_status()
             json_response = response.json()
             if json_response.get("tracks"):
                 total = json_response["tracks"].get("total", 0)
-                debug_print(f"URL2 found {total} tracks")
+                debug_print(f"URL_SPECIFIC_FIELD found {total} tracks")
                 if total > 0:
-                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track)
+                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, original_album=album)
+                    if sp_track_uri_id:
+                        debug_print(f"Match found via URL_SPECIFIC_FIELD")
+        except Exception:
+            pass
+
+    if not sp_track_uri_id:
+        try:
+            response = req.get(url_specific_phrase, headers=headers, timeout=FUNCTION_TIMEOUT)
+            response.raise_for_status()
+            json_response = response.json()
+            if json_response.get("tracks"):
+                total = json_response["tracks"].get("total", 0)
+                debug_print(f"URL_SPECIFIC_PHRASE found {total} tracks")
+                if total > 0:
+                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, original_album=album)
+                    if sp_track_uri_id:
+                        debug_print(f"Match found via URL_SPECIFIC_PHRASE")
         except Exception:
             pass
 
@@ -2095,35 +2126,41 @@ def spotify_search_song_trackid_duration(access_token, artist, track, album=""):
     track_cleaned = ""
     if not sp_track_uri_id and re.search(re_search_str, track, re.IGNORECASE):
         track_cleaned = re.sub(re_replace_str, '', track, flags=re.IGNORECASE).strip()
+        # Sanitize track_cleaned to remove quotes that might break the search query
+        track_cleaned = re.sub(re_chars_to_remove, '', track_cleaned, flags=re.IGNORECASE)
         if track_cleaned and track_cleaned.lower() != track.lower():
-            url3 = f'https://api.spotify.com/v1/search?q={quote_plus(f"artist:{artist_sanitized} track:{track_cleaned}")}&type=track&limit=5'
-            debug_print(f"Spotify search URL3 (fallback): {url3}")
+            url_cleaned_field = f'https://api.spotify.com/v1/search?q={quote(f"artist:\"{artist_sanitized}\" track:\"{track_cleaned}\"")}&type=track&limit=5'
+            debug_print(f"Spotify search URL_CLEANED_FIELD (fallback): {url_cleaned_field}")
             try:
-                response = req.get(url3, headers=headers, timeout=FUNCTION_TIMEOUT)
+                response = req.get(url_cleaned_field, headers=headers, timeout=FUNCTION_TIMEOUT)
                 response.raise_for_status()
                 json_response = response.json()
                 if json_response.get("tracks"):
                     total = json_response["tracks"].get("total", 0)
-                    debug_print(f"URL3 found {total} tracks")
+                    debug_print(f"URL_CLEANED_FIELD found {total} tracks")
                     if total > 0:
-                        sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, cleaned_track=track_cleaned)
+                        sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, cleaned_track=track_cleaned, original_album=album)
+                        if sp_track_uri_id:
+                            debug_print(f"Match found via URL_CLEANED_FIELD")
             except Exception:
                 pass
 
     # Final fallback: broad search without field qualifiers
     if not sp_track_uri_id:
-        search_query = f"{artist_sanitized} {track_cleaned if track_cleaned else track}"
-        url4 = f'https://api.spotify.com/v1/search?q={quote_plus(search_query)}&type=track&limit=5'
-        debug_print(f"Spotify search URL4 (broad): {url4}")
+        search_query = f"\"{artist_sanitized}\" \"{track_cleaned if track_cleaned else track_sanitized}\""
+        url_broad = f'https://api.spotify.com/v1/search?q={quote(search_query)}&type=track&limit=5'
+        debug_print(f"Spotify search URL_BROAD (fallback): {url_broad}")
         try:
-            response = req.get(url4, headers=headers, timeout=FUNCTION_TIMEOUT)
+            response = req.get(url_broad, headers=headers, timeout=FUNCTION_TIMEOUT)
             response.raise_for_status()
             json_response = response.json()
             if json_response.get("tracks"):
                 total = json_response["tracks"].get("total", 0)
-                debug_print(f"URL4 found {total} tracks")
+                debug_print(f"URL_BROAD found {total} tracks")
                 if total > 0:
-                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, cleaned_track=track_cleaned if track_cleaned else None)
+                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, cleaned_track=track_cleaned if track_cleaned else None, original_album=album)
+                    if sp_track_uri_id:
+                        debug_print(f"Match found via URL_BROAD")
         except Exception:
             pass
 
@@ -2875,7 +2912,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             retry_interval = FRIENDS_RETRY_INTERVAL
                             friends_next_check_ts = current_ts + retry_interval
 
-            debug_print(f"Fetching now playing / recent tracks for {username}...")
+            debug_print(f"Fetching now playing / recent tracks...")
             recent_tracks = lastfm_get_recent_tracks(username, network, 1)
             # Handle case where user still has no tracks
             if not recent_tracks or len(recent_tracks) == 0:
