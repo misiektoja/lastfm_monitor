@@ -1231,8 +1231,9 @@ def lastfm_get_friends(username):
                 "doesn't follow anyone",
                 "not following anyone",
                 "no followings",
-                "follow anyone yet",
-                "is not following"
+                "anyone yet",
+                "is not following",
+                "isn't following"
             ]
             if not any(indicator in page_lower for indicator in empty_indicators):
                 raise RuntimeError("No followings found and no 'empty followings' indicator detected (possible scraping error or transient API issue)")
@@ -1335,7 +1336,8 @@ def lastfm_get_followers(username):
                 "doesn't have any followers",
                 "no followers",
                 "any followers yet",
-                "no one is following"
+                "no one is following",
+                "no followers found"
             ]
             if not any(indicator in page_lower for indicator in empty_indicators):
                 raise RuntimeError("No followers found and no 'empty followers' indicator detected (possible scraping error or transient API issue)")
@@ -1530,8 +1532,8 @@ def notify_friends_changes(username, changes, skip_initial_line=False):
 
             html_parts.append("<br>")
             if check_range:
-                html_parts.append(f"Check interval: <b>{check_interval_str}</b> (<b>{check_range}</b>)")
-            html_parts.append(f"<br>Timestamp: <b>{get_cur_ts('')}</b>")
+                html_parts.append(f"Check interval: <b>{check_interval_str}</b> ({check_range})")
+            html_parts.append(f"<br>Timestamp: {get_cur_ts('')}")
 
             body = "\n".join(body_parts)
             body_html = f"<html><head></head><body>{''.join(html_parts)}</body></html>"
@@ -1626,8 +1628,8 @@ def notify_friends_changes(username, changes, skip_initial_line=False):
 
             html_parts.append("<br>")
             if check_range:
-                html_parts.append(f"Check interval: <b>{check_interval_str}</b> (<b>{check_range}</b>)")
-            html_parts.append(f"<br>Timestamp: <b>{get_cur_ts('')}</b>")
+                html_parts.append(f"Check interval: <b>{check_interval_str}</b> ({check_range})")
+            html_parts.append(f"<br>Timestamp: {get_cur_ts('')}")
 
             body = "\n".join(body_parts)
             body_html = f"<html><head></head><body>{''.join(html_parts)}</body></html>"
@@ -2615,6 +2617,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             followings_file_exists = os.path.isfile(f"lastfm_{username}_followings.json")
             followers_file_exists = os.path.isfile(f"lastfm_{username}_followers.json")
 
+            # Load existing state if available
             if TRACK_FOLLOWINGS and followings_file_exists:
                 followings_loaded = load_friends_state(username, 'followings')
                 followings_count = len(followings_loaded)
@@ -2625,49 +2628,42 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                 followers_count = len(followers_loaded)
                 print(f"* Loading followers for user {username} from file lastfm_{username}_followers.json ({followers_count})")
 
-            initial_changes = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS)
+            # Perform initial check to build baseline
+            # We use raise_on_error=True so initialization failures (e.g. scraping issues) are visible
+            initial_changes = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, save_state=True, raise_on_error=True)
+
+            # Announce baseline creation for missing files
+            if TRACK_FOLLOWINGS and not followings_file_exists:
+                if os.path.isfile(f"lastfm_{username}_followings.json"):
+                    followings_count = len(load_friends_state(username, 'followings'))
+                    print(f"* Saving followings for user {username} to file lastfm_{username}_followings.json ({followings_count})")
+
+            if TRACK_FOLLOWERS and not followers_file_exists:
+                if os.path.isfile(f"lastfm_{username}_followers.json"):
+                    followers_count = len(load_friends_state(username, 'followers'))
+                    print(f"* Saving followers for user {username} to file lastfm_{username}_followers.json ({followers_count})")
+
+            # Only notify if there are real changes (not initial fetch/baseline build)
             if initial_changes:
-                followings_is_initial = 'followings' in initial_changes and initial_changes['followings']['previous_count'] == 0 and not followings_file_exists
-                followers_is_initial = 'followers' in initial_changes and initial_changes['followers']['previous_count'] == 0 and not followers_file_exists
+                # Filter out initial additions (baseline) from notification
+                to_notify = {}
+                if 'followings' in initial_changes and not followings_file_exists:
+                    pass # Handled by "Saving baseline" above
+                elif 'followings' in initial_changes:
+                    to_notify['followings'] = initial_changes['followings']
 
-                if followings_is_initial:
-                    if os.path.isfile(f"lastfm_{username}_followings.json"):
-                        followings_count = initial_changes['followings']['current_count']
-                        print(f"* Saving followings for user {username} to file lastfm_{username}_followings.json ({followings_count})")
-                    # Don't notify on initial fetch - this is just baseline
-                    if 'followings' in initial_changes:
-                        del initial_changes['followings']
+                if 'followers' in initial_changes and not followers_file_exists:
+                    pass # Handled by "Saving baseline" above
+                elif 'followers' in initial_changes:
+                    to_notify['followers'] = initial_changes['followers']
 
-                if followers_is_initial:
-                    if os.path.isfile(f"lastfm_{username}_followers.json"):
-                        followers_count = initial_changes['followers']['current_count']
-                        print(f"* Saving followers for user {username} to file lastfm_{username}_followers.json ({followers_count})")
-                    # Don't notify on initial fetch - this is just baseline
-                    if 'followers' in initial_changes:
-                        del initial_changes['followers']
-
-                # Only notify if there are real changes (not initial fetch)
-                if initial_changes:
-                    notify_friends_changes(username, initial_changes, skip_initial_line=True)
+                if to_notify:
+                    notify_friends_changes(username, to_notify, skip_initial_line=True)
                 else:
-                    # No changes, just print timestamp
+                    # Baseline was built but no "real" changes to report
                     print_cur_ts("\nTimestamp:\t\t\t")
             else:
-                # No changes detected - show initial counts only if files didn't exist before
-                if not followings_file_exists and not followers_file_exists:
-                    if TRACK_FOLLOWINGS or TRACK_FOLLOWERS:
-                        print()
-                if TRACK_FOLLOWINGS:
-                    if not followings_file_exists:
-                        followings_count = len(load_friends_state(username, 'followings'))
-                        if os.path.isfile(f"lastfm_{username}_followings.json"):
-                            print(f"* Saving followings for user {username} to file lastfm_{username}_followings.json ({followings_count})")
-                if TRACK_FOLLOWERS:
-                    if not followers_file_exists:
-                        followers_count = len(load_friends_state(username, 'followers'))
-                        if os.path.isfile(f"lastfm_{username}_followers.json"):
-                            print(f"* Saving followers for user {username} to file lastfm_{username}_followers.json ({followers_count})")
-
+                # No changes detected during baseline build
                 print_cur_ts("\nTimestamp:\t\t\t")
         except Exception as e:
             print(f"* Warning: Initial friends check failed: {e}")
