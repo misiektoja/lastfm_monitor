@@ -2,6 +2,13 @@
 
 This is a high-level summary of the most important changes.
 
+# Changes in 2.4.2 (13 Jan 2026)
+
+**Features and Improvements**:
+
+- **IMPROVE:** Enhanced **Spotify track search logic** with improved matching to address recent Spotify API changes
+- **NEW:** Implemented **Debug Mode** (`--debug` flag or `DEBUG_MODE` config option) - provides full technical logging and internal state changes
+
 # Changes in 2.4.1 (12 Jan 2026)
 
 **Features and Improvements**:
