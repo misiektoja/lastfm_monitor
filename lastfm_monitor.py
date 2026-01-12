@@ -423,8 +423,8 @@ DEFAULT_CONFIG_FILENAME = "lastfm_monitor.conf"
 SECRET_KEYS = ("LASTFM_API_KEY", "LASTFM_API_SECRET", "SP_CLIENT_ID", "SP_CLIENT_SECRET", "SMTP_PASSWORD")
 
 # Strings removed from track names for generating proper Genius search URLs
-re_search_str = r'remaster|extended|original mix|remix|original soundtrack|radio( |-)edit|\(feat\.|( \(.*version\))|( - .*version)'
-re_replace_str = r'( - (\d*)( )*remaster$)|( - (\d*)( )*remastered( version)*( \d*)*.*$)|( \((\d*)( )*remaster\)$)|( - (\d+) - remaster$)|( - extended$)|( - extended mix$)|( - (.*); extended mix$)|( - extended version$)|( - (.*) remix$)|( - remix$)|( - remixed by .*$)|( - original mix$)|( - .*original soundtrack$)|( - .*radio( |-)edit$)|( \(feat\. .*\)$)|( \(\d+.*Remaster.*\)$)|( \(.*Version\))|( - .*version)'
+re_search_str = r'remaster|extended|original mix|remix|rework|vocal mix|original soundtrack|radio( |-)edit|\(feat\.|( \(.*version\))|( - .*version)'
+re_replace_str = r'( - (\d*)( )*remaster$)|( - (\d*)( )*remastered( version)*( \d*)*.*$)|( \((\d*)( )*remaster\)$)|( - (\d+) - remaster$)|( - extended$)|( - extended mix$)|( - (.*); extended mix$)|( - extended version$)|( - (.*) remix$)|( - remix$)|( - remixed by .*$)|( - (.*) rework$)|( - rework$)|( - vocal mix$)|( - original mix$)|( - .*original soundtrack$)|( - .*radio( |-)edit$)|( \(feat\. .*\)$)|( \(\d+.*Remaster.*\)$)|( \(.*Version\))|( - .*version)'
 
 # Default value for Spotify network-related timeouts in functions; in seconds
 FUNCTION_TIMEOUT = 5  # 5 seconds
@@ -1979,27 +1979,54 @@ def spotify_convert_uri_to_url(uri):
 
 
 # Processes track items returned by Spotify search Web API
-def spotify_search_process_track_items(track_items, track):
+def spotify_search_process_track_items(track_items, original_artist, original_track, cleaned_track=None, silent=True):
     sp_track_uri_id = None
     sp_track_duration = 0
 
+    best_item = None
+    best_score = -1
+
     for item in track_items:
-        if str(item.get("name")).lower() == str(track).lower():
-            sp_track_uri_id = item.get("id")
-            sp_track_duration = int(item.get("duration_ms") / 1000)
-            break
-    if not sp_track_uri_id:
-        for item in track_items:
-            if str(track).lower() in str(item.get("name")).lower():
-                sp_track_uri_id = item.get("id")
-                sp_track_duration = int(item.get("duration_ms") / 1000)
-                break
+        item_name = str(item.get("name"))
+        item_artists_list = [a.get("name") for a in item.get("artists", [])]
+        item_artists_str = ", ".join(item_artists_list)
+        item_duration = int(item.get("duration_ms", 0) / 1000)
+
+        if not silent:
+            print(f"DEBUG:   Found item: {item_artists_str} - {item_name} ({item_duration}s)")
+
+        # Artist match check
+        artist_match = any(original_artist.lower() in a.lower() for a in item_artists_list)
+        if not artist_match:
+            if not silent:
+                print(f"DEBUG:     Skipping item (artist mismatch)")
+            continue
+
+        score = 0
+        if item_name.lower() == original_track.lower():
+            score = 100  # Perfect match with original name
+        elif cleaned_track and item_name.lower() == cleaned_track.lower():
+            score = 80   # Match with cleaned name
+        elif original_track.lower() in item_name.lower() or item_name.lower() in original_track.lower():
+            score = 50   # Partial match
+
+        if score > best_score:
+            best_score = score
+            best_item = item
+            if not silent:
+                print(f"DEBUG:     => New best match! (score={score})")
+        elif not silent:
+            print(f"DEBUG:     => Match not better than current best (score={score})")
+
+    if best_item and best_score > 0:
+        sp_track_uri_id = best_item.get("id")
+        sp_track_duration = int(best_item.get("duration_ms") / 1000)
 
     return sp_track_uri_id, sp_track_duration
 
 
 # Returns Spotify track ID & duration for specific artist, track and optionally album
-def spotify_search_song_trackid_duration(access_token, artist, track, album=""):
+def spotify_search_song_trackid_duration(access_token, artist, track, album="", silent=True):
     artist, track = map(str, (artist, track))
     album = str(album) if album else ""
 
@@ -2010,6 +2037,10 @@ def spotify_search_song_trackid_duration(access_token, artist, track, album=""):
 
     url1 = f'https://api.spotify.com/v1/search?q={quote_plus(f"artist:{artist_sanitized} track:{track_sanitized} album:{album_sanitized}")}&type=track&limit=5'
     url2 = f'https://api.spotify.com/v1/search?q={quote_plus(f"artist:{artist_sanitized} track:{track_sanitized}")}&type=track&limit=5'
+
+    if not silent:
+        print(f"DEBUG: Spotify search URL1: {url1}")
+        print(f"DEBUG: Spotify search URL2: {url2}")
 
     pylast_version = getattr(pylast, '__version__', 'unknown')
     headers = {"Authorization": "Bearer " + access_token, "User-Agent": f"pylast/{pylast_version}"}
@@ -2023,8 +2054,11 @@ def spotify_search_song_trackid_duration(access_token, artist, track, album=""):
             response.raise_for_status()
             json_response = response.json()
             if json_response.get("tracks"):
-                if json_response["tracks"].get("total") > 0:
-                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], track)
+                total = json_response["tracks"].get("total", 0)
+                if not silent:
+                    print(f"DEBUG: URL1 found {total} tracks")
+                if total > 0:
+                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, silent=silent)
         except Exception:
             pass
 
@@ -2034,8 +2068,51 @@ def spotify_search_song_trackid_duration(access_token, artist, track, album=""):
             response.raise_for_status()
             json_response = response.json()
             if json_response.get("tracks"):
-                if json_response["tracks"].get("total") > 0:
-                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], track)
+                total = json_response["tracks"].get("total", 0)
+                if not silent:
+                    print(f"DEBUG: URL2 found {total} tracks")
+                if total > 0:
+                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, silent=silent)
+        except Exception:
+            pass
+
+    # If still not found, try a broader search by cleaning the track name
+    track_cleaned = ""
+    if not sp_track_uri_id and re.search(re_search_str, track, re.IGNORECASE):
+        track_cleaned = re.sub(re_replace_str, '', track, flags=re.IGNORECASE).strip()
+        if track_cleaned and track_cleaned.lower() != track.lower():
+            url3 = f'https://api.spotify.com/v1/search?q={quote_plus(f"artist:{artist_sanitized} track:{track_cleaned}")}&type=track&limit=5'
+            if not silent:
+                print(f"DEBUG: Spotify search URL3 (fallback): {url3}")
+            try:
+                response = req.get(url3, headers=headers, timeout=FUNCTION_TIMEOUT)
+                response.raise_for_status()
+                json_response = response.json()
+                if json_response.get("tracks"):
+                    total = json_response["tracks"].get("total", 0)
+                    if not silent:
+                        print(f"DEBUG: URL3 found {total} tracks")
+                    if total > 0:
+                        sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, cleaned_track=track_cleaned, silent=silent)
+            except Exception:
+                pass
+
+    # Final fallback: broad search without field qualifiers
+    if not sp_track_uri_id:
+        search_query = f"{artist_sanitized} {track_cleaned if track_cleaned else track}"
+        url4 = f'https://api.spotify.com/v1/search?q={quote_plus(search_query)}&type=track&limit=5'
+        if not silent:
+            print(f"DEBUG: Spotify search URL4 (broad): {url4}")
+        try:
+            response = req.get(url4, headers=headers, timeout=FUNCTION_TIMEOUT)
+            response.raise_for_status()
+            json_response = response.json()
+            if json_response.get("tracks"):
+                total = json_response["tracks"].get("total", 0)
+                if not silent:
+                    print(f"DEBUG: URL4 found {total} tracks")
+                if total > 0:
+                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, cleaned_track=track_cleaned if track_cleaned else None, silent=silent)
         except Exception:
             pass
 
@@ -2140,6 +2217,9 @@ def get_track_info(artist, track, album, network, silent=True):
     track_duration = 0
     duration_mark = ""
 
+    if not silent:
+        print(f"DEBUG: get_track_info(artist='{artist}', track='{track}', album='{album}')")
+
     if (USE_TRACK_DURATION_FROM_SPOTIFY or TRACK_SONGS) and SP_CLIENT_ID and SP_CLIENT_SECRET and SP_CLIENT_ID != "your_spotify_app_client_id" and SP_CLIENT_SECRET != "your_spotify_app_client_secret":
         try:
             accessToken = spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET)
@@ -2148,7 +2228,9 @@ def get_track_info(artist, track, album, network, silent=True):
                 print(f"* spotify_get_access_token(): {e}")
             accessToken = None
         if accessToken:
-            sp_track_uri_id, sp_track_duration = spotify_search_song_trackid_duration(accessToken, artist, track, album)
+            sp_track_uri_id, sp_track_duration = spotify_search_song_trackid_duration(accessToken, artist, track, album, silent=silent)
+            if not silent:
+                print(f"DEBUG: Spotify search result: id='{sp_track_uri_id}', duration={sp_track_duration}s")
             if not USE_TRACK_DURATION_FROM_SPOTIFY:
                 sp_track_duration = 0
 
@@ -2158,14 +2240,22 @@ def get_track_info(artist, track, album, network, silent=True):
             duration_mark = " S*"
     else:
         try:
-            lf_duration = pylast.Track(artist, track, network).get_duration()
+            lf_track = pylast.Track(artist, track, network)
+            lf_duration = lf_track.get_duration()
+            if not silent:
+                print(f"DEBUG: Last.fm fallback: raw duration={lf_duration}ms")
             if lf_duration and lf_duration > 0:
                 if USE_TRACK_DURATION_FROM_SPOTIFY and not DO_NOT_SHOW_DURATION_MARKS:
                     duration_mark = " L*"
-                track_duration = int(str(lf_duration)[0:-3])
+                # Last.fm returns duration in milliseconds
+                track_duration = int(lf_duration / 1000)
         except Exception as e:
-            print(e)
+            if not silent:
+                print(f"DEBUG: Last.fm fallback error: {e}")
             track_duration = 0
+
+    if not silent:
+        print(f"DEBUG: Final track_duration={track_duration}s, duration_mark='{duration_mark}'")
 
     return track_duration, sp_track_uri_id, duration_mark
 
