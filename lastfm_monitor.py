@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.4.1
+v2.4.2
 
 Tool implementing real-time tracking of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -16,7 +16,7 @@ python-dotenv (optional)
 beautifulsoup4 (optional, only for followers/followings tracking)
 """
 
-VERSION = "2.4.1"
+VERSION = "2.4.2"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -199,6 +199,10 @@ SP_USER_GOT_OFFLINE_TRACK_ID = ""
 # Delay before pausing the above track after the user goes offline; in seconds
 # Set to 0 to keep playing indefinitely until manually paused
 SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE = 5  # 5 seconds
+
+# Enable debug mode for full technical logging (can also be enabled via --debug flag)
+# Shows every API request and internal state changes
+DEBUG_MODE = False
 
 # How often to print a "liveness check" message to the output; in seconds
 # Set to 0 to disable
@@ -413,6 +417,8 @@ FOLLOWERS_NOTIFICATION = False
 FOLLOWINGS_NOTIFICATION = False
 FRIENDS_CHANGE_COUNTER = 0
 FRIENDS_RETRY_INTERVAL = 0
+DEBUG_MODE = False
+LASTFM_USERNAME_GLOBAL = ""
 
 exec(CONFIG_BLOCK, globals())
 
@@ -626,7 +632,9 @@ def calculate_timespan(timestamp1, timestamp2, show_weeks=True, show_hours=True,
 
 
 # Sends email notification
+# Sends an email notification
 def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
+    debug_print(f"Attempting to send email: {subject}")
     fqdn_re = re.compile(r'(?=^.{4,253}$)(^((?!-)[a-zA-Z0-9-]{1,63}(?<!-)\.)+[a-zA-Z]{2,63}\.?$)')
     email_re = re.compile(r'[^@]+@[^@]+\.[^@]+')
 
@@ -686,6 +694,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
 
         smtpObj.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, email_msg.as_string())
         smtpObj.quit()
+        debug_print("Email sent successfully")
     except Exception as e:
         print(f"Error sending email: {e}")
         return 1
@@ -694,6 +703,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
 
 # Initializes the CSV file
 def init_csv_file(csv_file_name):
+    debug_print(f"Initializing CSV file: {csv_file_name}")
     try:
         if not os.path.isfile(csv_file_name) or os.path.getsize(csv_file_name) == 0:
             with open(csv_file_name, 'a', newline='', buffering=1, encoding="utf-8") as f:
@@ -724,6 +734,15 @@ def get_cur_ts(ts_str=""):
 def print_cur_ts(ts_str=""):
     print(get_cur_ts(str(ts_str)))
     print("─" * HORIZONTAL_LINE)
+
+
+# Debug print helper - only prints if DEBUG_MODE is enabled
+def debug_print(message):
+    if DEBUG_MODE:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        prefix = f" [{LASTFM_USERNAME_GLOBAL}]" if LASTFM_USERNAME_GLOBAL else ""
+        # print(f"[DEBUG {timestamp}]{prefix} {message}")
+        print(f"[DEBUG {timestamp}] {message}")
 
 
 # Returns the timestamp/datetime object in human readable format (long version); eg. Sun 21 Apr 2024, 15:08:45
@@ -1938,6 +1957,7 @@ def spotify_get_access_token(sp_client_id, sp_client_secret):
         return None
 
     if SP_CACHED_ACCESS_TOKEN and check_token_validity(SP_CACHED_ACCESS_TOKEN):
+        debug_print("Using cached Spotify access token")
         return SP_CACHED_ACCESS_TOKEN
 
     if SP_TOKENS_FILE:
@@ -1948,6 +1968,7 @@ def spotify_get_access_token(sp_client_id, sp_client_secret):
     auth_manager = SpotifyClientCredentials(client_id=sp_client_id, client_secret=sp_client_secret, cache_handler=cache_handler)
 
     SP_CACHED_ACCESS_TOKEN = auth_manager.get_access_token(as_dict=False)
+    debug_print("Successfully obtained new Spotify access token")
 
     return SP_CACHED_ACCESS_TOKEN
 
@@ -1979,7 +2000,7 @@ def spotify_convert_uri_to_url(uri):
 
 
 # Processes track items returned by Spotify search Web API
-def spotify_search_process_track_items(track_items, original_artist, original_track, cleaned_track=None, silent=True):
+def spotify_search_process_track_items(track_items, original_artist, original_track, cleaned_track=None):
     sp_track_uri_id = None
     sp_track_duration = 0
 
@@ -1992,14 +2013,12 @@ def spotify_search_process_track_items(track_items, original_artist, original_tr
         item_artists_str = ", ".join(item_artists_list)
         item_duration = int(item.get("duration_ms", 0) / 1000)
 
-        if not silent:
-            print(f"DEBUG:   Found item: {item_artists_str} - {item_name} ({item_duration}s)")
+        debug_print(f"  Found item: {item_artists_str} - {item_name} ({item_duration}s)")
 
         # Artist match check
         artist_match = any(original_artist.lower() in a.lower() for a in item_artists_list)
         if not artist_match:
-            if not silent:
-                print(f"DEBUG:     Skipping item (artist mismatch)")
+            debug_print("    Skipping item (artist mismatch)")
             continue
 
         score = 0
@@ -2013,10 +2032,9 @@ def spotify_search_process_track_items(track_items, original_artist, original_tr
         if score > best_score:
             best_score = score
             best_item = item
-            if not silent:
-                print(f"DEBUG:     => New best match! (score={score})")
-        elif not silent:
-            print(f"DEBUG:     => Match not better than current best (score={score})")
+            debug_print(f"    => New best match! (score={score})")
+        else:
+            debug_print(f"    => Match not better than current best (score={score})")
 
     if best_item and best_score > 0:
         sp_track_uri_id = best_item.get("id")
@@ -2026,7 +2044,7 @@ def spotify_search_process_track_items(track_items, original_artist, original_tr
 
 
 # Returns Spotify track ID & duration for specific artist, track and optionally album
-def spotify_search_song_trackid_duration(access_token, artist, track, album="", silent=True):
+def spotify_search_song_trackid_duration(access_token, artist, track, album=""):
     artist, track = map(str, (artist, track))
     album = str(album) if album else ""
 
@@ -2038,9 +2056,8 @@ def spotify_search_song_trackid_duration(access_token, artist, track, album="", 
     url1 = f'https://api.spotify.com/v1/search?q={quote_plus(f"artist:{artist_sanitized} track:{track_sanitized} album:{album_sanitized}")}&type=track&limit=5'
     url2 = f'https://api.spotify.com/v1/search?q={quote_plus(f"artist:{artist_sanitized} track:{track_sanitized}")}&type=track&limit=5'
 
-    if not silent:
-        print(f"DEBUG: Spotify search URL1: {url1}")
-        print(f"DEBUG: Spotify search URL2: {url2}")
+    debug_print(f"Spotify search URL1: {url1}")
+    debug_print(f"Spotify search URL2: {url2}")
 
     pylast_version = getattr(pylast, '__version__', 'unknown')
     headers = {"Authorization": "Bearer " + access_token, "User-Agent": f"pylast/{pylast_version}"}
@@ -2055,10 +2072,9 @@ def spotify_search_song_trackid_duration(access_token, artist, track, album="", 
             json_response = response.json()
             if json_response.get("tracks"):
                 total = json_response["tracks"].get("total", 0)
-                if not silent:
-                    print(f"DEBUG: URL1 found {total} tracks")
+                debug_print(f"URL1 found {total} tracks")
                 if total > 0:
-                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, silent=silent)
+                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track)
         except Exception:
             pass
 
@@ -2069,10 +2085,9 @@ def spotify_search_song_trackid_duration(access_token, artist, track, album="", 
             json_response = response.json()
             if json_response.get("tracks"):
                 total = json_response["tracks"].get("total", 0)
-                if not silent:
-                    print(f"DEBUG: URL2 found {total} tracks")
+                debug_print(f"URL2 found {total} tracks")
                 if total > 0:
-                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, silent=silent)
+                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track)
         except Exception:
             pass
 
@@ -2082,18 +2097,16 @@ def spotify_search_song_trackid_duration(access_token, artist, track, album="", 
         track_cleaned = re.sub(re_replace_str, '', track, flags=re.IGNORECASE).strip()
         if track_cleaned and track_cleaned.lower() != track.lower():
             url3 = f'https://api.spotify.com/v1/search?q={quote_plus(f"artist:{artist_sanitized} track:{track_cleaned}")}&type=track&limit=5'
-            if not silent:
-                print(f"DEBUG: Spotify search URL3 (fallback): {url3}")
+            debug_print(f"Spotify search URL3 (fallback): {url3}")
             try:
                 response = req.get(url3, headers=headers, timeout=FUNCTION_TIMEOUT)
                 response.raise_for_status()
                 json_response = response.json()
                 if json_response.get("tracks"):
                     total = json_response["tracks"].get("total", 0)
-                    if not silent:
-                        print(f"DEBUG: URL3 found {total} tracks")
+                    debug_print(f"URL3 found {total} tracks")
                     if total > 0:
-                        sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, cleaned_track=track_cleaned, silent=silent)
+                        sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, cleaned_track=track_cleaned)
             except Exception:
                 pass
 
@@ -2101,18 +2114,16 @@ def spotify_search_song_trackid_duration(access_token, artist, track, album="", 
     if not sp_track_uri_id:
         search_query = f"{artist_sanitized} {track_cleaned if track_cleaned else track}"
         url4 = f'https://api.spotify.com/v1/search?q={quote_plus(search_query)}&type=track&limit=5'
-        if not silent:
-            print(f"DEBUG: Spotify search URL4 (broad): {url4}")
+        debug_print(f"Spotify search URL4 (broad): {url4}")
         try:
             response = req.get(url4, headers=headers, timeout=FUNCTION_TIMEOUT)
             response.raise_for_status()
             json_response = response.json()
             if json_response.get("tracks"):
                 total = json_response["tracks"].get("total", 0)
-                if not silent:
-                    print(f"DEBUG: URL4 found {total} tracks")
+                debug_print(f"URL4 found {total} tracks")
                 if total > 0:
-                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, cleaned_track=track_cleaned if track_cleaned else None, silent=silent)
+                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, cleaned_track=track_cleaned if track_cleaned else None)
         except Exception:
             pass
 
@@ -2211,26 +2222,23 @@ def resolve_executable(path):
     raise FileNotFoundError(f"Could not find executable '{path}'")
 
 
-def get_track_info(artist, track, album, network, silent=True):
+def get_track_info(artist, track, album, network):
     sp_track_uri_id = None
     sp_track_duration = 0
     track_duration = 0
     duration_mark = ""
 
-    if not silent:
-        print(f"DEBUG: get_track_info(artist='{artist}', track='{track}', album='{album}')")
+    debug_print(f"get_track_info(artist='{artist}', track='{track}', album='{album}')")
 
     if (USE_TRACK_DURATION_FROM_SPOTIFY or TRACK_SONGS) and SP_CLIENT_ID and SP_CLIENT_SECRET and SP_CLIENT_ID != "your_spotify_app_client_id" and SP_CLIENT_SECRET != "your_spotify_app_client_secret":
         try:
             accessToken = spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET)
         except Exception as e:
-            if not silent:
-                print(f"* spotify_get_access_token(): {e}")
+            debug_print(f"* spotify_get_access_token(): {e}")
             accessToken = None
         if accessToken:
-            sp_track_uri_id, sp_track_duration = spotify_search_song_trackid_duration(accessToken, artist, track, album, silent=silent)
-            if not silent:
-                print(f"DEBUG: Spotify search result: id='{sp_track_uri_id}', duration={sp_track_duration}s")
+            sp_track_uri_id, sp_track_duration = spotify_search_song_trackid_duration(accessToken, artist, track, album)
+            debug_print(f"Spotify search result: id='{sp_track_uri_id}', duration={sp_track_duration}s")
             if not USE_TRACK_DURATION_FROM_SPOTIFY:
                 sp_track_duration = 0
 
@@ -2242,20 +2250,17 @@ def get_track_info(artist, track, album, network, silent=True):
         try:
             lf_track = pylast.Track(artist, track, network)
             lf_duration = lf_track.get_duration()
-            if not silent:
-                print(f"DEBUG: Last.fm fallback: raw duration={lf_duration}ms")
+            debug_print(f"Last.fm fallback: raw duration={lf_duration}ms")
             if lf_duration and lf_duration > 0:
                 if USE_TRACK_DURATION_FROM_SPOTIFY and not DO_NOT_SHOW_DURATION_MARKS:
                     duration_mark = " L*"
                 # Last.fm returns duration in milliseconds
                 track_duration = int(lf_duration / 1000)
         except Exception as e:
-            if not silent:
-                print(f"DEBUG: Last.fm fallback error: {e}")
+            debug_print(f"Last.fm fallback error: {e}")
             track_duration = 0
 
-    if not silent:
-        print(f"DEBUG: Final track_duration={track_duration}s, duration_mark='{duration_mark}'")
+    debug_print(f"Final track_duration={track_duration}s, duration_mark='{duration_mark}'")
 
     return track_duration, sp_track_uri_id, duration_mark
 
@@ -2344,6 +2349,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
     error_network_issue_start_ts = 0
     friends_check_last_ts = 0
 
+    debug_print(f"Starting monitor loop for user: {username}")
     try:
         if csv_file_name:
             init_csv_file(csv_file_name)
@@ -2407,10 +2413,11 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             last_activity_track = track
             playing_track = new_track
             lf_user_online = True
+            debug_print(f"{username} is now ONLINE (initial track)")
             print(f"\nTrack:\t\t\t\t{artist} - {track}")
             print(f"Album:\t\t\t\t{album}")
 
-            track_duration, sp_track_uri_id, duration_mark = get_track_info(artist, track, album, network, silent=False)
+            track_duration, sp_track_uri_id, duration_mark = get_track_info(artist, track, album, network)
 
             if track_duration > 0:
                 print(f"Duration:\t\t\t{display_time(track_duration)}{duration_mark}")
@@ -2537,7 +2544,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             if last_activity_album:
                 print(f"* Last album:\t\t\t{last_activity_album}")
 
-            track_duration, sp_track_uri_id, duration_mark = get_track_info(last_activity_artist, last_activity_track, last_activity_album, network, silent=False)
+            track_duration, sp_track_uri_id, duration_mark = get_track_info(last_activity_artist, last_activity_track, last_activity_album, network)
 
             if track_duration > 0:
                 print(f"* Last track duration:\t\t{display_time(track_duration)}{duration_mark}")
@@ -2576,7 +2583,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             print(f"\nTrack:\t\t\t\t{artist} - {track}")
             print(f"Album:\t\t\t\t{album}")
 
-            track_duration, sp_track_uri_id, duration_mark = get_track_info(artist, track, album, network, silent=False)
+            track_duration, sp_track_uri_id, duration_mark = get_track_info(artist, track, album, network)
 
             if track_duration > 0:
                 print(f"Duration:\t\t\t{display_time(track_duration)}{duration_mark}")
@@ -2757,6 +2764,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                 print_cur_ts("\nTimestamp:\t\t\t")
         except Exception as e:
             print(f"* Warning: Initial friends check failed: {e}")
+            print_cur_ts("\nTimestamp:\t\t\t")
 
         friends_check_last_ts = int(time.time())
 
@@ -2867,6 +2875,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             retry_interval = FRIENDS_RETRY_INTERVAL
                             friends_next_check_ts = current_ts + retry_interval
 
+            debug_print(f"Fetching now playing / recent tracks for {username}...")
             recent_tracks = lastfm_get_recent_tracks(username, network, 1)
             # Handle case where user still has no tracks
             if not recent_tracks or len(recent_tracks) == 0:
@@ -2883,10 +2892,12 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             if not lf_user_online:
                 # If this is the first track appearing (user had no tracks before)
                 if last_track_start_ts_old2 == 0:
+                    debug_print("First track appeared!")
                     print("\n*** First track appeared! Starting monitoring...\n")
                     last_track_start_ts_old2 = last_track_start_ts
                     lf_track_ts_start_old = last_track_start_ts
                 if last_track_start_ts > last_track_start_ts_old2:
+                    debug_print(f"Detected new entries while offline ({last_track_start_ts} > {last_track_start_ts_old2})")
                     print("\n*** New last.fm entries showed up while user was offline!\n")
                     lf_track_ts_start_old = last_track_start_ts
                     duplicate_entries = False
@@ -3626,15 +3637,18 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                 print_cur_ts("Timestamp:\t\t\t")
 
         if lf_user_online:
-            time.sleep(LASTFM_ACTIVE_CHECK_INTERVAL)
+            check_interval = LASTFM_ACTIVE_CHECK_INTERVAL
         else:
-            time.sleep(LASTFM_CHECK_INTERVAL)
+            check_interval = LASTFM_CHECK_INTERVAL
+
+        debug_print(f"Sleeping for {check_interval}s before next check")
+        time.sleep(check_interval)
 
         new_track = None
 
 
 def main():
-    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, SP_TOKENS_FILE, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL
+    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, SP_TOKENS_FILE, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
 
     if "--generate-config" in sys.argv:
         print(CONFIG_BLOCK.strip("\n"))
@@ -3920,6 +3934,13 @@ def main():
         default=None,
         help="Disable logging to lastfm_monitor_<username>.log"
     )
+    opts.add_argument(
+        "--debug",
+        dest="debug_mode",
+        action="store_true",
+        default=None,
+        help="Enable debug mode (full API traces, internal logic logs)"
+    )
 
     args = parser.parse_args()
 
@@ -4005,6 +4026,11 @@ def main():
     if not LASTFM_API_SECRET or LASTFM_API_SECRET == "your_lastfm_api_secret":
         print("* Error: LASTFM_API_SECRET (-w / --lastfm-secret) value is empty or incorrect")
         sys.exit(1)
+
+    if args.debug_mode is True:
+        DEBUG_MODE = True
+
+    LASTFM_USERNAME_GLOBAL = args.username
 
     if args.spotify_creds:
         try:
@@ -4195,7 +4221,8 @@ def main():
     if TRACK_SONGS or USE_TRACK_DURATION_FROM_SPOTIFY:
         print(f"* Spotify token cache file:\t{SP_TOKENS_FILE or 'None (memory only)'}")
     print(f"* Configuration file:\t\t{cfg_path}")
-    print(f"* Dotenv file:\t\t\t{env_path or 'None'}\n")
+    print(f"* Dotenv file:\t\t\t{env_path or 'None'}")
+    print(f"* Debug mode:\t\t\t{DEBUG_MODE}\n")
 
     # We define signal handlers only for Linux, Unix & MacOS since Windows has limited number of signals supported
     if platform.system() != 'Windows':
