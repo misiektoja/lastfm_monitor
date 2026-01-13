@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.4.2
+v2.4.3
 
 Tool implementing real-time tracking of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -16,7 +16,7 @@ python-dotenv (optional)
 beautifulsoup4 (optional, only for followers/followings tracking)
 """
 
-VERSION = "2.4.2"
+VERSION = "2.4.3"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -1929,7 +1929,8 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
         album = str(new_track.info.get('album', '')) if new_track.info.get('album') else ""
         print("*** User is currently ACTIVE !")
         print(f"\nTrack:\t\t{artist} - {track}")
-        print(f"Album:\t\t{album}")
+        if album:
+            print(f"Album:\t\t{album}")
 
 
 # Sends a lightweight request to check token validity since Spotipy deprecates as_dict=True and there is no
@@ -2452,7 +2453,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             lf_user_online = True
             debug_print(f"{username} is now ONLINE (initial track)")
             print(f"\nTrack:\t\t\t\t{artist} - {track}")
-            print(f"Album:\t\t\t\t{album}")
+            if album:
+                print(f"Album:\t\t\t\t{album}")
 
             track_duration, sp_track_uri_id, duration_mark = get_track_info(artist, track, album, network)
 
@@ -2523,9 +2525,11 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                 lyrics_section_html = ""
             elif not music_urls_html:
                 music_section_html = "<br>"
-            m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}{music_section_text}{lyrics_section_text}Last activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+            album_line = f"Album: {album}" if album else ""
+            m_body = f"Track: {artist} - {track}{duration_m_body}\n{album_line}{music_section_text}{lyrics_section_text}Last activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
             album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
-            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html}Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
+            album_html_line = f"<br>Album: {album_html}" if album else ""
+            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}{album_html_line}{music_section_html}{lyrics_section_html}Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
             if ACTIVE_NOTIFICATION:
                 print(f"Sending email notification to {RECEIVER_EMAIL}")
@@ -2618,7 +2622,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
             artist_old = artist
             track_old = track
             print(f"\nTrack:\t\t\t\t{artist} - {track}")
-            print(f"Album:\t\t\t\t{album}")
+            if album:
+                print(f"Album:\t\t\t\t{album}")
 
             track_duration, sp_track_uri_id, duration_mark = get_track_info(artist, track, album, network)
 
@@ -2689,9 +2694,11 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                 lyrics_section_html = ""
             elif not music_urls_html:
                 music_section_html = "<br>"
-            m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}{music_section_text}{lyrics_section_text}Last activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+            album_line = f"Album: {album}" if album else ""
+            m_body = f"Track: {artist} - {track}{duration_m_body}\n{album_line}{music_section_text}{lyrics_section_text}Last activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
             album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
-            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html}Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
+            album_html_line = f"<br>Album: {album_html}" if album else ""
+            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}{album_html_line}{music_section_html}{lyrics_section_html}Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
             if ACTIVE_NOTIFICATION:
                 print(f"Sending email notification to {RECEIVER_EMAIL}")
@@ -3123,7 +3130,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                         recent_songs_session.pop(0)
 
                     print(f"Track:\t\t\t\t{artist} - {track}")
-                    print(f"Album:\t\t\t\t{album}")
+                    if album:
+                        print(f"Album:\t\t\t\t{album}")
 
                     track_duration, sp_track_uri_id, duration_mark = get_track_info(artist, track, album, network)
 
@@ -3251,10 +3259,12 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             lyrics_section_html = ""
                         elif not music_urls_html:
                             music_section_html = "<br>"
+                        album_line = f"Album: {album}" if album else ""
+                        album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
+                        album_html_line = f"<br>Album: {album_html}" if album else ""
                         if lf_active_ts_last > 0:
-                            m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}{music_section_text}{lyrics_section_text}{played_for_m_body}\n\nFriend got active after being offline for {offline_timespan}{last_track_start_changed}{private_mode}{last_activity_text}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                            album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
-                            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html}{played_for_m_body_html}<br><br>Friend got active after being offline for <b>{offline_timespan}</b>{last_track_start_changed_html}{private_mode_html}{last_activity_html}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                            m_body = f"Track: {artist} - {track}{duration_m_body}\n{album_line}{music_section_text}{lyrics_section_text}{played_for_m_body}\n\nFriend got active after being offline for {offline_timespan}{last_track_start_changed}{private_mode}{last_activity_text}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+                            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}{album_html_line}{music_section_html}{lyrics_section_html}{played_for_m_body_html}<br><br>Friend got active after being offline for <b>{offline_timespan}</b>{last_track_start_changed_html}{private_mode_html}{last_activity_html}{get_cur_ts('<br>Timestamp: ')}</body></html>"
                         else:
                             lyrics_section_text_fresh = f"\n{lyrics_urls_text}\n" if lyrics_urls_text else "\n"
                             lyrics_section_html_fresh = f"<br>{lyrics_urls_html}<br>" if lyrics_urls_html else "<br>"
@@ -3268,9 +3278,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                                 lyrics_section_html_fresh = ""
                             elif not music_urls_html:
                                 music_section_html = "<br>"
-                            m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}{music_section_text}{lyrics_section_text_fresh}{played_for_m_body}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                            album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
-                            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html_fresh}{played_for_m_body_html}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                            m_body = f"Track: {artist} - {track}{duration_m_body}\n{album_line}{music_section_text}{lyrics_section_text_fresh}{played_for_m_body}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+                            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}{album_html_line}{music_section_html}{lyrics_section_html_fresh}{played_for_m_body_html}{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
                         if ACTIVE_NOTIFICATION:
                             print(f"Sending email notification to {RECEIVER_EMAIL}")
@@ -3309,9 +3318,11 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             lyrics_section_html = ""
                         elif not music_urls_html:
                             music_section_html = "<br>"
-                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}{music_section_text}{lyrics_section_text}{played_for_m_body}{timespan_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                        album_line = f"Album: {album}" if album else ""
                         album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
-                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html}{played_for_m_body_html}{timespan_str_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                        album_html_line = f"<br>Album: {album_html}" if album else ""
+                        m_body = f"Track: {artist} - {track}{duration_m_body}\n{album_line}{music_section_text}{lyrics_section_text}{played_for_m_body}{timespan_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}{album_html_line}{music_section_html}{lyrics_section_html}{played_for_m_body_html}{timespan_str_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
 
                     # Check for loop first, before track/song notifications
                     if song_on_loop == SONG_ON_LOOP_VALUE:
@@ -3351,9 +3362,11 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             lyrics_section_html = ""
                         elif not music_urls_html:
                             music_section_html = "<br>"
-                        m_body = f"Track: {artist} - {track}{duration_m_body}\nAlbum: {album}{music_section_text}{lyrics_section_text}{played_for_m_body}\n\nUser plays song on LOOP ({song_on_loop} times){timespan_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                        album_line = f"Album: {album}" if album else ""
                         album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
-                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html}{played_for_m_body_html}<br><br>User plays song on LOOP (<b>{song_on_loop}</b> times){timespan_str_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                        album_html_line = f"<br>Album: {album_html}" if album else ""
+                        m_body = f"Track: {artist} - {track}{duration_m_body}\n{album_line}{music_section_text}{lyrics_section_text}{played_for_m_body}\n\nUser plays song on LOOP ({song_on_loop} times){timespan_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                        m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}{album_html_line}{music_section_html}{lyrics_section_html}{played_for_m_body_html}<br><br>User plays song on LOOP (<b>{song_on_loop}</b> times){timespan_str_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
                         print(f"Sending email notification to {RECEIVER_EMAIL}")
                         send_email(m_subject, m_body, m_body_html, SMTP_SSL)
                         email_sent = True
@@ -3588,9 +3601,11 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             lyrics_section_html = ""
                         elif not music_urls_html:
                             music_section_html = "<br>"
-                        m_body = f"Last played: {artist} - {track}{duration_m_body}\nAlbum: {album}{music_section_text}{lyrics_section_text}User got inactive after listening to music for {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}\nUser played music from {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep=' to ')}{paused_mbody}{listened_songs_mbody}{played_for_m_body}{recent_songs_mbody}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}\nInactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+                        album_line = f"Album: {album}" if album else ""
                         album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
-                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{last_played_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}<br>Album: {album_html}{music_section_html}{lyrics_section_html}User got inactive after listening to music for <b>{calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}</b><br>User played music from <b>{get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep='</b> to <b>')}</b>{paused_mbody_html}{listened_songs_mbody_html}{played_for_m_body_html}{recent_songs_mbody_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b><br>Inactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                        album_html_line = f"<br>Album: {album_html}" if album else ""
+                        m_body = f"Last played: {artist} - {track}{duration_m_body}\n{album_line}{music_section_text}{lyrics_section_text}User got inactive after listening to music for {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}\nUser played music from {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep=' to ')}{paused_mbody}{listened_songs_mbody}{played_for_m_body}{recent_songs_mbody}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}\nInactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{last_played_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}{album_html_line}{music_section_html}{lyrics_section_html}User got inactive after listening to music for <b>{calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}</b><br>User played music from <b>{get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep='</b> to <b>')}</b>{paused_mbody_html}{listened_songs_mbody_html}{played_for_m_body_html}{recent_songs_mbody_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b><br>Inactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
                         print(f"Sending email notification to {RECEIVER_EMAIL}")
                         send_email(m_subject, m_body, m_body_html, SMTP_SSL)
