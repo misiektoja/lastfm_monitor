@@ -1,6 +1,6 @@
 # lastfm_monitor
 
-lastfm_monitor is a tool for real-time monitoring of **Last.fm users' music activity**.
+**lastfm_monitor** is a powerful real-time tracker for Last.fm that brings your music data to life with automated Spotify playback, instant activity alerts and deep scrobble analytics.
 
 <a id="features"></a>
 ## Features
