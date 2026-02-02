@@ -1,6 +1,25 @@
 # lastfm_monitor
 
+<p align="left">
+  <img src="https://img.shields.io/github/v/release/misiektoja/lastfm_monitor?style=flat-square&color=blue" alt="GitHub Release" />
+  <img src="https://img.shields.io/pypi/v/lastfm_monitor?style=flat-square&color=orange" alt="PyPI Version" />
+  <img src="https://img.shields.io/github/stars/misiektoja/lastfm_monitor?style=flat-square&color=yellow" alt="GitHub Stars" />
+  <img src="https://img.shields.io/github/last-commit/misiektoja/lastfm_monitor?style=flat-square&color=green" alt="Last Commit" />
+  <img src="https://img.shields.io/github/license/misiektoja/lastfm_monitor?style=flat-square&color=blue" alt="License" />
+  <img src="https://img.shields.io/pypi/pyversions/lastfm_monitor?style=flat-square&color=blueviolet" alt="Python Versions" />
+  <img src="https://img.shields.io/badge/maintenance-active-brightgreen?style=flat-square" alt="Maintenance" />
+</p>
+
 **lastfm_monitor** is a powerful real-time tracker for Last.fm that brings your music data to life with automated Spotify playback, instant activity alerts and deep scrobble analytics.
+
+### 🚀 Quick Install
+```sh
+pip install lastfm_monitor
+```
+
+<p align="center">
+   <img src="https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/assets/lastfm_monitor.png" alt="lastfm_monitor_screenshot" width="90%"/>
+</p>
 
 <a id="features"></a>
 ## Features
@@ -21,10 +40,6 @@
 - **Flexible configuration** - support for config files, dotenv files, environment variables and command-line arguments
 - Possibility to **control the running copy** of the script via signals
 - **Functional, procedural Python** (minimal OOP)
-
-<p align="center">
-   <img src="https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/assets/lastfm_monitor.png" alt="lastfm_monitor_screenshot" width="90%"/>
-</p>
 
 <a id="table-of-contents"></a>
 ## Table of Contents
