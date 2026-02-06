@@ -2,6 +2,12 @@
 
 This is a high-level summary of the most important changes.
 
+# Changes in 2.4.3 (06 Feb 2026)
+
+**Features and Improvements**:
+
+- **IMPROVE:** Enhanced display of album information in notifications and outputs when album info is missing
+
 # Changes in 2.4.2 (13 Jan 2026)
 
 **Features and Improvements**:
