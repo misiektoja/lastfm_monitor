@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.4.3
+v2.4.4
 
 Tool implementing real-time tracking of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -16,7 +16,7 @@ python-dotenv (optional)
 beautifulsoup4 (optional, only for followers/followings tracking)
 """
 
-VERSION = "2.4.3"
+VERSION = "2.4.4"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -1402,14 +1402,16 @@ def save_friends_state(username, friends_type, users_set):
         print(f"* Warning: Cannot save {friends_type} state to '{filename}': {e}")
 
 
-# Checks for changes in friends/followers and returns change information
+# Checks for changes in friends/followers and returns (changes dict, current sets dict) so callers can persist the exact scraped sets without re-fetching
 def check_friends_changes(username, track_followings, track_followers, save_state=True, raise_on_error=False):
     changes = {}
+    current_sets = {}
 
     if track_followings:
         try:
             previous_friends = load_friends_state(username, 'followings')
             current_friends = lastfm_get_friends(username)
+            current_sets['followings'] = current_friends
 
             added_friends = current_friends - previous_friends
             removed_friends = previous_friends - current_friends
@@ -1421,12 +1423,9 @@ def check_friends_changes(username, track_followings, track_followers, save_stat
                     'current_count': len(current_friends),
                     'previous_count': len(previous_friends)
                 }
-                if save_state:
-                    save_friends_state(username, 'followings', current_friends)
-            else:
-                # Still save to update timestamp even if no changes
-                if save_state:
-                    save_friends_state(username, 'followings', current_friends)
+
+            if save_state:
+                save_friends_state(username, 'followings', current_friends)
         except Exception as e:
             if raise_on_error:
                 raise e
@@ -1435,6 +1434,7 @@ def check_friends_changes(username, track_followings, track_followers, save_stat
         try:
             previous_followers = load_friends_state(username, 'followers')
             current_followers = lastfm_get_followers(username)
+            current_sets['followers'] = current_followers
 
             added_followers = current_followers - previous_followers
             removed_followers = previous_followers - current_followers
@@ -1446,17 +1446,14 @@ def check_friends_changes(username, track_followings, track_followers, save_stat
                     'current_count': len(current_followers),
                     'previous_count': len(previous_followers)
                 }
-                if save_state:
-                    save_friends_state(username, 'followers', current_followers)
-            else:
-                # Still save to update timestamp even if no changes
-                if save_state:
-                    save_friends_state(username, 'followers', current_followers)
+
+            if save_state:
+                save_friends_state(username, 'followers', current_followers)
         except Exception as e:
             if raise_on_error:
                 raise e
 
-    return changes
+    return changes, current_sets
 
 
 # Sends notification about friends/followers changes
@@ -2771,7 +2768,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
 
             # Perform initial check to build baseline
             # We use raise_on_error=True so initialization failures (e.g. scraping issues) are visible
-            initial_changes = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, save_state=True, raise_on_error=True)
+            initial_changes, _ = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, save_state=True, raise_on_error=True)
 
             # Announce baseline creation for missing files
             if TRACK_FOLLOWINGS and not followings_file_exists:
@@ -2840,7 +2837,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                     try:
                         # Use save_state=False by default to avoid saving to file during suspected transient changes
                         # Use raise_on_error=True to detect check failures and avoid resetting streak
-                        changes = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS,
+                        # current_sets holds the exact sets we just scraped, so we can persist them without a second scrape (which could glitch and corrupt state)
+                        changes, current_sets = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS,
                                                      save_state=False, raise_on_error=True)
 
                         # Reset error streak on any successful check
@@ -2855,9 +2853,10 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                                 friends_streak = 1
 
                             if friends_streak >= FRIENDS_CHANGE_COUNTER:
-                                # Final confirmation after enough checks
-                                # Now call it again with save_state=True to persist changes
-                                check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, save_state=True, raise_on_error=True)
+                                # Final confirmation after enough checks; persist the exact sets we just scraped rather than re-fetching
+                                for key in ('followings', 'followers'):
+                                    if key in current_sets:
+                                        save_friends_state(username, key, current_sets[key])
                                 notify_friends_changes(username, changes, skip_initial_line=not PROGRESS_INDICATOR)
                                 friends_streak = 0
                                 friends_pending_changes = None
@@ -2890,8 +2889,10 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
                             friends_pending_changes = None
                             if not is_retry:
                                 friends_check_last_ts = current_ts
-                                # If it wasn't a retry, we update the timestamp to update lastfm baseline file
-                                check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, save_state=True, raise_on_error=True)
+                                # Persist the scraped sets to refresh the baseline file timestamp; reuse what we just fetched instead of re-scraping (which could glitch and overwrite state)
+                                for key in ('followings', 'followers'):
+                                    if key in current_sets:
+                                        save_friends_state(username, key, current_sets[key])
                     except Exception as e:
                         if friends_streak == 0:
                             # Start measuring error streak (negative values)
