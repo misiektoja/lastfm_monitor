@@ -1161,211 +1161,115 @@ def lastfm_get_recent_tracks(username, network, number):
         raise
 
 
-# Returns a set of usernames that the user is following (friends) - scraped from web
-def lastfm_get_friends(username):
+# Returns Last.fm HTTP headers crafted to look like a real browser so the WAF is less likely to block low-volume scraping
+def _lastfm_scrape_headers():
+    return {
+        'User-Agent': (
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+            'AppleWebKit/537.36 (KHTML, like Gecko) '
+            'Chrome/122.0.0.0 Safari/537.36'
+        ),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+    }
+
+
+# Fetches a URL with short retry/backoff on transient failures (Timeout, ConnectionError, 429, 5xx) and raises RuntimeError on any final failure
+def _lastfm_http_get_with_retry(url, attempts=3, base_delay=2.0):
+    last_exc = None
+    for i in range(attempts):
+        try:
+            response = req.get(url, headers=_lastfm_scrape_headers(), timeout=FUNCTION_TIMEOUT * 2)
+            if response.status_code in (429, 500, 502, 503, 504):
+                last_exc = RuntimeError(f"HTTP {response.status_code} from Last.fm")
+            else:
+                response.raise_for_status()
+                return response
+        except (req.Timeout, req.ConnectionError) as e:
+            last_exc = e
+        except req.HTTPError as e:
+            # Non-retryable 4xx (except 429 handled above) propagates immediately
+            raise RuntimeError(f"Failed to fetch from Last.fm: {e}")
+        if i < attempts - 1:
+            time.sleep(base_delay * (2 ** i))
+    raise RuntimeError(f"Failed to fetch from Last.fm after {attempts} attempts: {last_exc}")
+
+
+# Parses the "(N)" suffix from the h1 header on a followers/following page and returns N as int or None if not found
+def _lastfm_parse_count_from_h1(soup):
+    for h1 in soup.find_all('h1'):
+        txt = h1.get_text(' ', strip=True)
+        m = re.search(r'\((\d+)\)', txt)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+# Scrapes a user's followers or following list from Last.fm using structural selectors and cross-checks the parsed count against the page's own header count to avoid silent empty returns; kind must be 'followers' or 'following'
+def _lastfm_scrape_user_list(username, kind):
     from bs4 import BeautifulSoup  # type: ignore
 
-    url = f"https://www.last.fm/user/{quote_plus(username)}/following"
-    pylast_version = getattr(pylast, '__version__', 'unknown')
-    headers = {'User-Agent': f'pylast/{pylast_version} lastfm_monitor'}
+    if kind not in ('followers', 'following'):
+        raise ValueError(f"Invalid kind: {kind!r}")
 
+    url = f"https://www.last.fm/user/{quote_plus(username)}/{kind}"
     try:
-        response = req.get(url, headers=headers, timeout=FUNCTION_TIMEOUT * 2)
-        response.raise_for_status()
+        response = _lastfm_http_get_with_retry(url)
         soup = BeautifulSoup(response.content, 'html.parser')
 
-        # Check if user has no followings
-        page_text = soup.get_text()
-        if "doesn't follow anyone" in page_text.lower() or "not following anyone" in page_text.lower() or "no followings" in page_text.lower():
+        # Authoritative count from the page's h1 (e.g. "Followers (1)" / "Following (1)")
+        header_count = _lastfm_parse_count_from_h1(soup)
+        if header_count is None:
+            raise RuntimeError(f"Could not find {kind} count in page header (layout may have changed)")
+
+        if header_count == 0:
             return set()
 
-        followings = set()
-        # Navigation links to exclude (these are page navigation, not actual followings)
-        excluded_paths = {
-            'overview', 'reports', 'library', 'playlists', 'following', 'followers',
-            'loved', 'obsessions', 'events', 'neighbours', 'tags', 'shouts',
-            'charts', 'music', 'events', 'search', 'upgrade', 'pro', 'log', 'sign'
-        }
-
-        # Look for the main content area that contains followings list
-        followings_container = None
-        container_selectors = [
-            'main',
-            '.content',
-            '#content',
-            '.user-list',
-            '.friends-list',
-            '[class*="following"]',
-            '[id*="following"]'
-        ]
-
-        for container_selector in container_selectors:
-            container = soup.select_one(container_selector)
-            if container:
-                # Check if this container has following-related content
-                container_text = container.get_text().lower()
-                if 'following' in container_text or 'follows' in container_text:
-                    followings_container = container
-                    break
-
-        # If we found a container, search within it; otherwise search the whole page
-        search_area = followings_container if followings_container else soup
-
-        # Look for user profile links - these should be in the format /user/username (not /user/username/something)
-        for link in search_area.find_all('a', href=True):
-            href = link.get('href', '')
-
-            # Only process links that match /user/username pattern (exactly 2 path segments)
-            if isinstance(href, str) and href.startswith('/user/'):
+        # Structural container: ul.user-list > li.user-list-item, with ad items skipped
+        users = set()
+        for ul in soup.select('ul.user-list'):
+            for li in ul.find_all('li', recursive=False):
+                classes = li.get('class') or []
+                if any('ad' in c.lower() for c in classes):
+                    continue
+                a = li.select_one('.user-list-name a[href^="/user/"]') or li.select_one('a[href^="/user/"]')
+                if not a:
+                    continue
+                href = a.get('href', '')
                 parts = href.split('/')
-                # href should be like /user/username or /user/username?something
-                if len(parts) >= 3 and parts[1] == 'user':
-                    user_from_href = parts[2].split('?')[0].split('#')[0]
+                if len(parts) < 3 or parts[1] != 'user':
+                    continue
+                user_from_href = parts[2].split('?')[0].split('#')[0]
+                if user_from_href and user_from_href.lower() != username.lower():
+                    users.add(user_from_href)
 
-                    # Exclude navigation items and the user themselves
-                    if (user_from_href and user_from_href.lower() not in excluded_paths and user_from_href != username and user_from_href.lower() != username.lower()):
-                        # Additional validation: check if the link text looks like a username
-                        link_text = link.get_text(strip=True)
-                        if link_text and link_text.lower() not in excluded_paths:
-                            # Make sure it's not a navigation link by checking parent classes
-                            parent_classes = []
-                            parent = link.parent
-                            for _ in range(3):  # Check up to 3 levels up
-                                if parent and hasattr(parent, 'get'):
-                                    classes = parent.get('class')
-                                    if classes and isinstance(classes, list):
-                                        parent_classes.extend([str(c).lower() for c in classes])
-                                    parent = parent.parent if hasattr(parent, 'parent') else None
+        # Cross-check: the parsed set must match the authoritative header count; otherwise the page rendered unexpectedly and we must not silently return wrong data
+        if len(users) != header_count:
+            raise RuntimeError(
+                f"Parsed {kind} count mismatch: header says {header_count}, parsed {len(users)} "
+                f"(possible layout change, partial render, or bot-check page)"
+            )
 
-                            # Exclude if it's in navigation-related containers
-                            nav_indicators = ['nav', 'menu', 'sidebar', 'header', 'footer', 'tab']
-                            if not any(indicator in ' '.join(parent_classes) for indicator in nav_indicators):
-                                followings.add(user_from_href)
-
-        if not followings:
-            # If we found 0 followings, check if the "no followings" text was present
-            # If not, it might be a scraping error/API glitch
-            page_lower = page_text.lower()
-            empty_indicators = [
-                "doesn't follow anyone",
-                "not following anyone",
-                "no followings",
-                "anyone yet",
-                "is not following",
-                "isn't following"
-            ]
-            if not any(indicator in page_lower for indicator in empty_indicators):
-                raise RuntimeError("No followings found and no 'empty followings' indicator detected (possible scraping error or transient API issue)")
-
-        return followings
+        return users
     except req.RequestException as e:
-        raise RuntimeError(f"Failed to scrape followings from Last.fm: {e}")
+        raise RuntimeError(f"Failed to scrape {kind} from Last.fm: {e}")
+    except RuntimeError:
+        raise
     except Exception as e:
-        raise RuntimeError(f"Failed to parse followings page: {e}")
+        raise RuntimeError(f"Failed to parse {kind} page: {e}")
+
+
+# Returns a set of usernames that the user is following (friends) - scraped from web
+def lastfm_get_friends(username):
+    return _lastfm_scrape_user_list(username, 'following')
 
 
 # Returns a set of usernames that are following the user (scraped from web)
 def lastfm_get_followers(username):
-    from bs4 import BeautifulSoup  # type: ignore
-
-    url = f"https://www.last.fm/user/{quote_plus(username)}/followers"
-    pylast_version = getattr(pylast, '__version__', 'unknown')
-    headers = {'User-Agent': f'pylast/{pylast_version} lastfm_monitor'}
-
-    try:
-        response = req.get(url, headers=headers, timeout=FUNCTION_TIMEOUT * 2)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'html.parser')
-
-        # Check if user has no followers
-        page_text = soup.get_text()
-        if "doesn't have any followers" in page_text.lower() or "no followers" in page_text.lower():
-            return set()
-
-        followers = set()
-        # Navigation links to exclude (these are page navigation, not actual followers)
-        excluded_paths = {
-            'overview', 'reports', 'library', 'playlists', 'following', 'followers',
-            'loved', 'obsessions', 'events', 'neighbours', 'tags', 'shouts',
-            'charts', 'music', 'events', 'search', 'upgrade', 'pro', 'log', 'sign'
-        }
-
-        # Look for the main content area that contains followers list
-        # Try to find the followers container first
-        followers_container = None
-        container_selectors = [
-            'main',
-            '.content',
-            '#content',
-            '.user-list',
-            '.friends-list',
-            '[class*="followers"]',
-            '[id*="followers"]'
-        ]
-
-        for container_selector in container_selectors:
-            container = soup.select_one(container_selector)
-            if container:
-                # Check if this container has follower-related content
-                container_text = container.get_text().lower()
-                if 'followers' in container_text or 'following' in container_text:
-                    followers_container = container
-                    break
-
-        # If we found a container, search within it; otherwise search the whole page
-        search_area = followers_container if followers_container else soup
-
-        # Look for user profile links - these should be in the format /user/username (not /user/username/something)
-        for link in search_area.find_all('a', href=True):
-            href = link.get('href', '')
-
-            # Only process links that match /user/username pattern (exactly 2 path segments)
-            if isinstance(href, str) and href.startswith('/user/'):
-                parts = href.split('/')
-                # href should be like /user/username or /user/username?something
-                if len(parts) >= 3 and parts[1] == 'user':
-                    user_from_href = parts[2].split('?')[0].split('#')[0]
-
-                    # Exclude navigation items and the user themselves
-                    if (user_from_href and user_from_href.lower() not in excluded_paths and user_from_href != username and user_from_href.lower() != username.lower()):
-                        # Additional validation: check if the link text looks like a username
-                        # (not like "Overview", "Following", etc. which are navigation)
-                        link_text = link.get_text(strip=True)
-                        if link_text and link_text.lower() not in excluded_paths:
-                            # Make sure it's not a navigation link by checking parent classes
-                            parent_classes = []
-                            parent = link.parent
-                            for _ in range(3):  # Check up to 3 levels up
-                                if parent and hasattr(parent, 'get'):
-                                    classes = parent.get('class')
-                                    if classes and isinstance(classes, list):
-                                        parent_classes.extend([str(c).lower() for c in classes])
-                                    parent = parent.parent if hasattr(parent, 'parent') else None
-
-                            # Exclude if it's in navigation-related containers
-                            nav_indicators = ['nav', 'menu', 'sidebar', 'header', 'footer', 'tab']
-                            if not any(indicator in ' '.join(parent_classes) for indicator in nav_indicators):
-                                followers.add(user_from_href)
-
-        if not followers:
-            # If we found 0 followers, check if the "no followers" text was present
-            # If not, it might be a scraping error/API glitch
-            page_lower = page_text.lower()
-            empty_indicators = [
-                "doesn't have any followers",
-                "no followers",
-                "any followers yet",
-                "no one is following",
-                "no followers found"
-            ]
-            if not any(indicator in page_lower for indicator in empty_indicators):
-                raise RuntimeError("No followers found and no 'empty followers' indicator detected (possible scraping error or transient API issue)")
-
-        return followers
-    except req.RequestException as e:
-        raise RuntimeError(f"Failed to scrape followers from Last.fm: {e}")
-    except Exception as e:
-        raise RuntimeError(f"Failed to parse followers page: {e}")
+    return _lastfm_scrape_user_list(username, 'followers')
 
 
 # Loads previous friends/followers state from JSON file
