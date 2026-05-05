@@ -2,6 +2,16 @@
 
 This is a high-level summary of the most important changes.
 
+# Changes in 2.4.4 (05 May 2026)
+
+**Features and Improvements**:
+
+- **IMPROVE:** Hardened followers and followings scraping to avoid silent empty returns by adding retry and backoff plus structural parsing validation against Last.fm header counts
+
+**Bug fixes**:
+
+- **BUGFIX:** Prevented follower and following state corruption by persisting exactly the already-scraped sets instead of re-scraping during confirmation and baseline updates
+
 # Changes in 2.4.3 (06 Feb 2026)
 
 **Features and Improvements**:
