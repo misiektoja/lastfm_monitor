@@ -68,6 +68,26 @@ SP_CLIENT_SECRET = "your_spotify_app_client_secret"
 # Set to an empty string to use an in-memory cache
 SP_TOKENS_FILE = ".lastfm-monitor-oauth-app.json"
 
+# ----------------------------------------------
+# Advanced Spotify web-player TOTP options
+# Modifying the values below is NOT recommended!
+# ----------------------------------------------
+
+# TOTP parameters used to sign anonymous Spotify web-player token requests
+#
+# The Spotify web player derives a time-based one-time password from a versioned secret embedded in its
+# JavaScript bundle and sends it with every anonymous token request. These options ship set to v61, the
+# version the web player has selected since January 2026.
+#
+# You only need to change them if Spotify rotates the secret and the anonymous web-player metadata backend
+# starts failing to obtain a token. To refresh them:
+#   - Run the spotify_monitor_secret_grabber tool to extract the current version and cipher bytes from the
+#     live web-player bundle
+#   - Set SPOTIFY_TOTP_VERSION to the extracted version identifier (a positive integer)
+#   - Set SPOTIFY_TOTP_SECRET_CIPHER_BYTES to the extracted cipher bytes (a non-empty sequence of integers)
+SPOTIFY_TOTP_VERSION = 61
+SPOTIFY_TOTP_SECRET_CIPHER_BYTES = (44, 55, 47, 42, 70, 40, 34, 114, 76, 74, 50, 111, 120, 97, 75, 76, 94, 102, 43, 69, 49, 120, 118, 80, 64, 78)
+
 # SMTP settings for sending email notifications
 # If left as-is, no notifications will be sent
 #
@@ -351,6 +371,8 @@ LASTFM_API_SECRET = ""
 SP_CLIENT_ID = ""
 SP_CLIENT_SECRET = ""
 SP_TOKENS_FILE = ""
+SPOTIFY_TOTP_VERSION = 0
+SPOTIFY_TOTP_SECRET_CIPHER_BYTES: tuple[int, ...] = ()
 SMTP_HOST = ""
 SMTP_PORT = 0
 SMTP_USER = ""
@@ -460,8 +482,6 @@ SPOTIFY_SERVER_TIME_URL = "https://open.spotify.com/"
 SPOTIFY_WEB_PLAYER_URL = "https://open.spotify.com/"
 SPOTIFY_WEB_QUERY_URL = "https://api-partner.spotify.com/pathfinder/v2/query"
 SPOTIFY_WEB_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
-SPOTIFY_TOTP_VERSION = 61
-SPOTIFY_TOTP_SECRET_CIPHER_BYTES = (44, 55, 47, 42, 70, 40, 34, 114, 76, 74, 50, 111, 120, 97, 75, 76, 94, 102, 43, 69, 49, 120, 118, 80, 64, 78)
 SPOTIFY_WEB_TOKEN_EXPIRY_WINDOW = 60
 
 LIVENESS_CHECK_COUNTER = LIVENESS_CHECK_INTERVAL / LASTFM_CHECK_INTERVAL
@@ -1917,9 +1937,15 @@ def spotify_fetch_server_time(session=SPOTIFY_SESSION):
     return int(parsedate_to_datetime(date_header).timestamp())
 
 
-# Creates a TOTP object using the fixed Spotify web-player v61 cipher bytes
+# Builds a pyotp TOTP object from the configured Spotify web-player cipher bytes
 def generate_totp():
-    transformed = [value ^ ((index % 33) + 9) for index, value in enumerate(SPOTIFY_TOTP_SECRET_CIPHER_BYTES)]
+    cipher_bytes = SPOTIFY_TOTP_SECRET_CIPHER_BYTES
+    if not cipher_bytes or not all(isinstance(value, int) and not isinstance(value, bool) for value in cipher_bytes):
+        raise ValueError("SPOTIFY_TOTP_SECRET_CIPHER_BYTES must be a non-empty sequence of integers; refresh it with the spotify_monitor_secret_grabber tool if Spotify rotated the web-player secret")
+    if not isinstance(SPOTIFY_TOTP_VERSION, int) or isinstance(SPOTIFY_TOTP_VERSION, bool) or SPOTIFY_TOTP_VERSION <= 0:
+        raise ValueError("SPOTIFY_TOTP_VERSION must be a positive integer; refresh it with the spotify_monitor_secret_grabber tool if Spotify rotated the web-player secret")
+
+    transformed = [value ^ ((index % 33) + 9) for index, value in enumerate(cipher_bytes)]
     joined = "".join(str(number) for number in transformed)
     hex_string = joined.encode().hex()
     secret = base64.b32encode(bytes.fromhex(hex_string)).decode().rstrip("=")
