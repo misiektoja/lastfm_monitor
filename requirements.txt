@@ -1,6 +1,7 @@
 pylast
 requests
 python-dateutil
+pyotp
 spotipy
 python-dotenv
 beautifulsoup4
