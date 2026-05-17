@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.4.4
+v2.5
 
 Tool implementing real-time tracking of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -11,12 +11,13 @@ Python pip3 requirements:
 pylast
 requests
 python-dateutil
+pyotp
 spotipy (optional, only for Spotify-related features)
 python-dotenv (optional)
 beautifulsoup4 (optional, only for followers/followings tracking)
 """
 
-VERSION = "2.4.4"
+VERSION = "2.5"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -30,7 +31,7 @@ CONFIG_BLOCK = """
 # https://www.last.fm/api/accounts
 #
 # Provide the LASTFM_API_KEY and LASTFM_API_SECRET secrets using one of the following methods:
-#   - Pass it at runtime with -r / --lastfm-api-key and -w / --lastfm-secret
+#   - Pass it at runtime with -u / --lastfm-api-key and -w / --lastfm-secret
 #   - Set it as an environment variable (e.g. export LASTFM_API_KEY=...; export LASTFM_API_SECRET=...)
 #   - Add it to ".env" file (LASTFM_API_KEY=... and LASTFM_API_SECRET=...) for persistent use
 # Fallback:
@@ -38,11 +39,14 @@ CONFIG_BLOCK = """
 LASTFM_API_KEY = "your_lastfm_api_key"
 LASTFM_API_SECRET = "your_lastfm_api_secret"
 
-# This Spotify Client Credentials OAuth Flow section is optional and only needed if you want to:
+# Spotify Client Credentials OAuth Flow (OAuth app) is optional
+# When configured, the official Web API is tried before the anonymous web-player backend
+#
+# Only needed if you want to:
 #   - Get track duration from Spotify (via USE_TRACK_DURATION_FROM_SPOTIFY / -r), which is more accurate than Last.fm
 #   - Use automatic playback functionality (via TRACK_SONGS / -g), which requires Spotify track IDs
 #
-# To obtain the credentials:
+# To obtain the credentials for the Web API:
 #   - Log in to Spotify Developer dashboard: https://developer.spotify.com/dashboard
 #   - Create a new app
 #   - For 'Redirect URL', use: http://127.0.0.1:1234
@@ -60,8 +64,8 @@ LASTFM_API_SECRET = "your_lastfm_api_secret"
 SP_CLIENT_ID = "your_spotify_app_client_id"
 SP_CLIENT_SECRET = "your_spotify_app_client_secret"
 
-# Path to cache file used to store OAuth app access tokens across tool restarts
-# Set to empty to use in-memory cache only
+# Path used by Spotipy to cache OAuth app access tokens across restarts
+# Set to an empty string to use an in-memory cache
 SP_TOKENS_FILE = ".lastfm-monitor-oauth-app.json"
 
 # SMTP settings for sending email notifications
@@ -132,7 +136,7 @@ PROGRESS_INDICATOR = False
 
 # Set to True to retrieve track duration from Spotify instead of Last.fm
 # Recommended, as Last.fm often lacks this info or reports inaccurate values
-# Only works if SP_CLIENT_ID and SP_CLIENT_SECRET are defined (or provided via -z)
+# Uses OAuth app metadata first when configured, then anonymous web-player metadata
 # Can also be set with the -r flag
 USE_TRACK_DURATION_FROM_SPOTIFY = False
 
@@ -435,8 +439,30 @@ re_replace_str = r'( - (\d*)( )*remaster$)|( - (\d*)( )*remastered( version)*( \
 # Default value for Spotify network-related timeouts in functions; in seconds
 FUNCTION_TIMEOUT = 5  # 5 seconds
 
-# Variables for caching functionality of the Spotify access token to avoid unnecessary refreshing
-SP_CACHED_ACCESS_TOKEN = None
+# Reuses Spotipy's in-memory OAuth cache when no cache file is configured
+SP_OAUTH_MEMORY_CACHE_HANDLER = None
+
+# Spotify Web API endpoint used for OAuth app track search
+SPOTIFY_OAUTH_SEARCH_URL = "https://api.spotify.com/v1/search"
+
+# Caches the anonymous Spotify web-player token until its expiration window
+SP_CACHED_WEB_ACCESS_TOKEN = None
+SP_WEB_ACCESS_TOKEN_EXPIRES_AT = 0
+SP_CACHED_WEB_CLIENT_ID = ""
+
+# Caches persisted-query hashes discovered from the current Spotify web-player bundle
+SP_CACHED_TRACK_QUERY_HASH = ""
+SP_CACHED_SEARCH_QUERY_HASH = ""
+
+# Spotify web-player token and Pathfinder settings
+SPOTIFY_TOKEN_URL = "https://open.spotify.com/api/token"
+SPOTIFY_SERVER_TIME_URL = "https://open.spotify.com/"
+SPOTIFY_WEB_PLAYER_URL = "https://open.spotify.com/"
+SPOTIFY_WEB_QUERY_URL = "https://api-partner.spotify.com/pathfinder/v2/query"
+SPOTIFY_WEB_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+SPOTIFY_TOTP_VERSION = 61
+SPOTIFY_TOTP_SECRET_CIPHER_BYTES = (44, 55, 47, 42, 70, 40, 34, 114, 76, 74, 50, 111, 120, 97, 75, 76, 94, 102, 43, 69, 49, 120, 118, 80, 64, 78)
+SPOTIFY_WEB_TOKEN_EXPIRY_WINDOW = 60
 
 LIVENESS_CHECK_COUNTER = LIVENESS_CHECK_INTERVAL / LASTFM_CHECK_INTERVAL
 
@@ -475,7 +501,7 @@ try:
     import pylast
 except ModuleNotFoundError:
     raise SystemExit("Error: Couldn't find the pyLast library !\n\nTo install it, run:\n    pip install pylast\n\nOnce installed, re-run this tool. For more help, visit:\nhttps://github.com/pylast/pylast")
-from urllib.parse import quote_plus, quote
+from urllib.parse import quote_plus, quote, urljoin
 import subprocess
 import platform
 import re
@@ -488,6 +514,11 @@ from typing import Tuple
 import base64
 import hashlib
 import hmac
+from email.utils import parsedate_to_datetime
+import pyotp
+
+
+SPOTIFY_SESSION = req.Session()
 
 
 # Logger class to output messages to stdout and log file
@@ -919,6 +950,7 @@ def decrease_inactivity_check_signal_handler(sig, frame):
 
 # Signal handler for SIGHUP allowing to reload secrets from .env
 def reload_secrets_signal_handler(sig, frame):
+    global SP_OAUTH_MEMORY_CACHE_HANDLER
     sig_name = signal.Signals(sig).name
     print(f"* Signal {sig_name} received")
 
@@ -941,13 +973,18 @@ def reload_secrets_signal_handler(sig, frame):
             env_path = None
             print("* python-dotenv not installed, skipping env-var reload")
 
+    oauth_credentials_changed = False
     if env_path:
         for secret in SECRET_KEYS:
             old_val = globals().get(secret)
             val = os.getenv(secret)
             if val is not None and val != old_val:
                 globals()[secret] = val
+                if secret in ("SP_CLIENT_ID", "SP_CLIENT_SECRET"):
+                    oauth_credentials_changed = True
                 print(f"* Reloaded {secret} from {env_path}")
+    if oauth_credentials_changed:
+        SP_OAUTH_MEMORY_CACHE_HANDLER = None
 
     print_cur_ts("Timestamp:\t\t\t")
 
@@ -1238,7 +1275,7 @@ def _lastfm_scrape_user_list(username, kind):
                 a = li.select_one('.user-list-name a[href^="/user/"]') or li.select_one('a[href^="/user/"]')
                 if not a:
                     continue
-                href = a.get('href', '')
+                href = str(a.get('href', ''))
                 parts = href.split('/')
                 if len(parts) < 3 or parts[1] != 'user':
                     continue
@@ -1834,45 +1871,301 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
             print(f"Album:\t\t{album}")
 
 
-# Sends a lightweight request to check token validity since Spotipy deprecates as_dict=True and there is no
-# get_cached_token() method implemented yet for Client Credentials OAuth Flow
-def check_token_validity(token):
-    url = "https://api.spotify.com/v1/browse/categories?limit=1&fields=categories.items(id)"
-    pylast_version = getattr(pylast, '__version__', 'unknown')
-    headers = {"Authorization": f"Bearer {token}", "User-Agent": f"pylast/{pylast_version}"}
-
-    try:
-        return req.get(url, headers=headers, timeout=FUNCTION_TIMEOUT).status_code == 200
-    except Exception:
-        return False
+# Reports whether complete non-placeholder Spotify OAuth app credentials are configured
+def spotify_oauth_app_configured():
+    invalid_client_ids = ("", "your_spotify_app_client_id")
+    invalid_client_secrets = ("", "your_spotify_app_client_secret")
+    return SP_CLIENT_ID not in invalid_client_ids and SP_CLIENT_SECRET not in invalid_client_secrets
 
 
-# Gets Spotify access token based on provided sp_client_id & sp_client_secret values (Client Credentials OAuth Flow)
+# Returns an expiration-aware Spotify OAuth app token through Spotipy's cache handler
 def spotify_get_access_token(sp_client_id, sp_client_secret):
-    global SP_CACHED_ACCESS_TOKEN
-
+    global SP_OAUTH_MEMORY_CACHE_HANDLER
     try:
-        from spotipy.oauth2 import SpotifyClientCredentials
         from spotipy.cache_handler import CacheFileHandler, MemoryCacheHandler
-    except ImportError:
-        print("* Warning: the 'spotipy' package is required for Spotify-related features, install it with `pip install spotipy`")
-        return None
-
-    if SP_CACHED_ACCESS_TOKEN and check_token_validity(SP_CACHED_ACCESS_TOKEN):
-        debug_print("Using cached Spotify access token")
-        return SP_CACHED_ACCESS_TOKEN
+        from spotipy.oauth2 import SpotifyClientCredentials
+    except ImportError as error:
+        raise RuntimeError("Spotipy is required for the Spotify OAuth app backend") from error
 
     if SP_TOKENS_FILE:
         cache_handler = CacheFileHandler(cache_path=SP_TOKENS_FILE)
+        cache_description = "file"
     else:
-        cache_handler = MemoryCacheHandler()
+        if SP_OAUTH_MEMORY_CACHE_HANDLER is None:
+            SP_OAUTH_MEMORY_CACHE_HANDLER = MemoryCacheHandler()
+        cache_handler = SP_OAUTH_MEMORY_CACHE_HANDLER
+        cache_description = "memory"
 
-    auth_manager = SpotifyClientCredentials(client_id=sp_client_id, client_secret=sp_client_secret, cache_handler=cache_handler)
+    auth_manager = SpotifyClientCredentials(client_id=sp_client_id, client_secret=sp_client_secret, requests_timeout=FUNCTION_TIMEOUT, cache_handler=cache_handler)
+    access_token = auth_manager.get_access_token(as_dict=False)
+    if not access_token:
+        raise RuntimeError("Spotify OAuth app token response was empty")
+    debug_print(f"Spotify OAuth app access token obtained through {cache_description} cache, token_len={len(access_token)}")
+    return access_token
 
-    SP_CACHED_ACCESS_TOKEN = auth_manager.get_access_token(as_dict=False)
-    debug_print("Successfully obtained new Spotify access token")
 
-    return SP_CACHED_ACCESS_TOKEN
+# Fetches Spotify edge-server Unix time for anonymous token generation
+def spotify_fetch_server_time(session=SPOTIFY_SESSION):
+    headers = {"Accept": "*/*", "User-Agent": SPOTIFY_WEB_USER_AGENT}
+    debug_print(f"HTTP HEAD {SPOTIFY_SERVER_TIME_URL} [Spotify server time]")
+    response = session.head(SPOTIFY_SERVER_TIME_URL, headers=headers, timeout=FUNCTION_TIMEOUT)
+    debug_print(f"HTTP HEAD {SPOTIFY_SERVER_TIME_URL} [Spotify server time] -> {response.status_code}")
+    response.raise_for_status()
+    date_header = response.headers.get("Date")
+    if not date_header:
+        raise RuntimeError("Spotify server-time response is missing the Date header")
+    return int(parsedate_to_datetime(date_header).timestamp())
+
+
+# Creates a TOTP object using the fixed Spotify web-player v61 cipher bytes
+def generate_totp():
+    transformed = [value ^ ((index % 33) + 9) for index, value in enumerate(SPOTIFY_TOTP_SECRET_CIPHER_BYTES)]
+    joined = "".join(str(number) for number in transformed)
+    hex_string = joined.encode().hex()
+    secret = base64.b32encode(bytes.fromhex(hex_string)).decode().rstrip("=")
+    return pyotp.TOTP(secret, digits=6, interval=30)
+
+
+# Requests a fresh anonymous Spotify web-player access token
+def spotify_refresh_web_access_token(session=SPOTIFY_SESSION):
+    server_time = spotify_fetch_server_time(session)
+    otp_value = generate_totp().at(server_time)
+    headers = {"Accept": "application/json", "App-Platform": "WebPlayer", "Referer": SPOTIFY_WEB_PLAYER_URL, "User-Agent": SPOTIFY_WEB_USER_AGENT}
+    last_error = ""
+
+    for reason in ("transport", "init"):
+        params = {"productType": "web-player", "reason": reason, "totp": otp_value, "totpServer": otp_value, "totpVer": SPOTIFY_TOTP_VERSION}
+        try:
+            debug_print(f"HTTP GET {SPOTIFY_TOKEN_URL} [anonymous web token reason={reason}]")
+            response = session.get(SPOTIFY_TOKEN_URL, params=params, headers=headers, timeout=FUNCTION_TIMEOUT)
+            debug_print(f"HTTP GET {SPOTIFY_TOKEN_URL} [anonymous web token reason={reason}] -> {response.status_code}")
+            response.raise_for_status()
+            data = response.json()
+            if not isinstance(data, dict):
+                last_error = "invalid token data"
+                continue
+            access_token = data.get("accessToken", "")
+            expires_at = int(data.get("accessTokenExpirationTimestampMs", 0) / 1000)
+            client_id = data.get("clientId", "")
+            if access_token and expires_at and client_id:
+                debug_print(f"Anonymous Spotify web-player token obtained, token_len={len(access_token)}")
+                return {"access_token": access_token, "client_id": client_id, "expires_at": expires_at}
+            last_error = "incomplete token data"
+        except (req.RequestException, TypeError, ValueError) as error:
+            last_error = type(error).__name__
+            debug_print(f"Anonymous Spotify web-player token request failed with {last_error}")
+
+    raise RuntimeError(f"Spotify anonymous web-player token request failed: {last_error or 'unknown error'}")
+
+
+# Returns a cached or freshly generated anonymous Spotify web-player token
+def spotify_get_web_access_token_data():
+    global SP_CACHED_WEB_ACCESS_TOKEN, SP_WEB_ACCESS_TOKEN_EXPIRES_AT, SP_CACHED_WEB_CLIENT_ID
+    now = time.time()
+    if SP_CACHED_WEB_ACCESS_TOKEN and SP_CACHED_WEB_CLIENT_ID and now < SP_WEB_ACCESS_TOKEN_EXPIRES_AT - SPOTIFY_WEB_TOKEN_EXPIRY_WINDOW:
+        debug_print("Using cached anonymous Spotify web-player access token")
+        return {"access_token": SP_CACHED_WEB_ACCESS_TOKEN, "client_id": SP_CACHED_WEB_CLIENT_ID, "expires_at": SP_WEB_ACCESS_TOKEN_EXPIRES_AT}
+
+    token_data = spotify_refresh_web_access_token()
+    SP_CACHED_WEB_ACCESS_TOKEN = token_data["access_token"]
+    SP_CACHED_WEB_CLIENT_ID = token_data["client_id"]
+    SP_WEB_ACCESS_TOKEN_EXPIRES_AT = token_data["expires_at"]
+    return token_data
+
+
+# Clears the cached hash for one Spotify Pathfinder operation
+def spotify_clear_web_query_hash(operation_name):
+    global SP_CACHED_TRACK_QUERY_HASH, SP_CACHED_SEARCH_QUERY_HASH
+    if operation_name == "getTrack":
+        SP_CACHED_TRACK_QUERY_HASH = ""
+    elif operation_name == "assistedCurationSearch":
+        SP_CACHED_SEARCH_QUERY_HASH = ""
+    else:
+        raise ValueError(f"Unsupported Spotify web-player operation: {operation_name}")
+
+
+# Discovers and caches persisted-query hashes from the current Spotify web-player bundle
+def spotify_discover_web_query_hash(operation_name, force=False):
+    global SP_CACHED_TRACK_QUERY_HASH, SP_CACHED_SEARCH_QUERY_HASH
+    if operation_name == "getTrack":
+        cached_hash = SP_CACHED_TRACK_QUERY_HASH
+    elif operation_name == "assistedCurationSearch":
+        cached_hash = SP_CACHED_SEARCH_QUERY_HASH
+    else:
+        raise ValueError(f"Unsupported Spotify web-player operation: {operation_name}")
+
+    if cached_hash and not force:
+        return cached_hash
+
+    headers = {"Accept": "text/html,application/xhtml+xml", "User-Agent": SPOTIFY_WEB_USER_AGENT}
+    debug_print(f"HTTP GET {SPOTIFY_WEB_PLAYER_URL} [Spotify query discovery operation={operation_name}]")
+    response = SPOTIFY_SESSION.get(SPOTIFY_WEB_PLAYER_URL, headers=headers, timeout=FUNCTION_TIMEOUT)
+    debug_print(f"HTTP GET {SPOTIFY_WEB_PLAYER_URL} [Spotify query discovery operation={operation_name}] -> {response.status_code}")
+    response.raise_for_status()
+
+    script_urls = re.findall(r'<script[^>]+src=["\']([^"\']+)["\']', response.text, flags=re.IGNORECASE)
+    bundle_url = ""
+    for script_url in script_urls:
+        if re.search(r'/web-player/web-player\.[^/?]+\.js(?:\?|$)', script_url):
+            bundle_url = urljoin(SPOTIFY_WEB_PLAYER_URL, script_url)
+            break
+    if not bundle_url:
+        raise RuntimeError("Cannot find the Spotify desktop web-player JavaScript bundle")
+
+    debug_print(f"HTTP GET {bundle_url} [Spotify query bundle operation={operation_name}]")
+    bundle_response = SPOTIFY_SESSION.get(bundle_url, headers={"User-Agent": SPOTIFY_WEB_USER_AGENT}, timeout=FUNCTION_TIMEOUT)
+    debug_print(f"HTTP GET {bundle_url} [Spotify query bundle operation={operation_name}] -> {bundle_response.status_code}")
+    bundle_response.raise_for_status()
+
+    discovered_hashes = {}
+    for discovered_operation in ("getTrack", "assistedCurationSearch"):
+        hash_match = re.search(rf'["\']{re.escape(discovered_operation)}["\']\s*,\s*["\']query["\']\s*,\s*["\']([0-9a-f]{{64}})["\']', bundle_response.text)
+        if hash_match and discovered_operation == "getTrack":
+            SP_CACHED_TRACK_QUERY_HASH = hash_match.group(1)
+            discovered_hashes[discovered_operation] = hash_match.group(1)
+        elif hash_match:
+            SP_CACHED_SEARCH_QUERY_HASH = hash_match.group(1)
+            discovered_hashes[discovered_operation] = hash_match.group(1)
+
+    discovered_hash = discovered_hashes.get(operation_name, "")
+    if not discovered_hash:
+        raise RuntimeError(f"Cannot find the {operation_name} persisted-query hash in the Spotify web-player bundle")
+    debug_print(f"Discovered Spotify {operation_name} persisted-query hash from {bundle_url}")
+    return discovered_hash
+
+
+# Discovers and caches the getTrack persisted-query hash
+def spotify_discover_track_query_hash(force=False):
+    return spotify_discover_web_query_hash("getTrack", force)
+
+
+# Discovers and caches the anonymous search persisted-query hash
+def spotify_discover_search_query_hash(force=False):
+    return spotify_discover_web_query_hash("assistedCurationSearch", force)
+
+
+# Executes a Spotify Pathfinder query with one token refresh and one hash refresh
+def spotify_web_metadata_query(operation_name, variables):
+    global SP_CACHED_WEB_ACCESS_TOKEN, SP_WEB_ACCESS_TOKEN_EXPIRES_AT, SP_CACHED_WEB_CLIENT_ID
+    token_refreshed = False
+    hash_refreshed = False
+    force_query_hash = False
+    last_error = ""
+
+    for _ in range(3):
+        token_data = spotify_get_web_access_token_data()
+        query_hash = spotify_discover_web_query_hash(operation_name, force=force_query_hash)
+        force_query_hash = False
+        headers = {"Accept": "application/json", "App-Platform": "WebPlayer", "Authorization": f"Bearer {token_data['access_token']}", "Client-Id": token_data["client_id"], "Content-Type": "application/json", "User-Agent": SPOTIFY_WEB_USER_AGENT}
+        payload = {"extensions": {"persistedQuery": {"sha256Hash": query_hash, "version": 1}}, "operationName": operation_name, "variables": variables}
+        debug_print(f"HTTP POST {SPOTIFY_WEB_QUERY_URL} [Spotify web metadata operation={operation_name}]")
+        response = SPOTIFY_SESSION.post(SPOTIFY_WEB_QUERY_URL, headers=headers, json=payload, timeout=FUNCTION_TIMEOUT)
+        debug_print(f"HTTP POST {SPOTIFY_WEB_QUERY_URL} [Spotify web metadata operation={operation_name}] -> {response.status_code}")
+
+        try:
+            json_response = response.json()
+        except ValueError:
+            response.raise_for_status()
+            raise RuntimeError(f"Spotify web-player operation '{operation_name}' returned invalid JSON")
+
+        errors = json_response.get("errors") if isinstance(json_response, dict) else None
+        error_message = " | ".join(str(error.get("message", error)) if isinstance(error, dict) else str(error) for error in (errors or []))
+        last_error = error_message or f"HTTP {response.status_code}"
+
+        if response.status_code == 401 and not token_refreshed:
+            SP_CACHED_WEB_ACCESS_TOKEN = None
+            SP_WEB_ACCESS_TOKEN_EXPIRES_AT = 0
+            SP_CACHED_WEB_CLIENT_ID = ""
+            token_refreshed = True
+            debug_print("Anonymous Spotify web-player token was rejected, refreshing it once")
+            continue
+
+        persisted_query_rejected = bool(errors) and any(marker in error_message.lower() for marker in ("persistedquery", "persisted query", "sha256"))
+        if persisted_query_rejected and not hash_refreshed:
+            spotify_clear_web_query_hash(operation_name)
+            hash_refreshed = True
+            force_query_hash = True
+            debug_print(f"Spotify {operation_name} persisted query was rejected, rediscovering its hash once")
+            continue
+
+        if errors:
+            raise RuntimeError(f"Spotify web-player operation '{operation_name}' failed: {error_message}")
+
+        response.raise_for_status()
+        data = json_response.get("data") if isinstance(json_response, dict) else None
+        if not isinstance(data, dict):
+            raise RuntimeError(f"Spotify web-player operation '{operation_name}' returned no data")
+        return data
+
+    raise RuntimeError(f"Spotify web-player operation '{operation_name}' failed after refresh: {last_error}")
+
+
+# Builds a Spotify share URL from web-player data or an entity URI
+def spotify_get_web_entity_url(entity, uri):
+    sharing_info = entity.get("sharingInfo") or {} if isinstance(entity, dict) else {}
+    share_url = sharing_info.get("shareUrl", "") if isinstance(sharing_info, dict) else ""
+    return share_url or spotify_convert_uri_to_url(uri)
+
+
+# Normalizes Spotify getTrack data to the legacy track item shape
+def spotify_normalize_web_track(track):
+    if not isinstance(track, dict) or track.get("__typename") != "Track":
+        raise ValueError("Spotify web-player track data is missing or malformed")
+
+    duration_data = track.get("duration") or track.get("trackDuration") or {}
+    duration_ms = duration_data.get("totalMilliseconds") if isinstance(duration_data, dict) else None
+    track_uri = track.get("uri", "")
+    track_name = track.get("name")
+    if duration_ms is None or not track_uri.startswith("spotify:track:") or not track_name:
+        raise ValueError("Spotify web-player track metadata is incomplete")
+
+    artist_items = []
+    for artist_group_name in ("firstArtist", "otherArtists"):
+        artist_group = track.get(artist_group_name) or {}
+        if isinstance(artist_group, dict):
+            artist_items.extend(artist_group.get("items") or [])
+
+    artists = []
+    seen_artist_uris = set()
+    for artist in artist_items:
+        if not isinstance(artist, dict):
+            continue
+        artist_profile = artist.get("profile") or {}
+        artist_name = artist_profile.get("name") if isinstance(artist_profile, dict) else None
+        artist_uri = artist.get("uri", "")
+        if artist_name and artist_uri not in seen_artist_uris:
+            artists.append({"external_urls": {"spotify": spotify_get_web_entity_url(artist, artist_uri)}, "name": artist_name, "uri": artist_uri})
+            seen_artist_uris.add(artist_uri)
+    if not artists:
+        raise ValueError("Spotify web-player track artist is missing or malformed")
+
+    album = track.get("albumOfTrack") or {}
+    if not isinstance(album, dict):
+        album = {}
+    album_uri = album.get("uri", "")
+    return {"album": {"external_urls": {"spotify": spotify_get_web_entity_url(album, album_uri)}, "name": album.get("name", ""), "uri": album_uri}, "artists": artists, "duration_ms": int(duration_ms), "external_urls": {"spotify": spotify_get_web_entity_url(track, track_uri)}, "id": track_uri.rsplit(":", 1)[-1], "name": track_name, "uri": track_uri}
+
+
+# Fetches and normalizes public track metadata from Spotify Pathfinder
+def spotify_get_track_info_web(track_uri):
+    data = spotify_web_metadata_query("getTrack", {"uri": track_uri})
+    return spotify_normalize_web_track(data.get("trackUnion"))
+
+
+# Returns public Spotify track URIs for a web-player search term
+def spotify_web_search_track_uris(search_term):
+    variables = {"limit": 5, "numberOfTopResults": 5, "term": search_term}
+    data = spotify_web_metadata_query("assistedCurationSearch", variables)
+    search_data = data.get("searchV2") or {}
+    track_items = (search_data.get("tracksV2") or {}).get("items") or [] if isinstance(search_data, dict) else []
+    track_uris = []
+    for item in track_items:
+        item_data = (item.get("item") or {}).get("data") or {} if isinstance(item, dict) else {}
+        track_uri = item_data.get("uri", "") if isinstance(item_data, dict) else ""
+        if track_uri.startswith("spotify:track:") and track_uri not in track_uris:
+            track_uris.append(track_uri)
+    debug_print(f"Spotify anonymous search returned {len(track_uris)} track URIs")
+    return track_uris
 
 
 # Converts Spotify URI (e.g. spotify:user:username) to URL (e.g. https://open.spotify.com/user/username)
@@ -1901,7 +2194,7 @@ def spotify_convert_uri_to_url(uri):
     return url
 
 
-# Processes track items returned by Spotify search Web API
+# Processes normalized Spotify track items returned by web-player search
 def spotify_search_process_track_items(track_items, original_artist, original_track, cleaned_track=None, original_album=None):
     sp_track_uri_id = None
     sp_track_duration = 0
@@ -1915,27 +2208,33 @@ def spotify_search_process_track_items(track_items, original_artist, original_tr
         item_artists_str = ", ".join(item_artists_list)
         item_album_name = item.get("album", {}).get("name", "")
         item_duration = int(item.get("duration_ms", 0) / 1000)
+        exact_track_match = item_name.casefold() == original_track.casefold()
+        cleaned_track_match = bool(cleaned_track and item_name.casefold() == cleaned_track.casefold())
+        album_match = bool(original_album and item_album_name and item_album_name.casefold() == original_album.casefold())
 
         debug_print(f"  Found item: {item_artists_str} - {item_name} [{item_album_name}] ({item_duration}s)")
 
         # Artist match check
-        artist_match = any(original_artist.lower() in a.lower() for a in item_artists_list)
-        if not artist_match:
+        artist_match = any(original_artist.casefold() in a.casefold() for a in item_artists_list)
+        alias_match = exact_track_match and album_match
+        if not artist_match and not alias_match:
             debug_print("    Skipping item (artist mismatch)")
             continue
+        if not artist_match:
+            debug_print("    Accepting artist alias match through exact track and album")
 
         score = 0
-        if item_name.lower() == original_track.lower():
+        if exact_track_match:
             score = 100  # Perfect match with original name
-        elif cleaned_track and item_name.lower() == cleaned_track.lower():
+        elif cleaned_track_match:
             score = 80   # Match with cleaned name
-        elif original_track.lower() in item_name.lower() or item_name.lower() in original_track.lower():
+        elif original_track.casefold() in item_name.casefold() or item_name.casefold() in original_track.casefold():
             score = 50   # Partial match
 
         # Album match bonus (+20 points)
-        if original_album and item_album_name and item_album_name.lower() == original_album.lower():
+        if album_match:
             score += 20
-            debug_print(f"    Album match! (+20 bonus)")
+            debug_print("    Album match! (+20 bonus)")
 
         if score > best_score:
             best_score = score
@@ -1946,125 +2245,120 @@ def spotify_search_process_track_items(track_items, original_artist, original_tr
 
     if best_item and best_score > 0:
         sp_track_uri_id = best_item.get("id")
-        sp_track_duration = int(best_item.get("duration_ms") / 1000)
+        sp_track_duration = int(best_item.get("duration_ms", 0) / 1000)
 
     return sp_track_uri_id, sp_track_duration
 
 
-# Returns Spotify track ID & duration for specific artist, track and optionally album
-def spotify_search_song_trackid_duration(access_token, artist, track, album=""):
+# Returns normalized Spotify Web API search items for one OAuth app strategy
+def spotify_oauth_search_track_items(access_token, search_query, strategy):
+    headers = {"Authorization": f"Bearer {access_token}", "User-Agent": SPOTIFY_WEB_USER_AGENT}
+    params = {"q": search_query, "type": "track", "limit": 5}
+    debug_print(f"HTTP GET {SPOTIFY_OAUTH_SEARCH_URL} [Spotify OAuth app search strategy={strategy}]")
+    response = req.get(SPOTIFY_OAUTH_SEARCH_URL, params=params, headers=headers, timeout=FUNCTION_TIMEOUT)
+    debug_print(f"HTTP GET {SPOTIFY_OAUTH_SEARCH_URL} [Spotify OAuth app search strategy={strategy}] -> {response.status_code}")
+    response.raise_for_status()
+    json_response = response.json()
+    tracks = json_response.get("tracks") if isinstance(json_response, dict) else None
+    if not isinstance(tracks, dict):
+        raise RuntimeError("Spotify OAuth app search returned no track collection")
+    items = tracks.get("items") or []
+    debug_print(f"Spotify OAuth app search strategy={strategy} returned {len(items)} track items")
+    return items
+
+
+# Resolves a Spotify track ID and duration through official OAuth app search
+def spotify_search_song_trackid_duration_oauth(access_token, artist, track, album=""):
+    artist, track = map(str, (artist, track))
+    album = str(album) if album else ""
+    quote_chars = r'(["\'])'
+    artist_sanitized = re.sub(quote_chars, '', artist, flags=re.IGNORECASE)
+    track_sanitized = re.sub(quote_chars, '', track, flags=re.IGNORECASE)
+    album_sanitized = re.sub(quote_chars, '', album, flags=re.IGNORECASE)
+    track_cleaned = ""
+    if re.search(re_search_str, track, re.IGNORECASE):
+        track_cleaned = re.sub(re_replace_str, '', track, flags=re.IGNORECASE).strip()
+        track_cleaned = re.sub(quote_chars, '', track_cleaned, flags=re.IGNORECASE)
+
+    strategies = []
+    if album_sanitized:
+        strategies.append(("specific_full", f'artist:"{artist_sanitized}" track:"{track_sanitized}" album:"{album_sanitized}"'))
+    strategies.append(("specific_field", f'artist:"{artist_sanitized}" track:"{track_sanitized}"'))
+    strategies.append(("specific_phrase", f'"{artist_sanitized}" "{track_sanitized}"'))
+    if track_cleaned and track_cleaned.casefold() != track_sanitized.casefold():
+        strategies.append(("cleaned_field", f'artist:"{artist_sanitized}" track:"{track_cleaned}"'))
+    strategies.append(("broad", f'"{artist_sanitized}" "{track_cleaned or track_sanitized}"'))
+
+    for strategy, search_query in dict.fromkeys(strategies):
+        try:
+            track_items = spotify_oauth_search_track_items(access_token, search_query, strategy)
+        except (req.RequestException, RuntimeError, TypeError, ValueError) as error:
+            debug_print(f"Spotify OAuth app search strategy={strategy} failed with {type(error).__name__}")
+            continue
+        sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(track_items, artist, track, cleaned_track=track_cleaned or None, original_album=album)
+        if sp_track_uri_id:
+            debug_print(f"Spotify OAuth app metadata matched track ID '{sp_track_uri_id}' with duration {sp_track_duration}s")
+            return sp_track_uri_id, sp_track_duration
+
+    return None, 0
+
+
+# Returns a matching Spotify track ID and duration through anonymous web-player queries
+def spotify_search_song_trackid_duration(artist, track, album=""):
     artist, track = map(str, (artist, track))
     album = str(album) if album else ""
 
-    re_chars_to_remove = r'([\"\'])'
-    artist_sanitized = re.sub(re_chars_to_remove, '', artist, flags=re.IGNORECASE)
-    track_sanitized = re.sub(re_chars_to_remove, '', track, flags=re.IGNORECASE)
-    album_sanitized = re.sub(re_chars_to_remove, '', album, flags=re.IGNORECASE)
+    track_cleaned = ""
+    if re.search(re_search_str, track, re.IGNORECASE):
+        track_cleaned = re.sub(re_replace_str, '', track, flags=re.IGNORECASE).strip()
 
-    debug_print(f"Checking Spotify for track duration. Strategy: URL_SPECIFIC_FULL -> URL_SPECIFIC_FIELD -> URL_SPECIFIC_PHRASE -> URL_CLEANED_FIELD -> URL_BROAD")
+    search_terms = []
+    if album:
+        search_terms.append(f"{artist} {track} {album}")
+    search_terms.append(f"{artist} {track}")
+    if track_cleaned and track_cleaned.lower() != track.lower():
+        search_terms.append(f"{artist} {track_cleaned}")
 
-    url_specific_full = f'https://api.spotify.com/v1/search?q={quote(f"artist:\"{artist_sanitized}\" track:\"{track_sanitized}\" album:\"{album_sanitized}\"")}&type=track&limit=5'
-    url_specific_field = f'https://api.spotify.com/v1/search?q={quote(f"artist:\"{artist_sanitized}\" track:\"{track_sanitized}\"")}&type=track&limit=5'
-    url_specific_phrase = f'https://api.spotify.com/v1/search?q={quote(f"\"{artist_sanitized}\" \"{track_sanitized}\"")}&type=track&limit=5'
+    for search_term in dict.fromkeys(search_terms):
+        debug_print(f"Searching Spotify anonymous web metadata for artist='{artist}', track='{track}', album='{album}'")
+        track_items = []
+        for track_uri in spotify_web_search_track_uris(search_term):
+            try:
+                track_items.append(spotify_get_track_info_web(track_uri))
+            except (req.RequestException, RuntimeError, TypeError, ValueError) as error:
+                debug_print(f"Spotify getTrack candidate failed with {type(error).__name__}")
 
-    debug_print(f"Spotify search URL_SPECIFIC_FULL: {url_specific_full}")
-    debug_print(f"Spotify search URL_SPECIFIC_FIELD: {url_specific_field}")
-    debug_print(f"Spotify search URL_SPECIFIC_PHRASE: {url_specific_phrase}")
+        sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(track_items, artist, track, cleaned_track=track_cleaned or None, original_album=album)
+        if sp_track_uri_id:
+            debug_print(f"Spotify anonymous web metadata matched track ID '{sp_track_uri_id}' with duration {sp_track_duration}s")
+            return sp_track_uri_id, sp_track_duration
 
-    pylast_version = getattr(pylast, '__version__', 'unknown')
-    # Using a browser-like User-Agent to avoid potential API filtering/limitations
-    user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
-    headers = {"Authorization": "Bearer " + access_token, "User-Agent": user_agent}
+    return None, 0
 
+
+# Resolves Spotify metadata through OAuth app search then anonymous web-player search
+def spotify_resolve_track_metadata(artist, track, album=""):
     sp_track_uri_id = None
     sp_track_duration = 0
 
-    if album:
+    if spotify_oauth_app_configured():
         try:
-            response = req.get(url_specific_full, headers=headers, timeout=FUNCTION_TIMEOUT)
-            response.raise_for_status()
-            json_response = response.json()
-            if json_response.get("tracks"):
-                total = json_response["tracks"].get("total", 0)
-                debug_print(f"URL_SPECIFIC_FULL found {total} tracks")
-                if total > 0:
-                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, original_album=album)
-                    if sp_track_uri_id:
-                        debug_print(f"Match found via URL_SPECIFIC_FULL")
-        except Exception:
-            pass
+            access_token = spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET)
+            sp_track_uri_id, sp_track_duration = spotify_search_song_trackid_duration_oauth(access_token, artist, track, album)
+            debug_print(f"Spotify OAuth app metadata result: id='{sp_track_uri_id}', duration={sp_track_duration}s")
+        except Exception as error:
+            debug_print(f"Spotify OAuth app metadata failed with {type(error).__name__}")
 
-    if not sp_track_uri_id:
+    if not sp_track_uri_id or sp_track_duration <= 0:
         try:
-            response = req.get(url_specific_field, headers=headers, timeout=FUNCTION_TIMEOUT)
-            response.raise_for_status()
-            json_response = response.json()
-            if json_response.get("tracks"):
-                total = json_response["tracks"].get("total", 0)
-                debug_print(f"URL_SPECIFIC_FIELD found {total} tracks")
-                if total > 0:
-                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, original_album=album)
-                    if sp_track_uri_id:
-                        debug_print(f"Match found via URL_SPECIFIC_FIELD")
-        except Exception:
-            pass
-
-    if not sp_track_uri_id:
-        try:
-            response = req.get(url_specific_phrase, headers=headers, timeout=FUNCTION_TIMEOUT)
-            response.raise_for_status()
-            json_response = response.json()
-            if json_response.get("tracks"):
-                total = json_response["tracks"].get("total", 0)
-                debug_print(f"URL_SPECIFIC_PHRASE found {total} tracks")
-                if total > 0:
-                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, original_album=album)
-                    if sp_track_uri_id:
-                        debug_print(f"Match found via URL_SPECIFIC_PHRASE")
-        except Exception:
-            pass
-
-    # If still not found, try a broader search by cleaning the track name
-    track_cleaned = ""
-    if not sp_track_uri_id and re.search(re_search_str, track, re.IGNORECASE):
-        track_cleaned = re.sub(re_replace_str, '', track, flags=re.IGNORECASE).strip()
-        # Sanitize track_cleaned to remove quotes that might break the search query
-        track_cleaned = re.sub(re_chars_to_remove, '', track_cleaned, flags=re.IGNORECASE)
-        if track_cleaned and track_cleaned.lower() != track.lower():
-            url_cleaned_field = f'https://api.spotify.com/v1/search?q={quote(f"artist:\"{artist_sanitized}\" track:\"{track_cleaned}\"")}&type=track&limit=5'
-            debug_print(f"Spotify search URL_CLEANED_FIELD (fallback): {url_cleaned_field}")
-            try:
-                response = req.get(url_cleaned_field, headers=headers, timeout=FUNCTION_TIMEOUT)
-                response.raise_for_status()
-                json_response = response.json()
-                if json_response.get("tracks"):
-                    total = json_response["tracks"].get("total", 0)
-                    debug_print(f"URL_CLEANED_FIELD found {total} tracks")
-                    if total > 0:
-                        sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, cleaned_track=track_cleaned, original_album=album)
-                        if sp_track_uri_id:
-                            debug_print(f"Match found via URL_CLEANED_FIELD")
-            except Exception:
-                pass
-
-    # Final fallback: broad search without field qualifiers
-    if not sp_track_uri_id:
-        search_query = f"\"{artist_sanitized}\" \"{track_cleaned if track_cleaned else track_sanitized}\""
-        url_broad = f'https://api.spotify.com/v1/search?q={quote(search_query)}&type=track&limit=5'
-        debug_print(f"Spotify search URL_BROAD (fallback): {url_broad}")
-        try:
-            response = req.get(url_broad, headers=headers, timeout=FUNCTION_TIMEOUT)
-            response.raise_for_status()
-            json_response = response.json()
-            if json_response.get("tracks"):
-                total = json_response["tracks"].get("total", 0)
-                debug_print(f"URL_BROAD found {total} tracks")
-                if total > 0:
-                    sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(json_response["tracks"]["items"], artist, track, cleaned_track=track_cleaned if track_cleaned else None, original_album=album)
-                    if sp_track_uri_id:
-                        debug_print(f"Match found via URL_BROAD")
-        except Exception:
-            pass
+            web_track_uri_id, web_track_duration = spotify_search_song_trackid_duration(artist, track, album)
+            debug_print(f"Spotify anonymous web metadata result: id='{web_track_uri_id}', duration={web_track_duration}s")
+            if web_track_uri_id:
+                sp_track_uri_id = web_track_uri_id
+            if web_track_duration > 0:
+                sp_track_duration = web_track_duration
+        except Exception as error:
+            debug_print(f"Spotify anonymous web metadata failed with {type(error).__name__}")
 
     return sp_track_uri_id, sp_track_duration
 
@@ -2120,7 +2414,7 @@ def spotify_win_play_song(sp_track_uri_id, method=SPOTIFY_WINDOWS_PLAYING_METHOD
     elif method == "spotify-cmd":   # spotify-cmd
         subprocess.call((f"{WIN_SPOTIFY_APP_PATH} --uri=spotify:track:{sp_track_uri_id}"), shell=True)
     else:                           # trigger-url - just trigger track URL in the client
-        os.startfile(spotify_convert_uri_to_url(f"spotify:track:{sp_track_uri_id}"))
+        getattr(os, "startfile")(spotify_convert_uri_to_url(f"spotify:track:{sp_track_uri_id}"))
 
 
 # Finds an optional config file
@@ -2161,6 +2455,7 @@ def resolve_executable(path):
     raise FileNotFoundError(f"Could not find executable '{path}'")
 
 
+# Resolves Spotify track metadata first then falls back to Last.fm duration
 def get_track_info(artist, track, album, network):
     sp_track_uri_id = None
     sp_track_duration = 0
@@ -2169,17 +2464,10 @@ def get_track_info(artist, track, album, network):
 
     debug_print(f"get_track_info(artist='{artist}', track='{track}', album='{album}')")
 
-    if (USE_TRACK_DURATION_FROM_SPOTIFY or TRACK_SONGS) and SP_CLIENT_ID and SP_CLIENT_SECRET and SP_CLIENT_ID != "your_spotify_app_client_id" and SP_CLIENT_SECRET != "your_spotify_app_client_secret":
-        try:
-            accessToken = spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET)
-        except Exception as e:
-            debug_print(f"* spotify_get_access_token(): {e}")
-            accessToken = None
-        if accessToken:
-            sp_track_uri_id, sp_track_duration = spotify_search_song_trackid_duration(accessToken, artist, track, album)
-            debug_print(f"Spotify search result: id='{sp_track_uri_id}', duration={sp_track_duration}s")
-            if not USE_TRACK_DURATION_FROM_SPOTIFY:
-                sp_track_duration = 0
+    if USE_TRACK_DURATION_FROM_SPOTIFY or TRACK_SONGS:
+        sp_track_uri_id, sp_track_duration = spotify_resolve_track_metadata(artist, track, album)
+        if not USE_TRACK_DURATION_FROM_SPOTIFY:
+            sp_track_duration = 0
 
     if sp_track_duration > 0:
         track_duration = sp_track_duration
@@ -2252,7 +2540,7 @@ def decode(password: str) -> str:
 
 
 # Main function that monitors activity of the specified Last.fm user
-def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
+def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyright: ignore[reportGeneralTypeIssues]
 
     lf_active_ts_start = 0
     lf_active_ts_last = 0
@@ -3604,8 +3892,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):
         new_track = None
 
 
+# Runs the command-line interface
 def main():
-    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, SP_TOKENS_FILE, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
+    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
 
     if "--generate-config" in sys.argv:
         print(CONFIG_BLOCK.strip("\n"))
@@ -3681,10 +3970,9 @@ def main():
     creds.add_argument(
         "-z", "--spotify-creds",
         dest="spotify_creds",
-        metavar='SPOTIFY_CLIENT_ID:SPOTIFY_CLIENT_SECRET',
-        help="Spotify OAuth app client credentials - specify both values as SPOTIFY_CLIENT_ID:SPOTIFY_CLIENT_SECRET"
+        metavar="SPOTIFY_CLIENT_ID:SPOTIFY_CLIENT_SECRET",
+        help="Optional Spotify OAuth app credentials"
     )
-
     # Notifications
     notify = parser.add_argument_group("Notifications")
     notify.add_argument(
@@ -3847,7 +4135,7 @@ def main():
         dest="fetch_duration",
         action="store_true",
         default=None,
-        help="Fetch track duration from Spotify when credentials are set"
+        help="Fetch track duration through Spotify OAuth app or anonymous web metadata"
     )
     opts.add_argument(
         "-q", "--hide-duration-source",
@@ -3976,6 +4264,15 @@ def main():
     if args.lastfm_secret:
         LASTFM_API_SECRET = args.lastfm_secret
 
+    if args.spotify_creds:
+        SP_CLIENT_ID, separator, SP_CLIENT_SECRET = args.spotify_creds.partition(":")
+        if not separator or not SP_CLIENT_ID or not SP_CLIENT_SECRET:
+            print("* Error: -z / --spotify-creds has invalid format - use SP_CLIENT_ID:SP_CLIENT_SECRET")
+            sys.exit(1)
+
+    if SP_TOKENS_FILE:
+        SP_TOKENS_FILE = os.path.expanduser(SP_TOKENS_FILE)
+
     if not LASTFM_API_KEY or LASTFM_API_KEY == "your_lastfm_api_key":
         print("* Error: LASTFM_API_KEY (-u / --lastfm_api_key) value is empty or incorrect")
         sys.exit(1)
@@ -3988,16 +4285,6 @@ def main():
         DEBUG_MODE = True
 
     LASTFM_USERNAME_GLOBAL = args.username
-
-    if args.spotify_creds:
-        try:
-            SP_CLIENT_ID, SP_CLIENT_SECRET = args.spotify_creds.split(":")
-        except ValueError:
-            print("* Error: -z / --spotify-creds has invalid format - use SP_CLIENT_ID:SP_CLIENT_SECRET")
-            sys.exit(1)
-
-    if SP_TOKENS_FILE:
-        SP_TOKENS_FILE = os.path.expanduser(SP_TOKENS_FILE)
 
     if args.fetch_duration:
         USE_TRACK_DURATION_FROM_SPOTIFY = args.fetch_duration
@@ -4176,7 +4463,11 @@ def main():
     print(f"* Alert on monitored tracks:\t{bool(MONITOR_LIST_FILE)}" + (f" ({MONITOR_LIST_FILE})" if MONITOR_LIST_FILE else ""))
     print(f"* Output logging enabled:\t{not DISABLE_LOGGING}" + (f" ({FINAL_LOG_PATH})" if not DISABLE_LOGGING else ""))
     if TRACK_SONGS or USE_TRACK_DURATION_FROM_SPOTIFY:
-        print(f"* Spotify token cache file:\t{SP_TOKENS_FILE or 'None (memory only)'}")
+        if spotify_oauth_app_configured():
+            print("* Spotify metadata backends:\tOAuth app -> anonymous web player")
+            print(f"* Spotify token cache file:\t{SP_TOKENS_FILE or 'None (memory only)'}")
+        else:
+            print("* Spotify metadata backends:\tanonymous web player")
     print(f"* Configuration file:\t\t{cfg_path}")
     print(f"* Dotenv file:\t\t\t{env_path or 'None'}")
     print(f"* Debug mode:\t\t\t{DEBUG_MODE}\n")
