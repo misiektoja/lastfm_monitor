@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lastfm_monitor"
-version = "2.4.4"
+version = "2.5"
 description = "Track Last.fm listening activity in real time with Spotify integration, automated playback, scrobble history and instant notifications"
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -15,6 +15,7 @@ dependencies = [
   "pylast>=5.2.0",
   "requests>=2.0",
   "python-dateutil>=2.8",
+  "pyotp>=2.9.0",
   "spotipy>=2.24.0",
   "python-dotenv>=0.19",
   "beautifulsoup4>=4.9.0",
@@ -32,7 +33,7 @@ classifiers = [
   "Operating System :: POSIX :: Linux",
   "Operating System :: MacOS :: MacOS X",
 ]
-keywords = ["lastfm", "monitoring", "tracking", "real-time", "osint", "pylast", "spotipy"]
+keywords = ["lastfm", "monitoring", "tracking", "real-time", "osint", "pylast", "spotify"]
 
 [project.urls]
 Homepage = "https://github.com/misiektoja/lastfm_monitor"
