@@ -540,6 +540,38 @@ import pyotp
 
 SPOTIFY_SESSION = req.Session()
 
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+# Cap server-provided Retry-After to avoid long blocking sleeps on 429 responses
+SPOTIFY_MAX_RETRY_AFTER_SECONDS = 60
+
+
+class SpotifyCappedRetry(Retry):
+    def get_retry_after(self, response):
+        retry_after = super().get_retry_after(response)
+        if retry_after is None:
+            return None
+        return min(retry_after, SPOTIFY_MAX_RETRY_AFTER_SECONDS)
+
+
+# Every Spotify request on this session is an idempotent read or token fetch, so retry transient failures
+# (including the web-player GraphQL POST) with capped backoff
+spotify_retry = SpotifyCappedRetry(
+    total=5,
+    connect=3,
+    read=3,
+    backoff_factor=1,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET", "HEAD", "OPTIONS", "POST"],
+    raise_on_status=False,
+    respect_retry_after_header=True
+)
+
+spotify_adapter = HTTPAdapter(max_retries=spotify_retry, pool_connections=100, pool_maxsize=100)
+SPOTIFY_SESSION.mount("https://", spotify_adapter)
+SPOTIFY_SESSION.mount("http://", spotify_adapter)
+
 
 # Logger class to output messages to stdout and log file
 class Logger(object):
