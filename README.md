@@ -12,6 +12,7 @@
 
 Powerful real-time tracker for Last.fm that brings your music data to life with automated Spotify playback, instant activity alerts and deep scrobble analytics.
 
+<a id="-quick-install"></a>
 ### 🚀 Quick Install
 ```sh
 pip install lastfm_monitor
@@ -54,7 +55,8 @@ pip install lastfm_monitor
    * [Configuration File](#configuration-file)
    * [Last.fm API Key and Shared Secret](#lastfm-api-key-and-shared-secret)
    * [User Privacy Settings](#user-privacy-settings)
-   * [Spotify Client ID and Secret (optional)](#spotify-client-id-and-secret-optional)
+   * [Spotify Metadata Backends](#spotify-metadata-backends)
+      * [Optional Spotify OAuth App Setup](#optional-spotify-oauth-app-setup)
    * [SMTP Settings](#smtp-settings)
    * [Storing Secrets](#storing-secrets)
 5. [Usage](#usage)
@@ -77,7 +79,7 @@ pip install lastfm_monitor
 ## Requirements
 
 * Python 3.9 or higher
-* Libraries: [pyLast](https://github.com/pylast/pylast), `requests`, `python-dateutil`, [Spotipy](https://github.com/spotipy-dev/spotipy), `python-dotenv`, `beautifulsoup4`
+* Libraries: [pyLast](https://github.com/pylast/pylast), `requests`, `python-dateutil`, [PyOTP](https://github.com/pyauth/pyotp), [Spotipy](https://github.com/spotipy-dev/spotipy), `python-dotenv`, `beautifulsoup4`
 
 Tested on:
 
@@ -105,7 +107,7 @@ Download the *[lastfm_monitor.py](https://raw.githubusercontent.com/misiektoja/l
 Install dependencies via pip:
 
 ```sh
-pip install pylast requests python-dateutil spotipy python-dotenv beautifulsoup4
+pip install pylast requests python-dateutil pyotp spotipy python-dotenv beautifulsoup4
 ```
 
 Alternatively, from the downloaded *[requirements.txt](https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/requirements.txt)*:
@@ -166,6 +168,8 @@ Edit the `lastfm_monitor.conf` file and change any desired configuration options
 
 **New in v2.3:** The configuration file includes options to enable/disable music service URLs (Last.fm, Spotify, Apple Music, YouTube Music, Amazon Music, Deezer, Tidal) and lyrics service URLs (Genius, AZLyrics, Tekstowo.pl, Musixmatch, Lyrics.com) in console and email outputs.
 
+**New in v2.5:** The [track duration](#getting-track-duration-from-spotify) and [automatic playback](#automatic-playback-of-listened-tracks-in-the-spotify-client) features use the official OAuth app Web API when optional app credentials are configured. The anonymous web-player backend is the new automatic fallback and requires no Spotify credentials.
+
 <a id="lastfm-api-key-and-shared-secret"></a>
 ### Last.fm API Key and Shared Secret
 
@@ -191,37 +195,69 @@ The **Hide recent listening information** setting should be disabled.
 
 Otherwise you will get this error message returned by the `pyLast` library: *'Login: User required to be logged in'*.
 
-<a id="spotify-client-id-and-secret-optional"></a>
-### Spotify Client ID and Secret (optional)
+<a id="spotify-metadata-backends"></a>
+### Spotify Metadata Backends
 
-If you want to obtain the [track duration from Spotify](#getting-track-duration-from-spotify) or use the [automatic playback functionality](#automatic-playback-of-listened-tracks-in-the-spotify-client), you need to get Spotify credentials to perform the Client Credentials OAuth flow.
+The [track duration feature](#getting-track-duration-from-spotify) and [automatic playback feature](#automatic-playback-of-listened-tracks-in-the-spotify-client) both need Spotify track metadata:
 
-- Log in to Spotify Developer dashboard: https://developer.spotify.com/dashboard
+- Duration lookup needs the Spotify track duration
+- Automatic playback needs the Spotify track ID so the local Spotify client knows which track to play
 
-- Create a new app
+Spotify app credentials are not mandatory for either feature. The tool can obtain the required metadata from the anonymous web-player backend. If you configure OAuth app credentials, the official Spotify Web API is tried first.
 
-- For **Redirect URL**, use: http://127.0.0.1:1234
+Version 2.5 uses this metadata order:
 
-- Select **Web API** as the intended API
+1. Official Spotify Web API search through optional OAuth app Client Credentials
+2. Anonymous web-player search and Pathfinder `getTrack` metadata
+3. Last.fm duration as the final fallback
 
-- Copy the **Client ID** and **Client Secret**
+<a id="optional-spotify-oauth-app-setup"></a>
+#### Optional Spotify OAuth App Setup
 
-- Provide the `SP_CLIENT_ID` and `SP_CLIENT_SECRET` secrets using one of the following methods:
-   - Pass it at runtime with `-z` / `--spotify-creds`
-      - Use `SP_CLIENT_ID`:`SP_CLIENT_SECRET` format - note the colon separator
-   - Set it as an [environment variable](#storing-secrets) (e.g. `export SP_CLIENT_ID=...; export SP_CLIENT_SECRET=...`)
-   - Add it to [.env file](#storing-secrets) (`SP_CLIENT_ID=...` and `SP_CLIENT_SECRET=...`) for persistent use
-   - Fallback: hard-code it in the code or config file
+Follow these steps if you want the official Spotify Web API to be the primary metadata backend:
 
-Example:
+1. Log in to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
+2. Select **Create app**
+3. Enter an app name and description
+4. For **Redirect URI**, enter `http://127.0.0.1:1234`
+   - The Client Credentials flow does not redirect a user, but Spotify's app form requests a redirect URI
+   - Use the numeric loopback address exactly as shown because Spotify does not allow `localhost`
+5. Under the API selection, choose **Web API**
+6. Accept Spotify's Developer Terms of Service and create the app
+7. Open the app settings
+8. Copy the **Client ID**
+9. Select **View client secret** and copy the **Client Secret**
+
+Spotify currently requires the owner of a Development Mode app to have an active Spotify Premium subscription. See Spotify's [February 2026 Development Mode migration guide](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide) for the current restrictions.
+
+Provide `SP_CLIENT_ID` and `SP_CLIENT_SECRET` using one of these methods:
+
+- Pass them at runtime with `-z` / `--spotify-creds`
+  - Use the `SP_CLIENT_ID:SP_CLIENT_SECRET` format with a colon between the values
+- Set them as [environment variables](#storing-secrets), for example `export SP_CLIENT_ID=...` and `export SP_CLIENT_SECRET=...`
+- Add them to a [dotenv file](#storing-secrets) as `SP_CLIENT_ID=...` and `SP_CLIENT_SECRET=...`
+- Add them to `lastfm_monitor.conf`
+- As a final fallback, hard-code them in `lastfm_monitor.py`
+
+Command-line example:
 
 ```sh
 lastfm_monitor <lastfm_username> -z "your_spotify_app_client_id:your_spotify_app_client_secret"
 ```
 
-The tool takes care of refreshing the access token so it should remain valid indefinitely.
+The tool refreshes OAuth app access tokens automatically. The token cache path is configured through `SP_TOKENS_FILE` and defaults to `.lastfm-monitor-oauth-app.json`. Set `SP_TOKENS_FILE` to an empty string to use memory-only caching.
 
-If you store the `SP_CLIENT_ID` and `SP_CLIENT_SECRET` in a dotenv file you can update their values and send a `SIGHUP` signal to reload the file with the new secret values without restarting the tool. More info in [Storing Secrets](#storing-secrets) and [Signal Controls (macOS/Linux/Unix)](#signal-controls-macoslinuxunix).
+If you store `SP_CLIENT_ID` and `SP_CLIENT_SECRET` in a dotenv file, you can update them and send `SIGHUP` to reload the values without restarting the tool. See [Storing Secrets](#storing-secrets) and [Signal Controls](#signal-controls-macoslinuxunix).
+
+The OAuth backend relies on Spotipy's expiration-aware Client Credentials cache. It does not call a separate Web API endpoint to validate tokens. If credentials are absent, token retrieval fails or OAuth search returns incomplete metadata, the anonymous backend runs automatically.
+
+The tool fetches Spotify server time before generating the required v61 TOTP parameters. It caches the anonymous token until its expiration window and discovers the current persisted-query hashes from the active web-player bundle. An HTTP 401 refreshes the token once. A rejected persisted query refreshes its hash once.
+
+The v61 version and cipher bytes ship as the `SPOTIFY_TOTP_VERSION` and `SPOTIFY_TOTP_SECRET_CIPHER_BYTES` config options. If Spotify rotates the secret you can update them from the config file using the [spotify_monitor_secret_grabber](https://github.com/misiektoja/spotify_monitor/blob/dev/debug/spotify_monitor_secret_grabber.py) tool without a code change.
+
+Spotify metadata supplies the track duration, title, artists, album, URI and external URL. Last.fm duration remains the final fallback when Spotify web metadata is unavailable or incomplete.
+
+With `-r`, a successful duration from either Spotify backend is marked `S*`. Last.fm fallback duration is marked `L*`. Without `-r`, Last.fm remains the duration source while Spotify metadata can still resolve a track ID for `-g` playback.
 
 <a id="smtp-settings"></a>
 ### SMTP Settings
@@ -295,7 +331,7 @@ If you have not set `LASTFM_API_KEY` and `LASTFM_API_SECRET` secrets, you can us
 lastfm_monitor <lastfm_username> -u "your_lastfm_api_key" -w "your_lastfm_api_secret"
 ```
 
-If you want to obtain the [track duration from Spotify](#getting-track-duration-from-spotify) or use the [automatic playback functionality](#automatic-playback-of-listened-tracks-in-the-spotify-client) and you have not set `SP_CLIENT_ID` and `SP_CLIENT_SECRET`, you can use `-z` flag:
+To provide optional Spotify OAuth app credentials for one run, use `-z` / `--spotify-creds`:
 
 ```sh
 lastfm_monitor <lastfm_username> -z "your_spotify_app_client_id:your_spotify_app_client_secret"
@@ -518,7 +554,9 @@ lastfm_monitor <lastfm_username> -g
 
 Your Spotify client needs to be installed and running for this feature to work.
 
-In order to use this functionality you need to have Spotipy installed as described [here](#installation) and properly defined Spotify client ID and secret values as described [here](#spotify-client-id-and-secret-optional).
+Automatic playback needs a Spotify track ID for every scrobble. The tool resolves that ID through the [Spotify metadata backends](#spotify-metadata-backends). It tries the official OAuth app Web API when credentials are configured, then uses the anonymous web-player backend. OAuth app credentials are optional.
+
+The local playback action itself uses the configured platform method such as AppleScript on macOS or D-Bus on Linux. It does not use Spotify Web API playback control.
 
 The tool fully supports automatic playback on **Linux** and **macOS**. This means it will automatically play the changed track. It will also automatically pause and resume playback following the tracked user's actions. Additionally, it can pause or play an indicated track once the user becomes inactive (see the `SP_USER_GOT_OFFLINE_TRACK_ID` configuration option).
 
@@ -570,7 +608,7 @@ If you want the tool to fetch the track duration from Spotify instead of Last.fm
 lastfm_monitor <lastfm_username> -r
 ```
 
-In order to use this functionality you need to have Spotipy installed as described [here](#installation) and properly defined Spotify client ID and secret values as described [here](#spotify-client-id-and-secret-optional).
+Track duration is resolved through the [Spotify metadata backends](#spotify-metadata-backends). The official OAuth app Web API is tried first when credentials are configured. The anonymous web-player backend runs next. Last.fm duration is used only if both Spotify backends fail or return incomplete metadata.
 
 You will be able to tell if the track duration comes from Spotify as it has an S* suffix at the end (e.g. **3 minutes 42 seconds S\***), while those coming from Last.fm have an L* (e.g. **2 minutes 13 seconds L\***).
 
