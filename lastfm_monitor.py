@@ -1260,20 +1260,34 @@ def _lastfm_scrape_headers():
         ),
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
         'Connection': 'keep-alive',
         'Upgrade-Insecure-Requests': '1',
     }
 
 
-# Fetches a URL with short retry/backoff on transient failures (Timeout, ConnectionError, 429, 5xx) and raises RuntimeError on any final failure
+# Returns an error description when a Last.fm response should be retried
+def _lastfm_retryable_response_error(response):
+    if response.status_code == 429 or response.status_code >= 500:
+        return f"HTTP {response.status_code} from Last.fm"
+
+    content_type = response.headers.get('Content-Type', '').lower()
+    if 'text/html' in content_type:
+        body = response.content.lower()
+        if b'temporarily unavailable' in body and b'error 503' in body:
+            return "Last.fm returned its temporarily unavailable page"
+
+    return None
+
+
+# Fetches a URL with backoff for transient Last.fm HTTP and soft error responses then raises RuntimeError on final failure
 def _lastfm_http_get_with_retry(url, attempts=3, base_delay=2.0):
     last_exc = None
     for i in range(attempts):
         try:
             response = req.get(url, headers=_lastfm_scrape_headers(), timeout=FUNCTION_TIMEOUT * 2)
-            if response.status_code in (429, 500, 502, 503, 504):
-                last_exc = RuntimeError(f"HTTP {response.status_code} from Last.fm")
+            retryable_error = _lastfm_retryable_response_error(response)
+            if retryable_error:
+                last_exc = RuntimeError(retryable_error)
             else:
                 response.raise_for_status()
                 return response
