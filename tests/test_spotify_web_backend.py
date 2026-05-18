@@ -192,6 +192,12 @@ class SpotifyWebBackendTests(unittest.TestCase):
         self.assertEqual(result["trackUnion"]["uri"], TRACK_URI)
         self.assertEqual(discover.call_args_list, [call("getTrack", force=False), call("getTrack", force=True)])
 
+    # Verifies the Spotify session retries transient failures on idempotent reads including the GraphQL POST
+    def test_spotify_session_retries_post(self):
+        methods = getattr(monitor.SPOTIFY_SESSION.get_adapter(monitor.SPOTIFY_WEB_QUERY_URL), "max_retries").allowed_methods
+        self.assertIn("POST", methods)
+        self.assertIn("GET", methods)
+
     # Verifies successful web metadata lookup returns normalized public track data
     def test_successful_spotify_web_metadata(self):
         with patch.object(monitor, "spotify_web_metadata_query", return_value={"trackUnion": web_track_fixture()}) as query:
