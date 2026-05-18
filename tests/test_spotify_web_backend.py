@@ -61,6 +61,24 @@ class SpotifyWebBackendTests(unittest.TestCase):
         self.assertEqual(monitor.SPOTIFY_TOTP_VERSION, 61)
         self.assertEqual(monitor.generate_totp().at(1700000000), "371599")
 
+    # Verifies a configured TOTP override flows through to the generated token
+    def test_totp_config_override_is_used(self):
+        with patch.object(monitor, "SPOTIFY_TOTP_VERSION", 99), patch.object(monitor, "SPOTIFY_TOTP_SECRET_CIPHER_BYTES", (12, 34, 56, 78)):
+            token = monitor.generate_totp()
+        self.assertEqual(len(token.now()), 6)
+
+    # Verifies invalid configured TOTP parameters raise an actionable error
+    def test_generate_totp_rejects_invalid_config(self):
+        with patch.object(monitor, "SPOTIFY_TOTP_SECRET_CIPHER_BYTES", ()):
+            with self.assertRaises(ValueError):
+                monitor.generate_totp()
+        with patch.object(monitor, "SPOTIFY_TOTP_SECRET_CIPHER_BYTES", ("bad", 55)):
+            with self.assertRaises(ValueError):
+                monitor.generate_totp()
+        with patch.object(monitor, "SPOTIFY_TOTP_VERSION", 0):
+            with self.assertRaises(ValueError):
+                monitor.generate_totp()
+
     # Verifies anonymous token retrieval performs no authenticated validity request
     def test_anonymous_token_skips_authenticated_validity_checks(self):
         response = FakeResponse(json_data={"accessToken": "anonymous-token", "accessTokenExpirationTimestampMs": 1700003600000, "clientId": "web-client"})
