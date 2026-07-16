@@ -2,6 +2,19 @@
 
 This is a high-level summary of the most important changes.
 
+# Changes in 2.5 (TBD)
+
+**Features and Improvements**:
+
+- **NEW:** Added an anonymous Spotify web-player metadata backend that supplies the track information needed for duration lookup and automatic playback. This serves as an automatic fallback following optional OAuth app metadata.
+- **NEW:** Added Spotify server-time retrieval and shipped the stable v61 TOTP cipher bytes for anonymous token generation, exposed as the `SPOTIFY_TOTP_VERSION` and `SPOTIFY_TOTP_SECRET_CIPHER_BYTES` config options so a future Spotify rotation can be patched from the config file without a code release
+
+**Bug fixes**:
+
+- **BUGFIX:** Restored Spotify track IDs and duration lookup without relying on Web API endpoints affected by Development Mode restrictions
+- **BUGFIX:** Removed the restricted category request that falsely rejected otherwise valid OAuth app tokens
+- **BUGFIX:** Matched localized Spotify artist aliases when the track title and album are exact matches
+
 # Changes in 2.4.4 (05 May 2026)
 
 **Features and Improvements**:
