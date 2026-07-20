@@ -3050,12 +3050,12 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 # Filter out initial additions (baseline) from notification
                 to_notify = {}
                 if 'followings' in initial_changes and not followings_file_exists:
-                    pass # Handled by "Saving baseline" above
+                    pass  # Handled by "Saving baseline" above
                 elif 'followings' in initial_changes:
                     to_notify['followings'] = initial_changes['followings']
 
                 if 'followers' in initial_changes and not followers_file_exists:
-                    pass # Handled by "Saving baseline" above
+                    pass  # Handled by "Saving baseline" above
                 elif 'followers' in initial_changes:
                     to_notify['followers'] = initial_changes['followers']
 
@@ -3102,8 +3102,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         # Use save_state=False by default to avoid saving to file during suspected transient changes
                         # Use raise_on_error=True to detect check failures and avoid resetting streak
                         # current_sets holds the exact sets we just scraped, so we can persist them without a second scrape (which could glitch and corrupt state)
-                        changes, current_sets = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS,
-                                                     save_state=False, raise_on_error=True)
+                        changes, current_sets = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, save_state=False, raise_on_error=True)
 
                         # Reset error streak on any successful check
                         if friends_streak < 0:
