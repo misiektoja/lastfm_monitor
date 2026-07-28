@@ -41,15 +41,23 @@ def test_config_block_contains_complete_webhook_settings():
     assert "NTFY_ACCESS_TOKEN" in monitor.SECRET_KEYS
 
 
-# Verifies startup email and webhook summaries use the same detailed boolean layout
-def test_startup_notification_summaries_use_legacy_layout(monkeypatch):
+# Verifies startup email and webhook summaries use compact single-line category rollups
+def test_startup_notification_summaries_use_compact_rollups(monkeypatch):
     email_settings = {"ACTIVE_NOTIFICATION": False, "INACTIVE_NOTIFICATION": False, "TRACK_NOTIFICATION": False, "SONG_NOTIFICATION": False, "SONG_ON_LOOP_NOTIFICATION": False, "OFFLINE_ENTRIES_NOTIFICATION": False, "ERROR_NOTIFICATION": True, "FOLLOWERS_NOTIFICATION": True, "FOLLOWINGS_NOTIFICATION": True}
     webhook_settings = {"WEBHOOK_ENABLED": True, "WEBHOOK_PROVIDER": "ntfy", "WEBHOOK_ACTIVE_NOTIFICATION": True, "WEBHOOK_INACTIVE_NOTIFICATION": True, "WEBHOOK_TRACK_NOTIFICATION": False, "WEBHOOK_SONG_NOTIFICATION": True, "WEBHOOK_SONG_ON_LOOP_NOTIFICATION": True, "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION": True, "WEBHOOK_ERROR_NOTIFICATION": True, "WEBHOOK_FOLLOWERS_NOTIFICATION": True, "WEBHOOK_FOLLOWINGS_NOTIFICATION": False}
     for setting, value in {**email_settings, **webhook_settings}.items():
         monkeypatch.setattr(monitor, setting, value)
-    expected_email = "* Email notifications:\t\t[active = False] [inactive = False] [tracked = False] [every song = False]\n*\t\t\t\t[songs on loop = False] [offline entries = False] [errors = True]\n*\t\t\t\t[followers = True] [followings = True]"
-    expected_webhook = "* Webhook notifications:\t[enabled = True] [provider = ntfy]\n*\t\t\t\t[active = True] [inactive = True] [tracked = False] [every song = True]\n*\t\t\t\t[songs on loop = True] [offline entries = True] [errors = True]\n*\t\t\t\t[followers = True] [followings = False]"
+    expected_email = "* Notifications (email):        On (errors, followers, followings)"
+    expected_webhook = "* Notifications (webhook):      On (active, inactive, every song, songs on loop, offline entries, errors, followers)"
     assert monitor._startup_notification_summary_lines() == [expected_email, expected_webhook]
+
+
+# Verifies webhook categories remain off while the master switch is disabled
+def test_startup_webhook_summary_respects_master_switch(monkeypatch):
+    monkeypatch.setattr(monitor, "WEBHOOK_ENABLED", False)
+    monkeypatch.setattr(monitor, "WEBHOOK_ACTIVE_NOTIFICATION", True)
+    monkeypatch.setattr(monitor, "WEBHOOK_ERROR_NOTIFICATION", True)
+    assert monitor._startup_notification_summary_lines()[1] == "* Notifications (webhook):      Off"
 
 
 # Verifies URL validation and provider detection reject unsafe destinations
