@@ -8,17 +8,12 @@ Version **2.6** adds independent **Discord and ntfy webhook notifications**, saf
 
 **Features and improvements**:
 
-- **NEW:** Added independent **webhook notifications for Discord and ntfy** across active, inactive, monitored-track, every-song, loop, offline-entry, follower, following and monitoring-error events
-- **NEW:** Added **per-event webhook configuration and runtime controls** through `WEBHOOK_ENABLED`, `WEBHOOK_PROVIDER`, event-specific switches and matching options such as `--webhook`, `--webhook-provider`, `--webhook-active`, `--webhook-song-changes` and `--webhook-errors`
-- **NEW:** Added private **webhook URL setup** with the hidden `--set-webhook-url` command as the recommended way to save a destination, plus `--webhook-url URL` for automation or one-run overrides and `--send-test-webhook` for delivery checks
-- **NEW:** Added **customizable Discord-format payloads** through `WEBHOOK_TEMPLATE`, `WEBHOOK_TRANSFORMS`, `WEBHOOK_HEADERS`, `WEBHOOK_USERNAME` and `WEBHOOK_AVATAR_URL`
-- **NEW:** Added **native ntfy topic delivery** with protected-topic Bearer authentication through `NTFY_ACCESS_TOKEN`, bounded message sizes and compact activity alerts through `NTFY_SHORT`
-- **NEW:** Added hidden **Last.fm and Spotify credential setup** commands, `--set-lastfm-credentials` and `--set-spotify-credentials`, that atomically store credential pairs without exposing them through shell history or process listings
-- **IMPROVE:** Added **bounded webhook retries** for rate limits and transient server failures plus automatic provider correction for standard Discord and `ntfy.sh` URLs
-- **IMPROVE:** Kept **email and webhook delivery independent** with per-channel duplicate suppression when loop, monitored-track and every-song alerts overlap
-- **IMPROVE:** Added compact single-line **email and webhook category rollups** to the startup summary without displaying the private URL and extended `SIGHUP` secret reloads to webhook destinations and ntfy access tokens
-- **IMPROVE:** Made **private dotenv writes safer** with atomic replacement, owner-only permissions on POSIX systems and value loading without interpolation
-- **NOTE:** **ntfy alerts are text-only** because Last.fm Monitor does not retrieve a trusted artwork source
+- **NEW:** Added independent **Discord and ntfy webhook notifications** with per-event controls for active, inactive, monitored-track, every-song, loop, offline-entry, follower, following and monitoring-error alerts
+- **NEW:** Added private **webhook URL setup** with `--set-webhook-url`, one-run provider and URL overrides plus `--send-test-webhook` for delivery checks
+- **NEW:** Added **customizable Discord-format payloads** plus native ntfy topic delivery with protected-topic authentication and compact text-only alerts through `NTFY_SHORT`
+- **NEW:** Added safe **Last.fm and Spotify credential setup** through `--set-lastfm-credentials` and `--set-spotify-credentials`, with atomic owner-only dotenv writes that keep secrets out of shell history and process listings
+- **IMPROVE:** Added **bounded webhook retries**, automatic provider correction and per-channel duplicate suppression while keeping email and webhook delivery independent
+- **IMPROVE:** Added compact **email and webhook category rollups** with short labels while extending `SIGHUP` secret reloads to webhook destinations and ntfy access tokens
 
 # Changes in 2.5 (21 Jul 2026)
 
