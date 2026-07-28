@@ -977,6 +977,13 @@ def detect_webhook_provider(url: Any) -> str:
     return "discord" if discord_host and discord_path else ""
 
 
+# Builds detailed startup notification lines for both delivery channels
+def _startup_notification_summary_lines() -> List[str]:
+    email_line = f"* Email notifications:\t\t[active = {ACTIVE_NOTIFICATION}] [inactive = {INACTIVE_NOTIFICATION}] [tracked = {TRACK_NOTIFICATION}] [every song = {SONG_NOTIFICATION}]\n*\t\t\t\t[songs on loop = {SONG_ON_LOOP_NOTIFICATION}] [offline entries = {OFFLINE_ENTRIES_NOTIFICATION}] [errors = {ERROR_NOTIFICATION}]\n*\t\t\t\t[followers = {FOLLOWERS_NOTIFICATION}] [followings = {FOLLOWINGS_NOTIFICATION}]"
+    webhook_line = f"* Webhook notifications:\t[enabled = {WEBHOOK_ENABLED}] [provider = {normalized_webhook_provider() or 'invalid'}]\n*\t\t\t\t[active = {WEBHOOK_ACTIVE_NOTIFICATION}] [inactive = {WEBHOOK_INACTIVE_NOTIFICATION}] [tracked = {WEBHOOK_TRACK_NOTIFICATION}] [every song = {WEBHOOK_SONG_NOTIFICATION}]\n*\t\t\t\t[songs on loop = {WEBHOOK_SONG_ON_LOOP_NOTIFICATION}] [offline entries = {WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION}] [errors = {WEBHOOK_ERROR_NOTIFICATION}]\n*\t\t\t\t[followers = {WEBHOOK_FOLLOWERS_NOTIFICATION}] [followings = {WEBHOOK_FOLLOWINGS_NOTIFICATION}]"
+    return [email_line, webhook_line]
+
+
 # Returns whether one configured webhook alert is enabled independently of email settings
 def webhook_event_enabled(notification_type: str) -> bool:
     settings = {
@@ -5305,10 +5312,8 @@ def main():
     print(f"* Last.fm polling intervals:\t[offline check: {display_time(LASTFM_CHECK_INTERVAL)}] [active check: {display_time(LASTFM_ACTIVE_CHECK_INTERVAL)}]\n*\t\t\t\t[inactivity: {display_time(LASTFM_INACTIVITY_CHECK)}]")
     if TRACK_FOLLOWINGS or TRACK_FOLLOWERS:
         print(f"* Friends/followers tracking:\t[followings = {TRACK_FOLLOWINGS}] [followers = {TRACK_FOLLOWERS}]" + (f" [interval: {display_time(FRIENDS_CHECK_INTERVAL)}]" if FRIENDS_CHECK_INTERVAL > 0 else ""))
-    print(f"* Email notifications:\t\t[active = {ACTIVE_NOTIFICATION}] [inactive = {INACTIVE_NOTIFICATION}] [tracked = {TRACK_NOTIFICATION}] [every song = {SONG_NOTIFICATION}]\n*\t\t\t\t[songs on loop = {SONG_ON_LOOP_NOTIFICATION}] [offline entries = {OFFLINE_ENTRIES_NOTIFICATION}] [errors = {ERROR_NOTIFICATION}]\n*\t\t\t\t[followers = {FOLLOWERS_NOTIFICATION}] [followings = {FOLLOWINGS_NOTIFICATION}]")
-    webhook_events = [name for name, enabled in (("active", WEBHOOK_ACTIVE_NOTIFICATION), ("inactive", WEBHOOK_INACTIVE_NOTIFICATION), ("tracked", WEBHOOK_TRACK_NOTIFICATION), ("every song", WEBHOOK_SONG_NOTIFICATION), ("songs on loop", WEBHOOK_SONG_ON_LOOP_NOTIFICATION), ("offline entries", WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION), ("errors", WEBHOOK_ERROR_NOTIFICATION), ("followers", WEBHOOK_FOLLOWERS_NOTIFICATION), ("followings", WEBHOOK_FOLLOWINGS_NOTIFICATION)) if enabled]
-    webhook_status = f"On ({', '.join(webhook_events)})" if WEBHOOK_ENABLED and webhook_events else "Off"
-    print(f"* Webhook notifications:\t{webhook_status}" + (f" [{normalized_webhook_provider() or 'invalid provider'}]" if WEBHOOK_ENABLED else ""))
+    for notification_summary_line in _startup_notification_summary_lines():
+        print(notification_summary_line)
     if WEBHOOK_ENABLED and not validate_webhook_url():
         print("* Warning: Webhook alerts are enabled but WEBHOOK_URL is not a complete HTTPS link")
     print(f"* Progress indicator:\t\t{PROGRESS_INDICATOR}")
