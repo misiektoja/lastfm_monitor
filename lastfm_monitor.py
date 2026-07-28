@@ -632,6 +632,7 @@ if sys.version_info < (3, 9):
 
 import time
 import string
+import textwrap
 import json
 import os
 from datetime import datetime
@@ -982,10 +983,10 @@ def _startup_email_notification_categories() -> List[str]:
     settings = (
         (ACTIVE_NOTIFICATION, "active"),
         (INACTIVE_NOTIFICATION, "inactive"),
-        (TRACK_NOTIFICATION, "monitored tracks"),
-        (SONG_NOTIFICATION, "every song"),
-        (SONG_ON_LOOP_NOTIFICATION, "songs on loop"),
-        (OFFLINE_ENTRIES_NOTIFICATION, "offline entries"),
+        (TRACK_NOTIFICATION, "tracked"),
+        (SONG_NOTIFICATION, "songs"),
+        (SONG_ON_LOOP_NOTIFICATION, "loops"),
+        (OFFLINE_ENTRIES_NOTIFICATION, "offline"),
         (ERROR_NOTIFICATION, "errors"),
         (FOLLOWERS_NOTIFICATION, "followers"),
         (FOLLOWINGS_NOTIFICATION, "followings"),
@@ -998,10 +999,10 @@ def _startup_webhook_notification_categories() -> List[str]:
     settings = (
         (WEBHOOK_ACTIVE_NOTIFICATION, "active"),
         (WEBHOOK_INACTIVE_NOTIFICATION, "inactive"),
-        (WEBHOOK_TRACK_NOTIFICATION, "monitored tracks"),
-        (WEBHOOK_SONG_NOTIFICATION, "every song"),
-        (WEBHOOK_SONG_ON_LOOP_NOTIFICATION, "songs on loop"),
-        (WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, "offline entries"),
+        (WEBHOOK_TRACK_NOTIFICATION, "tracked"),
+        (WEBHOOK_SONG_NOTIFICATION, "songs"),
+        (WEBHOOK_SONG_ON_LOOP_NOTIFICATION, "loops"),
+        (WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, "offline"),
         (WEBHOOK_ERROR_NOTIFICATION, "errors"),
         (WEBHOOK_FOLLOWERS_NOTIFICATION, "followers"),
         (WEBHOOK_FOLLOWINGS_NOTIFICATION, "followings"),
@@ -1009,13 +1010,18 @@ def _startup_webhook_notification_categories() -> List[str]:
     return [label for enabled, label in settings if WEBHOOK_ENABLED and enabled]
 
 
+# Formats one notification row with unstarred continuation lines when needed
+def _format_startup_notification_line(label: str, categories: List[str]) -> str:
+    prefix = f"* {label:<30}"
+    state = "On (" + ", ".join(categories) + ")" if categories else "Off"
+    return textwrap.fill(state, width=100, initial_indent=prefix, subsequent_indent=" " * len(prefix), break_long_words=False, break_on_hyphens=False)
+
+
 # Builds compact startup notification lines for both delivery channels
 def _startup_notification_summary_lines() -> List[str]:
     enabled_email = _startup_email_notification_categories()
     enabled_webhook = _startup_webhook_notification_categories()
-    email_state = "On (" + ", ".join(enabled_email) + ")" if enabled_email else "Off"
-    webhook_state = "On (" + ", ".join(enabled_webhook) + ")" if enabled_webhook else "Off"
-    return [f"* {('Notifications (email):'):<30}{email_state}", f"* {('Notifications (webhook):'):<30}{webhook_state}"]
+    return [_format_startup_notification_line("Notifications (email):", enabled_email), _format_startup_notification_line("Notifications (webhook):", enabled_webhook)]
 
 
 # Returns whether one configured webhook alert is enabled independently of email settings
