@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.5
+v2.6
 
 Tool implementing real-time tracking of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -17,7 +17,7 @@ python-dotenv (optional)
 beautifulsoup4 (optional, only for followers/followings tracking)
 """
 
-VERSION = "2.5"
+VERSION = "2.6"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -132,6 +132,116 @@ OFFLINE_ENTRIES_NOTIFICATION = False
 # Whether to send an email on errors
 # Can also be disabled via the -e flag
 ERROR_NOTIFICATION = True
+
+# ----------------------------
+# Webhook Notifications
+# ----------------------------
+
+# Master switch for webhook notifications through Discord or ntfy
+# Event settings below select which notifications are sent
+# Can also be enabled via the --webhook flag
+WEBHOOK_ENABLED = False
+
+# Service used to deliver webhook notifications: "discord" or "ntfy"
+# Known Discord and ntfy.sh URLs correct a mismatched configured value at runtime
+# Can also be set via the --webhook-provider flag
+WEBHOOK_PROVIDER = "discord"
+
+# Private destination used to send webhook notifications
+# Discord: Edit Channel -> Integrations -> Webhooks -> New Webhook -> Copy Webhook URL
+# ntfy: complete topic URL such as https://ntfy.sh/your-private-topic
+# Prefer --set-webhook-url, an environment variable or a dotenv file instead of storing this private URL here
+# The --webhook-url flag is available for one-run overrides but may leave the private URL in shell history
+WEBHOOK_URL = "your_webhook_url"
+
+# Discord display name (leave empty to use the webhook default)
+WEBHOOK_USERNAME = "Last.fm Monitor"
+
+# Discord avatar URL (leave empty to use the webhook default)
+WEBHOOK_AVATAR_URL = ""
+
+# Whether to send a webhook notification when the user becomes active
+# Can also be enabled via the --webhook-active flag
+WEBHOOK_ACTIVE_NOTIFICATION = False
+
+# Whether to send a webhook notification when the user goes inactive
+# Can also be enabled via the --webhook-inactive flag
+WEBHOOK_INACTIVE_NOTIFICATION = False
+
+# Whether to send a webhook notification when a monitored track or album plays
+# Can also be enabled via the --webhook-track flag
+WEBHOOK_TRACK_NOTIFICATION = False
+
+# Whether to send a webhook notification on every song change
+# Can also be enabled via the --webhook-song-changes flag
+WEBHOOK_SONG_NOTIFICATION = False
+
+# Whether to send a webhook notification when the user plays a song on loop
+# Can also be enabled via the --webhook-loop flag
+WEBHOOK_SONG_ON_LOOP_NOTIFICATION = False
+
+# Whether to send a webhook notification when new scrobbles arrive while the user is offline
+# Can also be enabled via the --webhook-offline-entries flag
+WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION = False
+
+# Whether to send a webhook notification when followers change
+# Can also be enabled via the --webhook-followers flag
+WEBHOOK_FOLLOWERS_NOTIFICATION = False
+
+# Whether to send a webhook notification when followings change
+# Can also be enabled via the --webhook-followings flag
+WEBHOOK_FOLLOWINGS_NOTIFICATION = False
+
+# Whether to send a webhook notification on monitoring errors
+# Can also be enabled via --webhook-errors or disabled via --no-webhook-error-notify
+WEBHOOK_ERROR_NOTIFICATION = True
+
+# Optional request headers for advanced webhook integrations
+# Values support the same placeholders as WEBHOOK_TEMPLATE
+WEBHOOK_HEADERS = {}
+
+# ----------------------------
+# Advanced Webhook Settings
+# ----------------------------
+
+# Discord-format webhook request payload template
+# Supported placeholders include title, description, version, fields, fields_str, color, timestamp,
+# username and avatar_url
+WEBHOOK_TEMPLATE = {
+    "username": "{username}",
+    "avatar_url": "{avatar_url}",
+    "allowed_mentions": {
+        "parse": [],
+    },
+    "embeds": [{
+        "title": "{title}",
+        "description": "{description}",
+        "color": "{color}",
+        "footer": {
+            "text": "Last.fm Monitor v{version}",
+        },
+        "timestamp": "{timestamp}",
+    }],
+}
+
+# Optional transformations applied to WEBHOOK_TEMPLATE and WEBHOOK_HEADERS values
+# Tuple format: (field_to_target, method_name, *optional_arguments)
+#
+# Examples:
+#   [
+#       ("title", "upper"),
+#       ("description", "replace", "**", ""),
+#       ("description", "strip"),
+#   ]
+WEBHOOK_TRANSFORMS = []
+
+# Optional ntfy access token for Bearer authentication
+# Prefer an environment variable or dotenv file instead of storing this token here
+NTFY_ACCESS_TOKEN = ""
+
+# Whether to use compact ntfy alert titles and bodies for smaller screens
+# Discord webhook and email content remain unchanged
+NTFY_SHORT = False
 
 # How often to check for user activity when the user is considered offline (not playing music); in seconds
 # Can also be set using the -c flag
@@ -387,6 +497,25 @@ SONG_NOTIFICATION = False
 SONG_ON_LOOP_NOTIFICATION = False
 OFFLINE_ENTRIES_NOTIFICATION = False
 ERROR_NOTIFICATION = False
+WEBHOOK_ENABLED = False
+WEBHOOK_PROVIDER = ""
+WEBHOOK_URL = ""
+WEBHOOK_USERNAME = ""
+WEBHOOK_AVATAR_URL = ""
+WEBHOOK_ACTIVE_NOTIFICATION = False
+WEBHOOK_INACTIVE_NOTIFICATION = False
+WEBHOOK_TRACK_NOTIFICATION = False
+WEBHOOK_SONG_NOTIFICATION = False
+WEBHOOK_SONG_ON_LOOP_NOTIFICATION = False
+WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION = False
+WEBHOOK_FOLLOWERS_NOTIFICATION = False
+WEBHOOK_FOLLOWINGS_NOTIFICATION = False
+WEBHOOK_ERROR_NOTIFICATION = False
+WEBHOOK_HEADERS = {}
+WEBHOOK_TEMPLATE = {}
+WEBHOOK_TRANSFORMS = []
+NTFY_ACCESS_TOKEN = ""
+NTFY_SHORT = False
 LASTFM_CHECK_INTERVAL = 0
 LASTFM_ACTIVE_CHECK_INTERVAL = 0
 LASTFM_INACTIVITY_CHECK = 0
@@ -452,7 +581,7 @@ exec(CONFIG_BLOCK, globals())
 DEFAULT_CONFIG_FILENAME = "lastfm_monitor.conf"
 
 # List of secret keys to load from env/config
-SECRET_KEYS = ("LASTFM_API_KEY", "LASTFM_API_SECRET", "SP_CLIENT_ID", "SP_CLIENT_SECRET", "SMTP_PASSWORD")
+SECRET_KEYS = ("LASTFM_API_KEY", "LASTFM_API_SECRET", "SP_CLIENT_ID", "SP_CLIENT_SECRET", "SMTP_PASSWORD", "WEBHOOK_URL", "NTFY_ACCESS_TOKEN")
 
 # Strings removed from track names for generating proper Genius search URLs
 re_search_str = r'remaster|extended|original mix|remix|rework|vocal mix|original soundtrack|radio( |-)edit|\(feat\.|( \(.*version\))|( - .*version)'
@@ -521,16 +650,18 @@ try:
     import pylast
 except ModuleNotFoundError:
     raise SystemExit("Error: Couldn't find the pyLast library !\n\nTo install it, run:\n    pip install pylast\n\nOnce installed, re-run this tool. For more help, visit:\nhttps://github.com/pylast/pylast")
-from urllib.parse import quote_plus, quote, urljoin
+from urllib.parse import quote_plus, quote, urljoin, urlsplit
 import subprocess
 import platform
 import re
 import ipaddress
+import getpass
+import tempfile
 from itertools import tee, islice, chain
 from html import escape
 import shutil
 from pathlib import Path
-from typing import Tuple
+from typing import Any, Callable, List, Optional, Tuple, cast
 import base64
 import hashlib
 import hmac
@@ -539,12 +670,21 @@ import pyotp
 
 
 SPOTIFY_SESSION = req.Session()
+WEBHOOK_SESSION = req.Session()
 
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 # Cap server-provided Retry-After to avoid long blocking sleeps on 429 responses
 SPOTIFY_MAX_RETRY_AFTER_SECONDS = 60
+WEBHOOK_MAX_ATTEMPTS = 2
+WEBHOOK_MAX_RETRY_AFTER_SECONDS = 5.0
+WEBHOOK_FALLBACK_RETRY_SECONDS = 1.0
+WEBHOOK_TIMEOUT_SECONDS = 10
+WEBHOOK_EMBED_TITLE_LIMIT = 256
+WEBHOOK_EMBED_DESCRIPTION_LIMIT = 4096
+NTFY_MESSAGE_LIMIT_BYTES = 4000
+NTFY_TRUNCATION_SUFFIX = "\n\n[Notification truncated to fit ntfy's 4 KB message limit]"
 
 
 class SpotifyCappedRetry(Retry):
@@ -571,6 +711,11 @@ spotify_retry = SpotifyCappedRetry(
 spotify_adapter = HTTPAdapter(max_retries=spotify_retry, pool_connections=100, pool_maxsize=100)
 SPOTIFY_SESSION.mount("https://", spotify_adapter)
 SPOTIFY_SESSION.mount("http://", spotify_adapter)
+
+# Keep webhook delivery on its own bounded retry path
+webhook_adapter = HTTPAdapter(max_retries=Retry(total=0))
+WEBHOOK_SESSION.mount("https://", webhook_adapter)
+WEBHOOK_SESSION.mount("http://", webhook_adapter)
 
 
 # Logger class to output messages to stdout and log file
@@ -782,6 +927,333 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         print(f"Error sending email: {e}")
         return 1
     return 0
+
+
+# Redacts configured private values and common secret parameters from diagnostic text
+def sanitize_sensitive_text(value: Any) -> str:
+    text = str(value)
+    for key in SECRET_KEYS:
+        secret = globals().get(key)
+        if isinstance(secret, str) and secret and not secret.startswith("your_"):
+            text = text.replace(secret, "<redacted>")
+    text = re.sub(r"(?i)([?&](?:api_key|api_sig|token|secret|password)=)[^&\s]+", r"\1<redacted>", text)
+    return text
+
+
+# Returns whether a webhook URL is a complete private HTTPS link
+def validate_webhook_url(url: Any = None) -> bool:
+    selected_url = WEBHOOK_URL if url is None else url
+    if not isinstance(selected_url, str) or not selected_url.strip():
+        return False
+    try:
+        parsed = urlsplit(selected_url.strip())
+    except ValueError:
+        return False
+    return parsed.scheme.casefold() == "https" and bool(parsed.hostname) and not parsed.username and not parsed.password and bool(parsed.path.strip("/"))
+
+
+# Returns the normalized configured webhook provider or an empty string when unsupported
+def normalized_webhook_provider(provider: Any = None) -> str:
+    selected_provider = WEBHOOK_PROVIDER if provider is None else provider
+    if not isinstance(selected_provider, str):
+        return ""
+    normalized = selected_provider.strip().casefold()
+    return normalized if normalized in ("discord", "ntfy") else ""
+
+
+# Detects Discord and public ntfy webhook providers from distinctive URL shapes
+def detect_webhook_provider(url: Any) -> str:
+    if not validate_webhook_url(url):
+        return ""
+    try:
+        parsed = urlsplit(str(url).strip())
+    except ValueError:
+        return ""
+    hostname = parsed.hostname.casefold() if parsed.hostname else ""
+    if hostname == "ntfy.sh":
+        return "ntfy"
+    discord_host = hostname in ("discord.com", "discordapp.com") or hostname.endswith(".discord.com") or hostname.endswith(".discordapp.com")
+    discord_path = re.match(r"^/api(?:/v[0-9]+)?/webhooks/[0-9]+/[^/]+/?$", parsed.path) is not None
+    return "discord" if discord_host and discord_path else ""
+
+
+# Returns whether one configured webhook alert is enabled independently of email settings
+def webhook_event_enabled(notification_type: str) -> bool:
+    settings = {
+        "active": WEBHOOK_ACTIVE_NOTIFICATION,
+        "inactive": WEBHOOK_INACTIVE_NOTIFICATION,
+        "track": WEBHOOK_TRACK_NOTIFICATION,
+        "song": WEBHOOK_SONG_NOTIFICATION,
+        "loop": WEBHOOK_SONG_ON_LOOP_NOTIFICATION,
+        "offline_entries": WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION,
+        "followers": WEBHOOK_FOLLOWERS_NOTIFICATION,
+        "followings": WEBHOOK_FOLLOWINGS_NOTIFICATION,
+        "error": WEBHOOK_ERROR_NOTIFICATION,
+    }
+    return bool(WEBHOOK_ENABLED and settings.get(notification_type, False))
+
+
+# Parses a webhook rate-limit delay and caps untrusted server values to a short wait
+def webhook_retry_after_seconds(response: Any) -> float:
+    candidates: List[Any] = []
+    headers = getattr(response, "headers", {}) or {}
+    if hasattr(headers, "get"):
+        candidates.append(headers.get("Retry-After"))
+    try:
+        payload = response.json()
+    except Exception:
+        payload = None
+    if isinstance(payload, dict):
+        candidates.append(payload.get("retry_after"))
+    for candidate in candidates:
+        if candidate is None or candidate == "":
+            continue
+        try:
+            seconds = float(candidate)
+        except (TypeError, ValueError):
+            try:
+                retry_at = parsedate_to_datetime(str(candidate))
+                seconds = (retry_at - datetime.now(retry_at.tzinfo)).total_seconds()
+            except Exception:
+                continue
+        return max(0.0, min(seconds, WEBHOOK_MAX_RETRY_AFTER_SECONDS))
+    return WEBHOOK_FALLBACK_RETRY_SECONDS
+
+
+# Applies configured placeholders recursively to a webhook template
+def format_webhook_payload(template: Any, values: dict) -> Any:
+    if isinstance(template, dict):
+        return {key: format_webhook_payload(value, values) for key, value in template.items()}
+    if isinstance(template, list):
+        return [format_webhook_payload(value, values) for value in template]
+    if isinstance(template, tuple):
+        return tuple(format_webhook_payload(value, values) for value in template)
+    if isinstance(template, str):
+        if template == "{fields}":
+            return values.get("fields", [])
+        if template == "{color}":
+            return values.get("color", 0xD92323)
+        try:
+            return template.format(**values)
+        except KeyError:
+            return template
+    return template
+
+
+# Returns a configuration error for unsafe or unsupported webhook customization
+def validate_webhook_customization(provider: Any = None) -> Optional[str]:
+    selected_provider = normalized_webhook_provider(provider)
+    if selected_provider == "discord":
+        if not isinstance(WEBHOOK_USERNAME, str):
+            return "WEBHOOK_USERNAME must be a string"
+        if not isinstance(WEBHOOK_AVATAR_URL, str):
+            return "WEBHOOK_AVATAR_URL must be a string"
+        if WEBHOOK_AVATAR_URL.strip() and not validate_webhook_url(WEBHOOK_AVATAR_URL):
+            return "WEBHOOK_AVATAR_URL must contain a complete HTTPS link without embedded credentials"
+        if not isinstance(WEBHOOK_TEMPLATE, (dict, list, str)):
+            return "WEBHOOK_TEMPLATE must be a dictionary, list or string"
+    if not isinstance(NTFY_SHORT, bool):
+        return "NTFY_SHORT must be a boolean"
+    if not isinstance(WEBHOOK_TRANSFORMS, (list, tuple)):
+        return "WEBHOOK_TRANSFORMS must be a list or tuple"
+    for index, transform in enumerate(WEBHOOK_TRANSFORMS):
+        if not isinstance(transform, (list, tuple)) or len(transform) < 2 or not isinstance(transform[0], str) or not isinstance(transform[1], str):
+            return f"WEBHOOK_TRANSFORMS entry {index + 1} must contain a field name and string method name"
+        if transform[1].startswith("_") or not callable(getattr("", transform[1], None)):
+            return f"WEBHOOK_TRANSFORMS entry {index + 1} uses an unsupported string method"
+    return None
+
+
+# Applies configured string transformations to one webhook value mapping
+def apply_webhook_transforms(values: dict) -> dict:
+    transformed = dict(values)
+    for index, transform in enumerate(WEBHOOK_TRANSFORMS):
+        field = transform[0]
+        method_name = transform[1]
+        if field not in transformed or not isinstance(transformed[field], str):
+            continue
+        try:
+            transformed[field] = getattr(transformed[field], method_name)(*transform[2:])
+        except Exception as exc:
+            raise ValueError(f"WEBHOOK_TRANSFORMS entry {index + 1} could not apply {field}.{method_name}") from exc
+    return transformed
+
+
+# Builds bounded placeholder values shared by webhook templates and headers
+def build_webhook_values(title: str, description: str, notification_type: str) -> dict:
+    colors = {"active": 0x2ECC71, "inactive": 0x747F8D, "track": 0xD92323, "song": 0x3498DB, "loop": 0x9B59B6, "offline_entries": 0xF39C12, "followers": 0x1ABC9C, "followings": 0x16A085, "error": 0xE74C3C}
+    safe_title = str(title).replace("\x00", "")[:WEBHOOK_EMBED_TITLE_LIMIT] or "Last.fm Monitor"
+    safe_description = str(description).replace("\x00", "")[:WEBHOOK_EMBED_DESCRIPTION_LIMIT]
+    username = WEBHOOK_USERNAME.strip()[:80] if isinstance(WEBHOOK_USERNAME, str) else ""
+    avatar_url = WEBHOOK_AVATAR_URL.strip() if isinstance(WEBHOOK_AVATAR_URL, str) else ""
+    values = {"title": safe_title, "description": safe_description, "version": VERSION, "fields": [], "fields_str": "", "color": colors.get(notification_type, 0xD92323), "timestamp": datetime.now().astimezone().isoformat(), "username": username, "avatar_url": avatar_url}
+    return apply_webhook_transforms(values)
+
+
+# Builds one customized Discord-format payload while keeping mentions disabled
+def build_webhook_payload(title: str, description: str, notification_type: str, payload_values: Optional[dict] = None) -> Any:
+    values = build_webhook_values(title, description, notification_type) if payload_values is None else payload_values
+    try:
+        payload = format_webhook_payload(WEBHOOK_TEMPLATE, values)
+    except Exception as exc:
+        raise ValueError("WEBHOOK_TEMPLATE could not be formatted with the supported placeholders") from exc
+    if isinstance(payload, dict):
+        if payload.get("username") == "":
+            payload.pop("username")
+        if payload.get("avatar_url") == "":
+            payload.pop("avatar_url")
+        payload["allowed_mentions"] = {"parse": []}
+    return payload
+
+
+# Truncates text to a UTF-8 byte limit without returning a partial character
+def truncate_utf8_bytes(text: str, max_bytes: int, suffix: str = "") -> str:
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    encoded_suffix = suffix.encode("utf-8")
+    if len(encoded_suffix) >= max_bytes:
+        return encoded_suffix[:max_bytes].decode("utf-8", errors="ignore")
+    return encoded[:max_bytes - len(encoded_suffix)].decode("utf-8", errors="ignore") + suffix
+
+
+# Builds one bounded ntfy title and message pair
+def build_ntfy_webhook_message(title: str, description: str) -> Tuple[str, str]:
+    safe_title = str(title).replace("\x00", "")[:WEBHOOK_EMBED_TITLE_LIMIT] or "Last.fm Monitor"
+    safe_message = truncate_utf8_bytes(str(description).replace("\x00", ""), NTFY_MESSAGE_LIMIT_BYTES, NTFY_TRUNCATION_SUFFIX)
+    return safe_title, safe_message
+
+
+# Returns a safe validation error for one custom webhook header mapping
+def _validate_webhook_header_mapping(headers: Any) -> Optional[str]:
+    if not isinstance(headers, dict):
+        return "WEBHOOK_HEADERS must be a dictionary of string header names and values"
+    normalized_names = set()
+    for name, value in headers.items():
+        if not isinstance(name, str) or not re.fullmatch(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+", name):
+            return "WEBHOOK_HEADERS contains an invalid HTTP header name"
+        normalized_name = name.casefold()
+        if normalized_name in normalized_names:
+            return "WEBHOOK_HEADERS contains duplicate case-insensitive header names"
+        normalized_names.add(normalized_name)
+        if not isinstance(value, str):
+            return f"WEBHOOK_HEADERS value for {name} must be a string"
+        if "\r" in value or "\n" in value:
+            return f"WEBHOOK_HEADERS value for {name} must not contain line breaks"
+    return None
+
+
+# Returns a safe configuration error for custom webhook headers or ntfy access tokens
+def validate_webhook_headers(provider: Any = None) -> Optional[str]:
+    selected_provider = normalized_webhook_provider(provider)
+    header_error = _validate_webhook_header_mapping(WEBHOOK_HEADERS)
+    if header_error is not None:
+        return header_error
+    if selected_provider == "ntfy":
+        if not isinstance(NTFY_ACCESS_TOKEN, str):
+            return "NTFY_ACCESS_TOKEN must be a string"
+        token = NTFY_ACCESS_TOKEN.strip()
+        if "\r" in token or "\n" in token:
+            return "NTFY_ACCESS_TOKEN must not contain line breaks"
+        if token.casefold().startswith(("bearer ", "basic ")):
+            return "NTFY_ACCESS_TOKEN must contain only the access token without an Authorization scheme"
+    return None
+
+
+# Builds provider-specific headers while formatting placeholders and applying private ntfy authentication
+def build_webhook_headers(provider: str, values: dict) -> dict:
+    validation_error = validate_webhook_headers(provider)
+    if validation_error is not None:
+        raise ValueError(validation_error)
+    try:
+        formatted_headers = format_webhook_payload(WEBHOOK_HEADERS, values)
+    except Exception as exc:
+        raise ValueError("WEBHOOK_HEADERS could not be formatted with the supported placeholders") from exc
+    formatted_error = _validate_webhook_header_mapping(formatted_headers)
+    if formatted_error is not None:
+        raise ValueError(formatted_error)
+    headers = dict(cast(dict[str, str], formatted_headers))
+    if not any(name.casefold() == "user-agent" for name in headers):
+        headers["User-Agent"] = f"LastfmMonitor/{VERSION}"
+    if provider == "ntfy":
+        headers = {name: value for name, value in headers.items() if name.casefold() != "content-type"}
+        headers["Content-Type"] = "text/plain; charset=utf-8"
+        token = NTFY_ACCESS_TOKEN.strip()
+        if token:
+            headers = {name: value for name, value in headers.items() if name.casefold() != "authorization"}
+            headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+# Sends one webhook through an isolated bounded retry path
+def send_webhook(title: str, description: str, notification_type: str = "song", force: bool = False, sleeper: Optional[Callable[[float], None]] = None) -> int:
+    if not force and not webhook_event_enabled(notification_type):
+        return 1
+    if not validate_webhook_url():
+        print("* Error sending webhook: WEBHOOK_URL must contain a complete HTTPS link")
+        return 1
+    provider = normalized_webhook_provider()
+    if not provider:
+        print("* Error sending webhook: WEBHOOK_PROVIDER must be discord or ntfy")
+        return 1
+    customization_error = validate_webhook_customization(provider)
+    if customization_error is not None:
+        print(f"* Error sending webhook: {customization_error}")
+        return 1
+    header_error = validate_webhook_headers(provider)
+    if header_error is not None:
+        print(f"* Error sending webhook: {header_error}")
+        return 1
+    try:
+        webhook_values = build_webhook_values(title, description, notification_type)
+        request_headers = build_webhook_headers(provider, webhook_values)
+        discord_payload = build_webhook_payload(title, description, notification_type, webhook_values) if provider == "discord" else None
+    except ValueError as exc:
+        print(f"* Error sending webhook: {exc}")
+        return 1
+    sleep_func = time.sleep if sleeper is None else sleeper
+    ntfy_title, ntfy_message = build_ntfy_webhook_message(str(webhook_values["title"]), str(webhook_values["description"])) if provider == "ntfy" else ("", "")
+    ntfy_params = {"title": ntfy_title}
+    for attempt in range(WEBHOOK_MAX_ATTEMPTS):
+        try:
+            if provider == "ntfy":
+                response = WEBHOOK_SESSION.post(str(WEBHOOK_URL).strip(), data=ntfy_message.encode("utf-8"), params=ntfy_params, headers=request_headers, timeout=WEBHOOK_TIMEOUT_SECONDS)
+            elif isinstance(discord_payload, str):
+                response = WEBHOOK_SESSION.post(str(WEBHOOK_URL).strip(), data=discord_payload, headers=request_headers, timeout=WEBHOOK_TIMEOUT_SECONDS)
+            else:
+                response = WEBHOOK_SESSION.post(str(WEBHOOK_URL).strip(), json=discord_payload, headers=request_headers, timeout=WEBHOOK_TIMEOUT_SECONDS)
+            if 200 <= response.status_code <= 299:
+                return 0
+            retryable = response.status_code == 429 or 500 <= response.status_code <= 599
+            if not retryable or attempt == WEBHOOK_MAX_ATTEMPTS - 1:
+                print(f"* Error sending webhook: service returned HTTP {response.status_code}")
+                return 1
+            delay = webhook_retry_after_seconds(response) if response.status_code == 429 else WEBHOOK_FALLBACK_RETRY_SECONDS
+            debug_print(f"Webhook delivery returned HTTP {response.status_code}. Retrying once in {delay:g} seconds")
+            sleep_func(delay)
+        except req.RequestException as exc:
+            if attempt == WEBHOOK_MAX_ATTEMPTS - 1:
+                print(f"* Error sending webhook: {type(exc).__name__}")
+                return 1
+            debug_print(f"Webhook delivery failed with {type(exc).__name__}. Retrying once in {WEBHOOK_FALLBACK_RETRY_SECONDS:g} seconds")
+            sleep_func(WEBHOOK_FALLBACK_RETRY_SECONDS)
+    return 1
+
+
+# Sends one alert through the enabled email and webhook channels
+def send_notification_channels(notification_type: str, subject: str, body: str, body_html: str = "", email_enabled: bool = False, webhook_enabled: Optional[bool] = None, subject_short: str = "", body_short: str = "") -> Tuple[bool, bool]:
+    email_attempted = bool(email_enabled)
+    webhook_attempted = webhook_event_enabled(notification_type) if webhook_enabled is None else bool(webhook_enabled)
+    if email_attempted:
+        print(f"Sending email notification to {RECEIVER_EMAIL}")
+        send_email(subject, body, body_html, SMTP_SSL)
+    if webhook_attempted:
+        print("Sending webhook notification")
+        use_short_content = NTFY_SHORT is True and normalized_webhook_provider() == "ntfy"
+        webhook_subject = (subject_short or subject) if use_short_content else subject
+        webhook_body = (body_short or body) if use_short_content else body
+        send_webhook(webhook_subject, webhook_body, notification_type, force=True)
+    return email_attempted, webhook_attempted
 
 
 # Initializes the CSV file
@@ -1002,7 +1474,7 @@ def decrease_inactivity_check_signal_handler(sig, frame):
 
 # Signal handler for SIGHUP allowing to reload secrets from .env
 def reload_secrets_signal_handler(sig, frame):
-    global SP_OAUTH_MEMORY_CACHE_HANDLER
+    global SP_OAUTH_MEMORY_CACHE_HANDLER, WEBHOOK_PROVIDER
     sig_name = signal.Signals(sig).name
     print(f"* Signal {sig_name} received")
 
@@ -1018,7 +1490,7 @@ def reload_secrets_signal_handler(sig, frame):
             else:
                 env_path = find_dotenv()
             if env_path:
-                load_dotenv(env_path, override=True)
+                load_dotenv(env_path, override=True, interpolate=False)
             else:
                 print("* No .env file found, skipping env-var reload")
         except ImportError:
@@ -1026,6 +1498,7 @@ def reload_secrets_signal_handler(sig, frame):
             print("* python-dotenv not installed, skipping env-var reload")
 
     oauth_credentials_changed = False
+    webhook_url_changed = False
     if env_path:
         for secret in SECRET_KEYS:
             old_val = globals().get(secret)
@@ -1034,9 +1507,16 @@ def reload_secrets_signal_handler(sig, frame):
                 globals()[secret] = val
                 if secret in ("SP_CLIENT_ID", "SP_CLIENT_SECRET"):
                     oauth_credentials_changed = True
+                if secret == "WEBHOOK_URL":
+                    webhook_url_changed = True
                 print(f"* Reloaded {secret} from {env_path}")
     if oauth_credentials_changed:
         SP_OAUTH_MEMORY_CACHE_HANDLER = None
+    if webhook_url_changed:
+        detected_provider = detect_webhook_provider(WEBHOOK_URL)
+        if detected_provider and detected_provider != normalized_webhook_provider():
+            WEBHOOK_PROVIDER = detected_provider
+            print(f"* Updated webhook provider to {detected_provider}")
 
     print_cur_ts("Timestamp:\t\t\t")
 
@@ -1504,7 +1984,7 @@ def notify_friends_changes(username, changes, skip_initial_line=False):
                 user_url = f"https://www.last.fm/user/{quote_plus(user)}"
                 print(f"- {user} [ {user_url} ]")
 
-        if FOLLOWINGS_NOTIFICATION:
+        if FOLLOWINGS_NOTIFICATION or webhook_event_enabled("followings"):
             change_str = f"{change_count:+d}" if change_count != 0 else "0"
             subject = f"Last.fm user {username} followings number has changed! ({change_str}, {previous_count} -> {current_count})"
 
@@ -1561,8 +2041,8 @@ def notify_friends_changes(username, changes, skip_initial_line=False):
             body = "\n".join(body_parts)
             body_html = f"<html><head></head><body>{''.join(html_parts)}</body></html>"
 
-            print(f"\nSending email notification to {RECEIVER_EMAIL}")
-            send_email(subject, body, body_html, SMTP_SSL)
+            print()
+            send_notification_channels("followings", subject, body, body_html, email_enabled=FOLLOWINGS_NOTIFICATION)
 
         if check_range:
             print(f"\nCheck interval:\t\t\t{check_interval_str} ({check_range})")
@@ -1600,7 +2080,7 @@ def notify_friends_changes(username, changes, skip_initial_line=False):
                 user_url = f"https://www.last.fm/user/{quote_plus(user)}"
                 print(f"- {user} [ {user_url} ]")
 
-        if FOLLOWERS_NOTIFICATION:
+        if FOLLOWERS_NOTIFICATION or webhook_event_enabled("followers"):
             change_str = f"{change_count:+d}" if change_count != 0 else "0"
             subject = f"Last.fm user {username} followers number has changed! ({change_str}, {previous_count} -> {current_count})"
 
@@ -1657,8 +2137,8 @@ def notify_friends_changes(username, changes, skip_initial_line=False):
             body = "\n".join(body_parts)
             body_html = f"<html><head></head><body>{''.join(html_parts)}</body></html>"
 
-            print(f"\nSending email notification to {RECEIVER_EMAIL}")
-            send_email(subject, body, body_html, SMTP_SSL)
+            print()
+            send_notification_channels("followers", subject, body, body_html, email_enabled=FOLLOWERS_NOTIFICATION)
 
         if check_range:
             print(f"\nCheck interval:\t\t\t{check_interval_str} ({check_range})")
@@ -2489,6 +2969,170 @@ def spotify_win_play_song(sp_track_uri_id, method=SPOTIFY_WINDOWS_PLAYING_METHOD
         getattr(os, "startfile")(spotify_convert_uri_to_url(f"spotify:track:{sp_track_uri_id}"))
 
 
+# Raised when private values cannot be checked or saved safely
+class PrivateSettingsError(Exception):
+    pass
+
+
+# Resolves a writable dotenv destination without searching parent directories
+def resolve_private_settings_path(env_file=None, cwd=None) -> Path:
+    if env_file is not None and str(env_file).casefold() == "none":
+        raise PrivateSettingsError("Private setup requires a dotenv destination and cannot use --env-file none")
+    base_directory = Path.cwd() if cwd is None else Path(cwd)
+    destination = base_directory / ".env" if not env_file else Path(env_file).expanduser()
+    return destination.resolve()
+
+
+# Checks whether a dotenv file already contains one named assignment
+def _dotenv_contains_key(destination, key) -> bool:
+    destination_path = Path(destination)
+    if not destination_path.exists():
+        return False
+    try:
+        lines = destination_path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        raise PrivateSettingsError(f"Could not read private settings file '{destination_path}'. Check that it is a readable UTF-8 file") from None
+    assignment_pattern = re.compile(rf"^\s*(?:export\s+)?{re.escape(key)}\s*=")
+    return any(assignment_pattern.match(line) for line in lines)
+
+
+# Quotes one private value for lossless parsing by python-dotenv
+def _format_dotenv_value(value: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError("Dotenv values must be strings")
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\r", "\\r").replace("\n", "\\n")
+    return f'"{escaped}"'
+
+
+# Updates allowed private values in a dotenv file through an atomic replacement
+def update_dotenv_file(destination, updates):
+    if not hasattr(updates, "items"):
+        raise TypeError("Dotenv updates must be a mapping")
+    update_items = list(updates.items())
+    for key, value in update_items:
+        if not isinstance(key, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]*", key) or key not in SECRET_KEYS:
+            raise ValueError(f"Unsupported dotenv key: {key!r}")
+        if not isinstance(value, str):
+            raise TypeError(f"Dotenv value for {key} must be a string")
+    destination_path = Path(destination).expanduser()
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    existing_lines = destination_path.read_text(encoding="utf-8").splitlines() if destination_path.exists() else []
+    update_keys = {key for key, _ in update_items}
+    values_by_key = dict(update_items)
+    seen_keys = set()
+    output_lines = []
+    assignment_pattern = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
+    for line in existing_lines:
+        match = assignment_pattern.match(line)
+        key = match.group(1) if match else None
+        if key not in update_keys:
+            output_lines.append(line)
+            continue
+        if key in seen_keys:
+            continue
+        output_lines.append(f"{key}={_format_dotenv_value(values_by_key[key])}")
+        seen_keys.add(key)
+    for key, value in update_items:
+        if key not in seen_keys:
+            output_lines.append(f"{key}={_format_dotenv_value(value)}")
+            seen_keys.add(key)
+    content = "\n".join(output_lines) + ("\n" if output_lines else "")
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", prefix=f".{destination_path.name}.", suffix=".tmp", dir=str(destination_path.parent), delete=False) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write(content)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        if os.name == "posix":
+            os.chmod(temporary_path, 0o600)
+        os.replace(temporary_path, destination_path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
+    return str(destination_path)
+
+
+# Collects hidden private values and saves them together after overwrite confirmation
+def _run_set_private_values(option_name: str, prompts: List[Tuple[str, str]], env_file=None, interactive=None, input_func=None, getpass_func=None) -> str:
+    destination = resolve_private_settings_path(env_file)
+    terminal_is_interactive = sys.stdin.isatty() if interactive is None else interactive
+    if not terminal_is_interactive:
+        raise PrivateSettingsError(f"{option_name} requires an interactive terminal so private values stay hidden")
+    existing_keys = [key for key, _ in prompts if _dotenv_contains_key(destination, key)]
+    prompt = input if input_func is None else input_func
+    if existing_keys:
+        try:
+            confirmed = prompt(f"Replace {', '.join(existing_keys)} in '{destination}'? [y/N]: ").strip().casefold() in ("y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            confirmed = False
+        if not confirmed:
+            raise PrivateSettingsError("Private settings update was cancelled. The dotenv file was not changed")
+    hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
+    updates = {}
+    try:
+        for key, prompt_text in prompts:
+            value = hidden_prompt(prompt_text).strip()
+            if not value or "\r" in value or "\n" in value:
+                raise PrivateSettingsError(f"No valid value was entered for {key}. The dotenv file was not changed")
+            updates[key] = value
+    except (EOFError, KeyboardInterrupt):
+        raise PrivateSettingsError("Private settings entry was cancelled. The dotenv file was not changed") from None
+    try:
+        update_dotenv_file(destination, updates)
+    except PrivateSettingsError:
+        raise
+    except Exception:
+        raise PrivateSettingsError(f"Could not save private values in '{destination}'. Check file permissions or choose another path with --env-file") from None
+    print(f"* Updated private settings file: {destination}")
+    print(f"* Saved: {', '.join(updates)}")
+    return str(destination)
+
+
+# Safely stores one privately entered webhook URL
+def run_set_webhook_url(env_file=None, interactive=None, input_func=None, getpass_func=None) -> str:
+    destination = resolve_private_settings_path(env_file)
+    terminal_is_interactive = sys.stdin.isatty() if interactive is None else interactive
+    if not terminal_is_interactive:
+        raise PrivateSettingsError("--set-webhook-url requires an interactive terminal so the webhook URL stays hidden")
+    prompt = input if input_func is None else input_func
+    if _dotenv_contains_key(destination, "WEBHOOK_URL"):
+        try:
+            confirmed = prompt(f"Replace WEBHOOK_URL in '{destination}'? [y/N]: ").strip().casefold() in ("y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            confirmed = False
+        if not confirmed:
+            raise PrivateSettingsError("Webhook setup was cancelled. The dotenv file was not changed")
+    hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
+    try:
+        webhook_url = hidden_prompt("Paste the Discord or ntfy webhook URL (input hidden): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        raise PrivateSettingsError("Webhook setup was cancelled. The dotenv file was not changed") from None
+    if not validate_webhook_url(webhook_url):
+        raise PrivateSettingsError("That does not look like a complete HTTPS webhook URL. The dotenv file was not changed")
+    try:
+        update_dotenv_file(destination, {"WEBHOOK_URL": webhook_url})
+    except Exception:
+        raise PrivateSettingsError(f"Could not save the webhook URL in '{destination}'. Check file permissions or choose another path with --env-file") from None
+    print("* Webhook URL looks valid")
+    print(f"* Updated private settings file: {destination}")
+    print("* Test it with: lastfm_monitor --send-test-webhook")
+    return str(destination)
+
+
+# Safely stores privately entered Last.fm API credentials
+def run_set_lastfm_credentials(env_file=None, interactive=None, input_func=None, getpass_func=None) -> str:
+    prompts = [("LASTFM_API_KEY", "Enter the Last.fm API key privately: "), ("LASTFM_API_SECRET", "Enter the Last.fm shared secret privately: ")]
+    return _run_set_private_values("--set-lastfm-credentials", prompts, env_file, interactive, input_func, getpass_func)
+
+
+# Safely stores privately entered Spotify OAuth app credentials
+def run_set_spotify_credentials(env_file=None, interactive=None, input_func=None, getpass_func=None) -> str:
+    prompts = [("SP_CLIENT_ID", "Enter the Spotify client ID privately: "), ("SP_CLIENT_SECRET", "Enter the Spotify client secret privately: ")]
+    return _run_set_private_values("--set-spotify-credentials", prompts, env_file, interactive, input_func, getpass_func)
+
+
 # Finds an optional config file
 def find_config_file(cli_path=None):
     """
@@ -2792,9 +3436,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             album_html_line = f"<br>Album: {album_html}" if album else ""
             m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}{album_html_line}{music_section_html}{lyrics_section_html}Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
-            if ACTIVE_NOTIFICATION:
-                print(f"Sending email notification to {RECEIVER_EMAIL}")
-                send_email(m_subject, m_body, m_body_html, SMTP_SSL)
+            if ACTIVE_NOTIFICATION or webhook_event_enabled("active"):
+                send_notification_channels("active", m_subject, m_body, m_body_html, email_enabled=ACTIVE_NOTIFICATION, subject_short=f"{username} is active", body_short="\n".join(value for value in (track, artist, album) if value))
 
             # If tracking functionality is enabled then play the current song via Spotify client
             if TRACK_SONGS and sp_track_uri_id:
@@ -2961,9 +3604,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             album_html_line = f"<br>Album: {album_html}" if album else ""
             m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}{album_html_line}{music_section_html}{lyrics_section_html}Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
-            if ACTIVE_NOTIFICATION:
-                print(f"Sending email notification to {RECEIVER_EMAIL}")
-                send_email(m_subject, m_body, m_body_html, SMTP_SSL)
+            if ACTIVE_NOTIFICATION or webhook_event_enabled("active"):
+                send_notification_channels("active", m_subject, m_body, m_body_html, email_enabled=ACTIVE_NOTIFICATION, subject_short=f"{username} is active", body_short="\n".join(value for value in (track, artist, album) if value))
 
             playing_track = new_track
             # If user has tracks, use the first one's timestamp, otherwise use current time
@@ -3007,6 +3649,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
     print_cur_ts("\nTimestamp:\t\t\t")
 
     email_sent = False
+    webhook_sent = False
 
     tracks_upper = {t.upper() for t in tracks}
 
@@ -3193,6 +3836,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             last_track_start_ts = int(recent_tracks[0].timestamp)
             new_track = user.get_now_playing()
             email_sent = False
+            webhook_sent = False
 
             lf_current_ts = int(time.time()) - LASTFM_ACTIVE_CHECK_INTERVAL
 
@@ -3229,13 +3873,12 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     except Exception as e:
                         print(f"* Error: {e}")
 
-                    if i > 0 and OFFLINE_ENTRIES_NOTIFICATION:
+                    if i > 0 and (OFFLINE_ENTRIES_NOTIFICATION or webhook_event_enabled("offline_entries")):
                         if added_entries_list:
                             added_entries_list_mbody = f"\n\n{added_entries_list}"
                         m_subject = f"Last.fm user {username}: new entries showed up while user was offline"
                         m_body = f"New last.fm entries showed up while user was offline!{added_entries_list_mbody}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                        print(f"Sending email notification to {RECEIVER_EMAIL}")
-                        send_email(m_subject, m_body, "", SMTP_SSL)
+                        send_notification_channels("offline_entries", m_subject, m_body, email_enabled=OFFLINE_ENTRIES_NOTIFICATION, subject_short=f"{username}: {i} new offline scrobbles", body_short=added_entries_list.strip())
 
                     print_cur_ts("\nTimestamp:\t\t\t")
 
@@ -3545,12 +4188,15 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             m_body = f"Track: {artist} - {track}{duration_m_body}\n{album_line}{music_section_text}{lyrics_section_text_fresh}{played_for_m_body}{get_cur_ts(nl_ch + 'Timestamp: ')}"
                             m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}{album_html_line}{music_section_html}{lyrics_section_html_fresh}{played_for_m_body_html}{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
-                        if ACTIVE_NOTIFICATION:
-                            print(f"Sending email notification to {RECEIVER_EMAIL}")
-                            send_email(m_subject, m_body, m_body_html, SMTP_SSL)
-                            email_sent = True
+                        if ACTIVE_NOTIFICATION or webhook_event_enabled("active"):
+                            email_attempted, webhook_attempted = send_notification_channels("active", m_subject, m_body, m_body_html, email_enabled=ACTIVE_NOTIFICATION, subject_short=f"{username} is active", body_short="\n".join(value for value in (track, artist, album) if value))
+                            email_sent = email_sent or email_attempted
+                            webhook_sent = webhook_sent or webhook_attempted
 
-                    if (TRACK_NOTIFICATION or SONG_NOTIFICATION) and not email_sent:
+                    track_matched = track.upper() in tracks_upper or album.upper() in tracks_upper
+                    email_song_enabled = ((TRACK_NOTIFICATION and track_matched) or SONG_NOTIFICATION) and not email_sent
+                    webhook_song_enabled = ((webhook_event_enabled("track") and track_matched) or webhook_event_enabled("song")) and not webhook_sent
+                    if email_song_enabled or webhook_song_enabled:
                         timespan_str = f"\n\nSongs Played: {listened_songs}"
                         timespan_str_html = f"<br><br>Songs Played: {listened_songs}"
                         # Only show timespan if lf_active_ts_start is properly set (not 0) and different from current track start
@@ -3594,7 +4240,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         print(f"User plays song on LOOP ({song_on_loop} times)")
                         print("─" * HORIZONTAL_LINE)
 
-                    if song_on_loop == SONG_ON_LOOP_VALUE and SONG_ON_LOOP_NOTIFICATION:
+                    loop_email_enabled = song_on_loop == SONG_ON_LOOP_VALUE and SONG_ON_LOOP_NOTIFICATION and not email_sent
+                    loop_webhook_enabled = song_on_loop == SONG_ON_LOOP_VALUE and webhook_event_enabled("loop") and not webhook_sent
+                    if loop_email_enabled or loop_webhook_enabled:
                         timespan_str = f"\n\nSongs Played: {listened_songs}"
                         timespan_str_html = f"<br><br>Songs Played: {listened_songs}"
                         # Only show timespan if lf_active_ts_start is properly set (not 0) and different from current track start
@@ -3631,23 +4279,27 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         album_html_line = f"<br>Album: {album_html}" if album else ""
                         m_body = f"Track: {artist} - {track}{duration_m_body}\n{album_line}{music_section_text}{lyrics_section_text}{played_for_m_body}\n\nUser plays song on LOOP ({song_on_loop} times){timespan_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                         m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}{album_html_line}{music_section_html}{lyrics_section_html}{played_for_m_body_html}<br><br>User plays song on LOOP (<b>{song_on_loop}</b> times){timespan_str_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
-                        print(f"Sending email notification to {RECEIVER_EMAIL}")
-                        send_email(m_subject, m_body, m_body_html, SMTP_SSL)
-                        email_sent = True
+                        email_attempted, webhook_attempted = send_notification_channels("loop", m_subject, m_body, m_body_html, email_enabled=loop_email_enabled, webhook_enabled=loop_webhook_enabled, subject_short=f"{username} is playing a song on loop", body_short="\n".join(value for value in (track, artist, album) if value))
+                        email_sent = email_sent or email_attempted
+                        webhook_sent = webhook_sent or webhook_attempted
 
                     # Send track/song notifications only if loop notification was not sent
-                    if track.upper() in tracks_upper or album.upper() in tracks_upper:
+                    if track_matched:
                         print("\n*** Track/album matched with the list!")
 
-                        if TRACK_NOTIFICATION and not email_sent:
-                            print(f"Sending email notification to {RECEIVER_EMAIL}")
-                            send_email(m_subject, m_body, m_body_html, SMTP_SSL)
-                            email_sent = True
+                        track_email_enabled = TRACK_NOTIFICATION and not email_sent
+                        track_webhook_enabled = webhook_event_enabled("track") and not webhook_sent
+                        if track_email_enabled or track_webhook_enabled:
+                            email_attempted, webhook_attempted = send_notification_channels("track", m_subject, m_body, m_body_html, email_enabled=track_email_enabled, webhook_enabled=track_webhook_enabled, subject_short=f"{username}: monitored track", body_short="\n".join(value for value in (track, artist, album) if value))
+                            email_sent = email_sent or email_attempted
+                            webhook_sent = webhook_sent or webhook_attempted
 
-                    if SONG_NOTIFICATION and not email_sent:
-                        print(f"Sending email notification to {RECEIVER_EMAIL}")
-                        send_email(m_subject, m_body, m_body_html, SMTP_SSL)
-                        email_sent = True
+                    song_email_enabled = SONG_NOTIFICATION and not email_sent
+                    song_webhook_enabled = webhook_event_enabled("song") and not webhook_sent
+                    if song_email_enabled or song_webhook_enabled:
+                        email_attempted, webhook_attempted = send_notification_channels("song", m_subject, m_body, m_body_html, email_enabled=song_email_enabled, webhook_enabled=song_webhook_enabled, subject_short=f"{username}: song changed", body_short="\n".join(value for value in (track, artist, album) if value))
+                        email_sent = email_sent or email_attempted
+                        webhook_sent = webhook_sent or webhook_attempted
 
                     lf_user_online = True
                     lf_active_ts_last = int(time.time())
@@ -3814,7 +4466,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             json.dump(last_activity_to_save, f, indent=2)
                     except Exception as e:
                         print(f"* Cannot save last status to '{lastfm_last_activity_file}' file: {e}")
-                    if INACTIVE_NOTIFICATION:
+                    if INACTIVE_NOTIFICATION or webhook_event_enabled("inactive"):
                         # Format recently listened songs list for email (skip if only 1 song)
                         recent_songs_mbody = ""
                         recent_songs_mbody_html = ""
@@ -3871,9 +4523,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         m_body = f"Last played: {artist} - {track}{duration_m_body}\n{album_line}{music_section_text}{lyrics_section_text}User got inactive after listening to music for {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}\nUser played music from {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep=' to ')}{paused_mbody}{listened_songs_mbody}{played_for_m_body}{recent_songs_mbody}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}\nInactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
                         m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{last_played_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}{album_html_line}{music_section_html}{lyrics_section_html}User got inactive after listening to music for <b>{calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}</b><br>User played music from <b>{get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep='</b> to <b>')}</b>{paused_mbody_html}{listened_songs_mbody_html}{played_for_m_body_html}{recent_songs_mbody_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b><br>Inactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
-                        print(f"Sending email notification to {RECEIVER_EMAIL}")
-                        send_email(m_subject, m_body, m_body_html, SMTP_SSL)
-                        email_sent = True
+                        email_attempted, webhook_attempted = send_notification_channels("inactive", m_subject, m_body, m_body_html, email_enabled=INACTIVE_NOTIFICATION, subject_short=f"{username} is inactive", body_short="\n".join(value for value in (track, artist, album) if value))
+                        email_sent = email_sent or email_attempted
+                        webhook_sent = webhook_sent or webhook_attempted
                     lf_active_ts_start = 0
                     playing_track = None
                     last_track_start_ts = 0
@@ -3928,12 +4580,22 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
             if error_500_start_ts and (error_500_counter >= ERROR_500_NUMBER_LIMIT and (int(time.time()) - error_500_start_ts) >= ERROR_500_TIME_LIMIT):
                 print(f"* Error 50x ({error_500_counter}x times in the last {display_time((int(time.time()) - error_500_start_ts))}): '{e}'")
+                if webhook_event_enabled("error") and not webhook_sent:
+                    m_subject = f"lastfm_monitor: Last.fm service error (user: {username})"
+                    m_body = f"Repeated Last.fm 50x errors: {sanitize_sensitive_text(e)}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                    _, webhook_attempted = send_notification_channels("error", m_subject, m_body, webhook_enabled=True)
+                    webhook_sent = webhook_sent or webhook_attempted
                 print_cur_ts("Timestamp:\t\t\t")
                 error_500_start_ts = 0
                 error_500_counter = 0
 
             elif error_network_issue_start_ts and (error_network_issue_counter >= ERROR_NETWORK_ISSUES_NUMBER_LIMIT and (int(time.time()) - error_network_issue_start_ts) >= ERROR_NETWORK_ISSUES_TIME_LIMIT):
                 print(f"* Error with network ({error_network_issue_counter}x times in the last {display_time((int(time.time()) - error_network_issue_start_ts))}): '{e}'")
+                if webhook_event_enabled("error") and not webhook_sent:
+                    m_subject = f"lastfm_monitor: network error (user: {username})"
+                    m_body = f"Repeated network errors: {sanitize_sensitive_text(e)}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                    _, webhook_attempted = send_notification_channels("error", m_subject, m_body, webhook_enabled=True)
+                    webhook_sent = webhook_sent or webhook_attempted
                 print_cur_ts("Timestamp:\t\t\t")
                 error_network_issue_start_ts = 0
                 error_network_issue_counter = 0
@@ -3943,13 +4605,21 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
                 if 'Invalid API key' in str(e) or 'API Key Suspended' in str(e):
                     print("* API key might not be valid anymore!")
-                    if ERROR_NOTIFICATION and not email_sent:
+                    error_email_enabled = ERROR_NOTIFICATION and not email_sent
+                    error_webhook_enabled = webhook_event_enabled("error") and not webhook_sent
+                    if error_email_enabled or error_webhook_enabled:
                         m_subject = f"lastfm_monitor: API key error! (user: {username})"
-                        m_body = f"API key might not be valid anymore: {e}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>API key might not be valid anymore: {escape(str(e))}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
-                        print(f"Sending email notification to {RECEIVER_EMAIL}")
-                        send_email(m_subject, m_body, m_body_html, SMTP_SSL)
-                        email_sent = True
+                        safe_error = sanitize_sensitive_text(e)
+                        m_body = f"API key might not be valid anymore: {safe_error}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                        m_body_html = f"<html><head></head><body>API key might not be valid anymore: {escape(safe_error)}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                        email_attempted, webhook_attempted = send_notification_channels("error", m_subject, m_body, m_body_html, email_enabled=error_email_enabled, webhook_enabled=error_webhook_enabled)
+                        email_sent = email_sent or email_attempted
+                        webhook_sent = webhook_sent or webhook_attempted
+                elif webhook_event_enabled("error") and not webhook_sent:
+                    m_subject = f"lastfm_monitor: monitoring error (user: {username})"
+                    m_body = f"Monitoring error: {sanitize_sensitive_text(e)}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                    _, webhook_attempted = send_notification_channels("error", m_subject, m_body, webhook_enabled=True)
+                    webhook_sent = webhook_sent or webhook_attempted
                 print_cur_ts("Timestamp:\t\t\t")
 
         if lf_user_online:
@@ -3963,15 +4633,54 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
         new_track = None
 
 
+# Applies validated one-run webhook command-line overrides to runtime settings
+def apply_webhook_cli_overrides(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    global WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION
+    if args.webhook_provider is not None:
+        WEBHOOK_PROVIDER = str(args.webhook_provider)
+    if args.webhook_url is not None:
+        if not validate_webhook_url(args.webhook_url):
+            parser.error("--webhook-url must contain a complete HTTPS link without embedded credentials")
+        WEBHOOK_URL = str(args.webhook_url).strip()
+        WEBHOOK_ENABLED = True
+    if args.webhook_enabled is not None:
+        WEBHOOK_ENABLED = args.webhook_enabled
+    event_overrides = (
+        (args.webhook_active, "WEBHOOK_ACTIVE_NOTIFICATION"),
+        (args.webhook_inactive, "WEBHOOK_INACTIVE_NOTIFICATION"),
+        (args.webhook_track, "WEBHOOK_TRACK_NOTIFICATION"),
+        (args.webhook_song_changes, "WEBHOOK_SONG_NOTIFICATION"),
+        (args.webhook_loop, "WEBHOOK_SONG_ON_LOOP_NOTIFICATION"),
+        (args.webhook_offline_entries, "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION"),
+        (args.webhook_followers, "WEBHOOK_FOLLOWERS_NOTIFICATION"),
+        (args.webhook_followings, "WEBHOOK_FOLLOWINGS_NOTIFICATION"),
+    )
+    for enabled, setting in event_overrides:
+        if enabled is True:
+            WEBHOOK_ENABLED = True
+            globals()[setting] = True
+    if args.webhook_errors is not None:
+        WEBHOOK_ERROR_NOTIFICATION = args.webhook_errors
+        if args.webhook_errors:
+            WEBHOOK_ENABLED = True
+    if args.webhook_provider is None:
+        detected_provider = detect_webhook_provider(WEBHOOK_URL)
+        configured_provider = normalized_webhook_provider()
+        if detected_provider and detected_provider != configured_provider:
+            WEBHOOK_PROVIDER = detected_provider
+            print(f"* Warning: Configured webhook provider did not match the URL. Using {detected_provider}")
+
+
 # Runs the command-line interface
 def main():
-    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
+    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
 
-    if "--generate-config" in sys.argv:
+    private_setup_flags = ("--set-webhook-url", "--set-lastfm-credentials", "--set-spotify-credentials")
+    if "--generate-config" in sys.argv and not any(flag in sys.argv for flag in private_setup_flags):
         print(CONFIG_BLOCK.strip("\n"))
         sys.exit(0)
 
-    if "--version" in sys.argv:
+    if "--version" in sys.argv and not any(flag in sys.argv for flag in private_setup_flags):
         print(f"{os.path.basename(sys.argv[0])} v{VERSION}")
         sys.exit(0)
 
@@ -3986,7 +4695,7 @@ def main():
 
     parser = argparse.ArgumentParser(
         prog="lastfm_monitor",
-        description=("Monitor a Last.fm user's scrobbles and send customizable email alerts [ https://github.com/misiektoja/lastfm_monitor/ ]"), formatter_class=argparse.RawTextHelpFormatter
+        description=("Monitor a Last.fm user's scrobbles and send customizable email or webhook alerts [ https://github.com/misiektoja/lastfm_monitor/ ]"), formatter_class=argparse.RawTextHelpFormatter
     )
 
     # Positional
@@ -4022,6 +4731,24 @@ def main():
         dest="env_file",
         metavar="PATH",
         help="Path to optional dotenv file (auto-search if not set, disable with 'none')",
+    )
+    conf.add_argument(
+        "--set-webhook-url",
+        dest="set_webhook_url",
+        action="store_true",
+        help="Save a Discord or ntfy webhook URL through a hidden prompt",
+    )
+    conf.add_argument(
+        "--set-lastfm-credentials",
+        dest="set_lastfm_credentials",
+        action="store_true",
+        help="Save Last.fm API credentials through hidden prompts",
+    )
+    conf.add_argument(
+        "--set-spotify-credentials",
+        dest="set_spotify_credentials",
+        action="store_true",
+        help="Save optional Spotify OAuth app credentials through hidden prompts",
     )
 
     # API credentials
@@ -4115,6 +4842,25 @@ def main():
         action="store_true",
         help="Send a test email to verify SMTP settings"
     )
+
+    webhook_notify = parser.add_argument_group("Webhook notifications")
+    webhook_toggle = webhook_notify.add_mutually_exclusive_group()
+    webhook_toggle.add_argument("--webhook", dest="webhook_enabled", action="store_true", default=None, help="Enable the configured webhook alerts")
+    webhook_toggle.add_argument("--no-webhook", dest="webhook_enabled", action="store_false", default=None, help="Disable the configured webhook alerts")
+    webhook_notify.add_argument("--webhook-url", dest="webhook_url", metavar="URL", type=str, help="Use one Discord webhook or ntfy topic URL for this run (may remain in shell history)")
+    webhook_notify.add_argument("--webhook-provider", dest="webhook_provider", choices=("discord", "ntfy"), help="Webhook request format for this run (default: configured provider)")
+    webhook_notify.add_argument("--webhook-active", dest="webhook_active", action="store_true", default=None, help="Send a webhook alert when the user becomes active")
+    webhook_notify.add_argument("--webhook-inactive", dest="webhook_inactive", action="store_true", default=None, help="Send a webhook alert when the user goes inactive")
+    webhook_notify.add_argument("--webhook-track", dest="webhook_track", action="store_true", default=None, help="Send a webhook alert when a monitored track or album plays")
+    webhook_notify.add_argument("--webhook-song-changes", dest="webhook_song_changes", action="store_true", default=None, help="Send a webhook alert on every song change")
+    webhook_notify.add_argument("--webhook-loop", dest="webhook_loop", action="store_true", default=None, help="Send a webhook alert when the user plays a song on loop")
+    webhook_notify.add_argument("--webhook-offline-entries", dest="webhook_offline_entries", action="store_true", default=None, help="Send a webhook alert when new scrobbles arrive while the user is offline")
+    webhook_notify.add_argument("--webhook-followers", dest="webhook_followers", action="store_true", default=None, help="Send a webhook alert when followers change")
+    webhook_notify.add_argument("--webhook-followings", dest="webhook_followings", action="store_true", default=None, help="Send a webhook alert when followings change")
+    webhook_error_toggle = webhook_notify.add_mutually_exclusive_group()
+    webhook_error_toggle.add_argument("--webhook-errors", dest="webhook_errors", action="store_true", default=None, help="Send webhook alerts when monitoring has a problem")
+    webhook_error_toggle.add_argument("--no-webhook-error-notify", dest="webhook_errors", action="store_false", default=None, help="Disable webhook alerts when monitoring has a problem")
+    webhook_notify.add_argument("--send-test-webhook", dest="send_test_webhook", action="store_true", help="Send one test webhook without starting monitoring")
 
     # Intervals & Timers
     times = parser.add_argument_group("Intervals & timers")
@@ -4287,6 +5033,32 @@ def main():
         if DOTENV_FILE:
             DOTENV_FILE = os.path.expanduser(DOTENV_FILE)
 
+    private_actions = {
+        "set_webhook_url": args.set_webhook_url,
+        "set_lastfm_credentials": args.set_lastfm_credentials,
+        "set_spotify_credentials": args.set_spotify_credentials,
+    }
+    selected_private_actions = [name for name, enabled in private_actions.items() if enabled]
+    if len(selected_private_actions) > 1:
+        parser.error("Private setup commands cannot be combined")
+    if selected_private_actions:
+        allowed_private_args = {"config_file", "env_file", *private_actions}
+        conflicts = [name for name, value in vars(args).items() if name not in allowed_private_args and value is not None and value is not False]
+        if conflicts:
+            parser.error(f"--{selected_private_actions[0].replace('_', '-')} cannot be combined with " + ", ".join(f"--{name.replace('_', '-')}" for name in conflicts))
+        private_env_file = DOTENV_FILE or None
+        runners = {
+            "set_webhook_url": run_set_webhook_url,
+            "set_lastfm_credentials": run_set_lastfm_credentials,
+            "set_spotify_credentials": run_set_spotify_credentials,
+        }
+        try:
+            runners[selected_private_actions[0]](env_file=private_env_file)
+        except PrivateSettingsError as exc:
+            print(f"* Error: {exc}")
+            sys.exit(1)
+        sys.exit(0)
+
     if DOTENV_FILE and DOTENV_FILE.lower() == 'none':
         env_path = None
     else:
@@ -4298,11 +5070,11 @@ def main():
                 if not os.path.isfile(env_path):
                     print(f"* Warning: dotenv file '{env_path}' does not exist\n")
                 else:
-                    load_dotenv(env_path, override=True)
+                    load_dotenv(env_path, override=True, interpolate=False)
             else:
                 env_path = find_dotenv() or None
                 if env_path:
-                    load_dotenv(env_path, override=True)
+                    load_dotenv(env_path, override=True, interpolate=False)
         except ImportError:
             env_path = DOTENV_FILE if DOTENV_FILE else None
             if env_path:
@@ -4314,8 +5086,7 @@ def main():
             if val is not None:
                 globals()[secret] = val
 
-    if not check_internet():
-        sys.exit(1)
+    apply_webhook_cli_overrides(args, parser)
 
     if args.send_test_email:
         print("* Sending test email notification ...\n")
@@ -4324,6 +5095,17 @@ def main():
         else:
             sys.exit(1)
         sys.exit(0)
+
+    if args.send_test_webhook:
+        print("* Sending a test webhook ...\n")
+        if send_webhook("Last.fm Monitor test", "Your webhook alerts are set up correctly.", "song", force=True) == 0:
+            print("* Test webhook sent successfully !")
+        else:
+            sys.exit(1)
+        sys.exit(0)
+
+    if not check_internet():
+        sys.exit(1)
 
     if not args.username:
         print("* Error: LASTFM_USERNAME argument is required !")
@@ -4524,6 +5306,11 @@ def main():
     if TRACK_FOLLOWINGS or TRACK_FOLLOWERS:
         print(f"* Friends/followers tracking:\t[followings = {TRACK_FOLLOWINGS}] [followers = {TRACK_FOLLOWERS}]" + (f" [interval: {display_time(FRIENDS_CHECK_INTERVAL)}]" if FRIENDS_CHECK_INTERVAL > 0 else ""))
     print(f"* Email notifications:\t\t[active = {ACTIVE_NOTIFICATION}] [inactive = {INACTIVE_NOTIFICATION}] [tracked = {TRACK_NOTIFICATION}] [every song = {SONG_NOTIFICATION}]\n*\t\t\t\t[songs on loop = {SONG_ON_LOOP_NOTIFICATION}] [offline entries = {OFFLINE_ENTRIES_NOTIFICATION}] [errors = {ERROR_NOTIFICATION}]\n*\t\t\t\t[followers = {FOLLOWERS_NOTIFICATION}] [followings = {FOLLOWINGS_NOTIFICATION}]")
+    webhook_events = [name for name, enabled in (("active", WEBHOOK_ACTIVE_NOTIFICATION), ("inactive", WEBHOOK_INACTIVE_NOTIFICATION), ("tracked", WEBHOOK_TRACK_NOTIFICATION), ("every song", WEBHOOK_SONG_NOTIFICATION), ("songs on loop", WEBHOOK_SONG_ON_LOOP_NOTIFICATION), ("offline entries", WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION), ("errors", WEBHOOK_ERROR_NOTIFICATION), ("followers", WEBHOOK_FOLLOWERS_NOTIFICATION), ("followings", WEBHOOK_FOLLOWINGS_NOTIFICATION)) if enabled]
+    webhook_status = f"On ({', '.join(webhook_events)})" if WEBHOOK_ENABLED and webhook_events else "Off"
+    print(f"* Webhook notifications:\t{webhook_status}" + (f" [{normalized_webhook_provider() or 'invalid provider'}]" if WEBHOOK_ENABLED else ""))
+    if WEBHOOK_ENABLED and not validate_webhook_url():
+        print("* Warning: Webhook alerts are enabled but WEBHOOK_URL is not a complete HTTPS link")
     print(f"* Progress indicator:\t\t{PROGRESS_INDICATOR}")
     print(f"* Track listened songs:\t\t{TRACK_SONGS}")
     print(f"* Track duration (Spotify):\t{USE_TRACK_DURATION_FROM_SPOTIFY}")
