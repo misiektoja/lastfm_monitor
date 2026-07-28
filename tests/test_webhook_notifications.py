@@ -41,15 +41,17 @@ def test_config_block_contains_complete_webhook_settings():
     assert "NTFY_ACCESS_TOKEN" in monitor.SECRET_KEYS
 
 
-# Verifies startup email and webhook summaries use compact single-line category rollups
+# Verifies startup summaries use short labels and unstarred bounded continuation lines
 def test_startup_notification_summaries_use_compact_rollups(monkeypatch):
-    email_settings = {"ACTIVE_NOTIFICATION": False, "INACTIVE_NOTIFICATION": False, "TRACK_NOTIFICATION": False, "SONG_NOTIFICATION": False, "SONG_ON_LOOP_NOTIFICATION": False, "OFFLINE_ENTRIES_NOTIFICATION": False, "ERROR_NOTIFICATION": True, "FOLLOWERS_NOTIFICATION": True, "FOLLOWINGS_NOTIFICATION": True}
-    webhook_settings = {"WEBHOOK_ENABLED": True, "WEBHOOK_PROVIDER": "ntfy", "WEBHOOK_ACTIVE_NOTIFICATION": True, "WEBHOOK_INACTIVE_NOTIFICATION": True, "WEBHOOK_TRACK_NOTIFICATION": False, "WEBHOOK_SONG_NOTIFICATION": True, "WEBHOOK_SONG_ON_LOOP_NOTIFICATION": True, "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION": True, "WEBHOOK_ERROR_NOTIFICATION": True, "WEBHOOK_FOLLOWERS_NOTIFICATION": True, "WEBHOOK_FOLLOWINGS_NOTIFICATION": False}
+    email_settings = {"ACTIVE_NOTIFICATION": True, "INACTIVE_NOTIFICATION": True, "TRACK_NOTIFICATION": True, "SONG_NOTIFICATION": True, "SONG_ON_LOOP_NOTIFICATION": True, "OFFLINE_ENTRIES_NOTIFICATION": True, "ERROR_NOTIFICATION": True, "FOLLOWERS_NOTIFICATION": True, "FOLLOWINGS_NOTIFICATION": True}
+    webhook_settings = {"WEBHOOK_ENABLED": True, "WEBHOOK_ACTIVE_NOTIFICATION": True, "WEBHOOK_INACTIVE_NOTIFICATION": True, "WEBHOOK_TRACK_NOTIFICATION": True, "WEBHOOK_SONG_NOTIFICATION": True, "WEBHOOK_SONG_ON_LOOP_NOTIFICATION": True, "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION": True, "WEBHOOK_ERROR_NOTIFICATION": True, "WEBHOOK_FOLLOWERS_NOTIFICATION": True, "WEBHOOK_FOLLOWINGS_NOTIFICATION": True}
     for setting, value in {**email_settings, **webhook_settings}.items():
         monkeypatch.setattr(monitor, setting, value)
-    expected_email = "* Notifications (email):        On (errors, followers, followings)"
-    expected_webhook = "* Notifications (webhook):      On (active, inactive, every song, songs on loop, offline entries, errors, followers)"
+    expected_email = "* Notifications (email):        On (active, inactive, tracked, songs, loops, offline, errors,\n                                followers, followings)"
+    expected_webhook = "* Notifications (webhook):      On (active, inactive, tracked, songs, loops, offline, errors,\n                                followers, followings)"
     assert monitor._startup_notification_summary_lines() == [expected_email, expected_webhook]
+    assert all(len(line) <= 100 for summary in (expected_email, expected_webhook) for line in summary.splitlines())
+    assert "\n*" not in expected_email + expected_webhook
 
 
 # Verifies webhook categories remain off while the master switch is disabled
