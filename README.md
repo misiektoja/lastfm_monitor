@@ -31,6 +31,7 @@ pip install lastfm_monitor
 - Information about the **duration** the user listened to a song and whether the **song was skipped** and if it was **shorter or longer than the track duration**
 - **Tracking** of Last.fm user's **followers** and **followings** with notifications when users are added or removed
 - **Email notifications** for various events (user becomes active or inactive, specific or all songs, songs on loop, new entries appearing while user was offline, followers/followings changes, errors)
+- **Webhook notifications** through **Discord**, **ntfy** and compatible integrations with event-specific controls
 - **Saving all listened songs** with timestamps to the **CSV file**
 - **Last.fm Wrapped tool** for generating Spotify Wrapped-style statistics (top artists, tracks, albums) from CSV data
 - **Clickable** **Last.fm**, **Apple Music**, **YouTube Music**, **Amazon Music**, **Deezer**, **Tidal**, **Genius Lyrics**, **AZLyrics**, **Tekstowo.pl**, **Musixmatch** and **Lyrics.com** search URLs printed in the console and included in email notifications (configurable per service)
@@ -58,11 +59,13 @@ pip install lastfm_monitor
    * [Spotify Metadata Backends](#spotify-metadata-backends)
       * [Optional Spotify OAuth App Setup](#optional-spotify-oauth-app-setup)
    * [SMTP Settings](#smtp-settings)
+   * [Webhook Settings](#webhook-settings)
    * [Storing Secrets](#storing-secrets)
 5. [Usage](#usage)
    * [Monitoring Mode](#monitoring-mode)
    * [Listing Mode](#listing-mode)
    * [Email Notifications](#email-notifications)
+   * [Webhook Notifications](#webhook-notifications)
    * [CSV Export](#csv-export)
    * [Last.fm Wrapped Tool](#lastfm-wrapped-tool)
    * [Automatic Playback of Listened Tracks in the Spotify Client](#automatic-playback-of-listened-tracks-in-the-spotify-client)
@@ -177,12 +180,19 @@ Edit the `lastfm_monitor.conf` file and change any desired configuration options
    - Or get your existing credentials from: [https://www.last.fm/api/accounts](https://www.last.fm/api/accounts)
 
 - Provide the `LASTFM_API_KEY` and `LASTFM_API_SECRET` secrets using one of the following methods:
+   - Recommended: run `lastfm_monitor --set-lastfm-credentials` and enter both values through hidden prompts
    - Pass it at runtime with `-u` / `--lastfm-api-key` and `-w` / `--lastfm-secret`
    - Set it as an [environment variable](#storing-secrets) (e.g. `export LASTFM_API_KEY=...; export LASTFM_API_SECRET=...`)
    - Add it to [.env file](#storing-secrets) (`LASTFM_API_KEY=...` and `LASTFM_API_SECRET=...`) for persistent use
    - Fallback: hard-code it in the code or config file
 
 If you store the `LASTFM_API_KEY` and `LASTFM_API_SECRET` in a dotenv file you can update their values and send a `SIGHUP` signal to the process to reload the file with the new secret values without restarting the tool. More info in [Storing Secrets](#storing-secrets) and [Signal Controls (macOS/Linux/Unix)](#signal-controls-macoslinuxunix).
+
+The hidden setup command keeps both values out of shell history and process listings:
+
+```sh
+lastfm_monitor --set-lastfm-credentials
+```
 
 <a id="user-privacy-settings"></a>
 ### User Privacy Settings
@@ -232,6 +242,7 @@ Spotify currently requires the owner of a Development Mode app to have an active
 
 Provide `SP_CLIENT_ID` and `SP_CLIENT_SECRET` using one of these methods:
 
+- Recommended: run `lastfm_monitor --set-spotify-credentials` and enter both values through hidden prompts
 - Pass them at runtime with `-z` / `--spotify-creds`
   - Use the `SP_CLIENT_ID:SP_CLIENT_SECRET` format with a colon between the values
 - Set them as [environment variables](#storing-secrets), for example `export SP_CLIENT_ID=...` and `export SP_CLIENT_SECRET=...`
@@ -243,6 +254,12 @@ Command-line example:
 
 ```sh
 lastfm_monitor <lastfm_username> -z "your_spotify_app_client_id:your_spotify_app_client_secret"
+```
+
+The `-z` value may remain visible in shell history or process listings. Prefer the hidden setup command for persistent credentials:
+
+```sh
+lastfm_monitor --set-spotify-credentials
 ```
 
 The tool refreshes OAuth app access tokens automatically. The token cache path is configured through `SP_TOKENS_FILE` and defaults to `.lastfm-monitor-oauth-app.json`. Set `SP_TOKENS_FILE` to an empty string to use memory-only caching.
@@ -270,10 +287,51 @@ Verify your SMTP settings by using `--send-test-email` flag (the tool will try t
 lastfm_monitor --send-test-email
 ```
 
+<a id="webhook-settings"></a>
+### Webhook Settings
+
+Webhook alerts work independently from email. Discord and ntfy are supported directly. Compatible services can use the Discord request format or the advanced payload and header settings.
+
+First save the private destination through a hidden prompt:
+
+```sh
+lastfm_monitor --set-webhook-url
+```
+
+The command validates that the destination is a complete HTTPS URL then updates only `WEBHOOK_URL` in `.env`. Existing values require confirmation. Use `--env-file PATH` to select another private settings file.
+
+Set `WEBHOOK_ENABLED = True` in `lastfm_monitor.conf` then choose `WEBHOOK_PROVIDER = "discord"` or `WEBHOOK_PROVIDER = "ntfy"`. Standard Discord and `ntfy.sh` URLs correct a mismatched configured provider automatically.
+
+Enable the events you want through the `WEBHOOK_*_NOTIFICATION` settings. Last.fm Monitor supports active, inactive, monitored track, every song, loop, offline entry, follower, following and error alerts. Matching command-line switches are listed under [Webhook Notifications](#webhook-notifications).
+
+Test delivery without starting monitoring:
+
+```sh
+lastfm_monitor --send-test-webhook
+```
+
+For automation or one-run tests, `--webhook-url URL` overrides the saved destination and enables webhooks. This value may remain visible in shell history or process listings, so `--set-webhook-url` is recommended for normal setup. `--webhook-provider {discord,ntfy}` overrides the request format for one run.
+
+Protected ntfy topics can use `NTFY_ACCESS_TOKEN` from an environment variable or dotenv file. The token is sent with Bearer authentication. A custom `Authorization` header can also be supplied through `WEBHOOK_HEADERS`.
+
+`WEBHOOK_USERNAME`, `WEBHOOK_AVATAR_URL`, `WEBHOOK_TEMPLATE`, `WEBHOOK_TRANSFORMS` and `WEBHOOK_HEADERS` provide the same Discord-format customization model as Spotify Monitor. Header values and template values support placeholders such as `{title}`, `{description}`, `{version}`, `{color}`, `{timestamp}`, `{username}` and `{avatar_url}`. `NTFY_SHORT = True` uses compact activity text on smaller screens without changing Discord or email content.
+
+Last.fm Monitor does not attach artwork to ntfy alerts because it does not retrieve a trusted artwork source. Webhook delivery remains text-only.
+
 <a id="storing-secrets"></a>
 ### Storing Secrets
 
-It is recommended to store secrets like `LASTFM_API_KEY`, `LASTFM_API_SECRET`, `SP_CLIENT_ID`, `SP_CLIENT_SECRET` or `SMTP_PASSWORD` as either an environment variable or in a dotenv file.
+It is recommended to store secrets like `LASTFM_API_KEY`, `LASTFM_API_SECRET`, `SP_CLIENT_ID`, `SP_CLIENT_SECRET`, `SMTP_PASSWORD`, `WEBHOOK_URL` or `NTFY_ACCESS_TOKEN` as either an environment variable or in a dotenv file.
+
+The safest interactive entry methods write only the selected values to `.env` through hidden prompts:
+
+```sh
+lastfm_monitor --set-lastfm-credentials
+lastfm_monitor --set-spotify-credentials
+lastfm_monitor --set-webhook-url
+```
+
+Each command accepts `--env-file PATH`. Existing values require confirmation and the update is atomic. `--env-file none` is rejected because these commands must save their values.
 
 Set the needed environment variables using `export` on **Linux/Unix/macOS/WSL** systems:
 
@@ -283,6 +341,8 @@ export LASTFM_API_SECRET="your_lastfm_api_secret"
 export SP_CLIENT_ID="your_spotify_app_client_id"
 export SP_CLIENT_SECRET="your_spotify_app_client_secret"
 export SMTP_PASSWORD="your_smtp_password"
+export WEBHOOK_URL="your_private_webhook_url"
+export NTFY_ACCESS_TOKEN="your_ntfy_access_token"
 ```
 
 On **Windows Command Prompt** use `set` instead of `export` and on **Windows PowerShell** use `$env`.
@@ -295,6 +355,8 @@ LASTFM_API_SECRET="your_lastfm_api_secret"
 SP_CLIENT_ID="your_spotify_app_client_id"
 SP_CLIENT_SECRET="your_spotify_app_client_secret"
 SMTP_PASSWORD="your_smtp_password"
+WEBHOOK_URL="your_private_webhook_url"
+NTFY_ACCESS_TOKEN="your_ntfy_access_token"
 ```
 
 By default the tool will auto-search for dotenv file named `.env` in current directory and then upward from it.
@@ -490,6 +552,43 @@ Example email:
 <p align="center">
    <img src="https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/assets/lastfm_monitor_email_notifications.png" alt="lastfm_monitor_email_notifications" width="90%"/>
 </p>
+
+<a id="webhook-notifications"></a>
+### Webhook Notifications
+
+Webhook event choices mirror email controls while remaining independent. Enable the master switch in the config file or for one run:
+
+```sh
+lastfm_monitor <lastfm_username> --webhook
+```
+
+Choose events with config settings or matching command-line flags:
+
+| Event | Config setting | Command-line flag |
+|---|---|---|
+| User becomes active | `WEBHOOK_ACTIVE_NOTIFICATION` | `--webhook-active` |
+| User becomes inactive | `WEBHOOK_INACTIVE_NOTIFICATION` | `--webhook-inactive` |
+| Monitored track or album plays | `WEBHOOK_TRACK_NOTIFICATION` | `--webhook-track` |
+| Every song change | `WEBHOOK_SONG_NOTIFICATION` | `--webhook-song-changes` |
+| Song plays on loop | `WEBHOOK_SONG_ON_LOOP_NOTIFICATION` | `--webhook-loop` |
+| Offline scrobbles arrive | `WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION` | `--webhook-offline-entries` |
+| Followers change | `WEBHOOK_FOLLOWERS_NOTIFICATION` | `--webhook-followers` |
+| Followings change | `WEBHOOK_FOLLOWINGS_NOTIFICATION` | `--webhook-followings` |
+| Monitoring error occurs | `WEBHOOK_ERROR_NOTIFICATION` | `--webhook-errors` |
+
+An event flag also enables the master switch for that run. Use `--no-webhook` to disable configured webhook delivery. Use `--no-webhook-error-notify` to disable only error webhooks.
+
+Examples:
+
+```sh
+lastfm_monitor <lastfm_username> --webhook-active --webhook-inactive
+lastfm_monitor <lastfm_username> --webhook-song-changes --webhook-loop
+lastfm_monitor <lastfm_username> --track-followers --webhook-followers
+```
+
+Email and webhook delivery attempts remain independent. When loop, monitored-track and every-song choices overlap, Last.fm Monitor sends no more than one alert per channel for that song change.
+
+See [Webhook Settings](#webhook-settings) for Discord, ntfy, private URL setup, test delivery and advanced request customization.
 
 <a id="csv-export"></a>
 ### CSV Export
