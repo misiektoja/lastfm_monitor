@@ -977,11 +977,45 @@ def detect_webhook_provider(url: Any) -> str:
     return "discord" if discord_host and discord_path else ""
 
 
-# Builds detailed startup notification lines for both delivery channels
+# Returns enabled email notification category names in display order
+def _startup_email_notification_categories() -> List[str]:
+    settings = (
+        (ACTIVE_NOTIFICATION, "active"),
+        (INACTIVE_NOTIFICATION, "inactive"),
+        (TRACK_NOTIFICATION, "monitored tracks"),
+        (SONG_NOTIFICATION, "every song"),
+        (SONG_ON_LOOP_NOTIFICATION, "songs on loop"),
+        (OFFLINE_ENTRIES_NOTIFICATION, "offline entries"),
+        (ERROR_NOTIFICATION, "errors"),
+        (FOLLOWERS_NOTIFICATION, "followers"),
+        (FOLLOWINGS_NOTIFICATION, "followings"),
+    )
+    return [label for enabled, label in settings if enabled]
+
+
+# Returns enabled webhook notification category names in display order
+def _startup_webhook_notification_categories() -> List[str]:
+    settings = (
+        (WEBHOOK_ACTIVE_NOTIFICATION, "active"),
+        (WEBHOOK_INACTIVE_NOTIFICATION, "inactive"),
+        (WEBHOOK_TRACK_NOTIFICATION, "monitored tracks"),
+        (WEBHOOK_SONG_NOTIFICATION, "every song"),
+        (WEBHOOK_SONG_ON_LOOP_NOTIFICATION, "songs on loop"),
+        (WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, "offline entries"),
+        (WEBHOOK_ERROR_NOTIFICATION, "errors"),
+        (WEBHOOK_FOLLOWERS_NOTIFICATION, "followers"),
+        (WEBHOOK_FOLLOWINGS_NOTIFICATION, "followings"),
+    )
+    return [label for enabled, label in settings if WEBHOOK_ENABLED and enabled]
+
+
+# Builds compact startup notification lines for both delivery channels
 def _startup_notification_summary_lines() -> List[str]:
-    email_line = f"* Email notifications:\t\t[active = {ACTIVE_NOTIFICATION}] [inactive = {INACTIVE_NOTIFICATION}] [tracked = {TRACK_NOTIFICATION}] [every song = {SONG_NOTIFICATION}]\n*\t\t\t\t[songs on loop = {SONG_ON_LOOP_NOTIFICATION}] [offline entries = {OFFLINE_ENTRIES_NOTIFICATION}] [errors = {ERROR_NOTIFICATION}]\n*\t\t\t\t[followers = {FOLLOWERS_NOTIFICATION}] [followings = {FOLLOWINGS_NOTIFICATION}]"
-    webhook_line = f"* Webhook notifications:\t[enabled = {WEBHOOK_ENABLED}] [provider = {normalized_webhook_provider() or 'invalid'}]\n*\t\t\t\t[active = {WEBHOOK_ACTIVE_NOTIFICATION}] [inactive = {WEBHOOK_INACTIVE_NOTIFICATION}] [tracked = {WEBHOOK_TRACK_NOTIFICATION}] [every song = {WEBHOOK_SONG_NOTIFICATION}]\n*\t\t\t\t[songs on loop = {WEBHOOK_SONG_ON_LOOP_NOTIFICATION}] [offline entries = {WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION}] [errors = {WEBHOOK_ERROR_NOTIFICATION}]\n*\t\t\t\t[followers = {WEBHOOK_FOLLOWERS_NOTIFICATION}] [followings = {WEBHOOK_FOLLOWINGS_NOTIFICATION}]"
-    return [email_line, webhook_line]
+    enabled_email = _startup_email_notification_categories()
+    enabled_webhook = _startup_webhook_notification_categories()
+    email_state = "On (" + ", ".join(enabled_email) + ")" if enabled_email else "Off"
+    webhook_state = "On (" + ", ".join(enabled_webhook) + ")" if enabled_webhook else "Off"
+    return [f"* {('Notifications (email):'):<30}{email_state}", f"* {('Notifications (webhook):'):<30}{webhook_state}"]
 
 
 # Returns whether one configured webhook alert is enabled independently of email settings
