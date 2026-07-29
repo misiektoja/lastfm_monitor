@@ -2,7 +2,7 @@
 
 This is a high-level summary of the most important changes.
 
-# Changes in 2.6 (TBD)
+# Changes in 2.6 (30 Jul 2026)
 
 Version **2.6** adds independent **Discord and ntfy webhook notifications**, safer **private credential setup** and clearer **per-channel notification controls**.
 
