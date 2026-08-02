@@ -2,6 +2,15 @@
 
 This is a high-level summary of the most important changes.
 
+# Changes in 2.6.1 (TBD)
+
+Version **2.6.1** improves log alignment and makes configuration generation reliable in Windows PowerShell.
+
+**Features and improvements**:
+
+- **IMPROVE:** Expanded tabs to spaces in output log files to ensure **consistent alignment across different viewers**
+- **IMPROVE:** Enhanced `--generate-config` to write directly to a specified file as UTF-8 and documented the recommended Windows PowerShell usage to avoid UTF-16 redirection issues
+
 # Changes in 2.6 (30 Jul 2026)
 
 Version **2.6** adds independent **Discord and ntfy webhook notifications**, safer **private credential setup** and clearer **per-channel notification controls**.
