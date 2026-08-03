@@ -163,9 +163,16 @@ Most settings can be configured via command-line arguments.
 If you want to have it stored persistently, generate a default config template and save it to a file named `lastfm_monitor.conf`:
 
 ```sh
+# On macOS, Linux or Windows Command Prompt (cmd.exe)
 lastfm_monitor --generate-config > lastfm_monitor.conf
 
+# On Windows PowerShell (recommended to avoid encoding issues)
+lastfm_monitor --generate-config lastfm_monitor.conf
 ```
+
+> **IMPORTANT**: In Windows PowerShell, do not use `>` for this command. Some PowerShell versions write redirected text as UTF-16, which makes Last.fm Monitor report a "null bytes" error. Pass the filename to `--generate-config` so Last.fm Monitor writes a UTF-8 file itself.
+
+When you include the filename, Last.fm Monitor writes the template directly as UTF-8. This avoids PowerShell changing the file encoding during redirection.
 
 Edit the `lastfm_monitor.conf` file and change any desired configuration options (detailed comments are provided for each).
 
@@ -424,6 +431,8 @@ The tool runs until interrupted (`Ctrl+C`). Use `tmux` or `screen` for persisten
 You can monitor multiple Last.fm users by running multiple copies of the script.
 
 The tool automatically saves its output to `lastfm_monitor_<username>.log` file. It can be changed in the settings via `LF_LOGFILE` configuration option or disabled completely via `DISABLE_LOGGING` / `-d` flag.
+
+Set `ASCII_LOG_SEPARATORS` to `"Auto"` (default) to use ASCII separator-only lines on Windows, `"On"` to use them on every operating system or `"Off"` to preserve Unicode separators in logs everywhere. Terminal separators stay Unicode. Log files and all other logged text remain UTF-8.
 
 The tool also saves the last activity information (artist, track, timestamp) to `lastfm_<username>_last_activity.json` file and the number and list of followings and followers to `lastfm_<username>_followings.json` and `lastfm_<username>_followers.json` files (if tracking is enabled), so this data can be reused if the tool is restarted.
 
