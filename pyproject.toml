@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lastfm_monitor"
-version = "2.6.1"
+version = "2.6.2"
 description = "Track Last.fm listening activity in real time with Spotify integration, automated playback, scrobble history and instant notifications"
 readme = "README.md"
 license = "GPL-3.0-or-later"
