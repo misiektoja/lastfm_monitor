@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.6.1
+v2.6.2
 
 Tool implementing real-time tracking of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -17,7 +17,7 @@ python-dotenv (optional)
 beautifulsoup4 (optional, only for followers/followings tracking)
 """
 
-VERSION = "2.6.1"
+VERSION = "2.6.2"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -5407,7 +5407,7 @@ def main():
     print(f"* CSV logging enabled:\t\t{bool(CSV_FILE)}" + (f" ({CSV_FILE})" if CSV_FILE else ""))
     print(f"* Alert on monitored tracks:\t{bool(MONITOR_LIST_FILE)}" + (f" ({MONITOR_LIST_FILE})" if MONITOR_LIST_FILE else ""))
     print(f"* Output logging enabled:\t{not DISABLE_LOGGING}" + (f" ({FINAL_LOG_PATH})" if not DISABLE_LOGGING else ""))
-    print(f"* ASCII log separators:\t{ascii_log_separators_enabled()} (mode: {ASCII_LOG_SEPARATORS})")
+    print(f"* ASCII log separators:\t\t{ascii_log_separators_enabled()} (mode: {ASCII_LOG_SEPARATORS})")
     if TRACK_SONGS or USE_TRACK_DURATION_FROM_SPOTIFY:
         if spotify_oauth_app_configured():
             print("* Spotify metadata backends:\tOAuth app -> anonymous web player")
