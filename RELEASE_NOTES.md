@@ -2,6 +2,12 @@
 
 This is a high-level summary of the most important changes.
 
+# Changes in 2.6.2 (04 Aug 2026)
+
+**Bug fixes**:
+
+- **BUGFIX:** Fixed indentation of ASCII log separators in summary screen
+
 # Changes in 2.6.1 (04 Aug 2026)
 
 Version **2.6.1** makes saved logs easier to read consistently across platforms and prevents Windows PowerShell from creating incompatible configuration files.
