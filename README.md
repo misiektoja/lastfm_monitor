@@ -323,6 +323,8 @@ Protected ntfy topics can use `NTFY_ACCESS_TOKEN` from an environment variable o
 
 `WEBHOOK_USERNAME`, `WEBHOOK_AVATAR_URL`, `WEBHOOK_TEMPLATE`, `WEBHOOK_TRANSFORMS` and `WEBHOOK_HEADERS` provide the same Discord-format customization model as Spotify Monitor. Header values and template values support placeholders such as `{title}`, `{description}`, `{version}`, `{color}`, `{timestamp}`, `{username}` and `{avatar_url}`. `NTFY_SHORT = True` uses compact activity text on smaller screens without changing Discord or email content.
 
+`WEBHOOK_TEMPLATE`, `WEBHOOK_USERNAME` and `WEBHOOK_AVATAR_URL` apply only to Discord and are ignored when `WEBHOOK_PROVIDER` is `"ntfy"`. The ntfy provider needs no template: it sends the alert body as a native ntfy message with the subject as its title. Customize ntfy delivery through `WEBHOOK_HEADERS` (for example `X-Priority` or `X-Tags`).
+
 Last.fm Monitor does not attach artwork to ntfy alerts because it does not retrieve a trusted artwork source. Webhook delivery remains text-only.
 
 <a id="storing-secrets"></a>
