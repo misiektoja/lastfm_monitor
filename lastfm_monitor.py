@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.6.2
+v2.6.3
 
 Tool implementing real-time tracking of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -17,7 +17,7 @@ python-dotenv (optional)
 beautifulsoup4 (optional, only for followers/followings tracking)
 """
 
-VERSION = "2.6.2"
+VERSION = "2.6.3"
 
 # ---------------------------
 # CONFIGURATION SECTION START
