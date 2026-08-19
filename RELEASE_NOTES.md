@@ -2,6 +2,14 @@
 
 This is a high-level summary of the most important changes.
 
+# Changes in 2.6.3 (TBD)
+
+Version **2.6.3** clarifies **ntfy webhook customization**.
+
+**Features and improvements**:
+
+- **IMPROVE:** **Clearer ntfy webhook customization** - Documentation and the generated configuration now state that `WEBHOOK_TEMPLATE`, `WEBHOOK_USERNAME` and `WEBHOOK_AVATAR_URL` apply only to Discord and are ignored by ntfy, which needs no template. Customize ntfy delivery through `WEBHOOK_HEADERS` such as `X-Priority` or `X-Tags`
+
 # Changes in 2.6.2 (04 Aug 2026)
 
 **Bug fixes**:
