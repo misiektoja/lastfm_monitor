@@ -4,11 +4,14 @@ This is a high-level summary of the most important changes.
 
 # Changes in 2.6.3 (TBD)
 
-Version **2.6.3** clarifies **ntfy webhook customization**.
+Version **2.6.3** clarifies **ntfy webhook customization**. Release downloads are now verifiable, the repository can be cited directly from its GitHub page and an automated defect check runs on every change.
 
 **Features and improvements**:
 
 - **IMPROVE:** **Clearer ntfy webhook customization** - Documentation and the generated configuration now state that `WEBHOOK_TEMPLATE`, `WEBHOOK_USERNAME` and `WEBHOOK_AVATAR_URL` apply only to Discord and are ignored by ntfy, which needs no template. Customize ntfy delivery through `WEBHOOK_HEADERS` such as `X-Priority` or `X-Tags`
+- **IMPROVE:** **Verifiable release downloads** - Each published release now attaches a **`SHA256SUMS.txt`** file next to the `zip` and `tar.gz` archives, and both archives carry a signed build provenance attestation. You can confirm a download really came from this repository before you unpack it with `gh attestation verify lastfm_monitor_<tag>.zip --repo misiektoja/lastfm_monitor`
+- **IMPROVE:** **Automated defect checks on every change** - A pinned [Ruff](https://docs.astral.sh/ruff/) lint pass now runs in CI on every change, reporting unused names, undefined names and common bug patterns. Added optional pre-commit hooks and a shared [.editorconfig](https://github.com/misiektoja/lastfm_monitor/blob/main/.editorconfig) that records the project's existing style
+- **IMPROVE:** **Cite the project and find help faster** - The repository page now offers **Cite this repository**, which exports a ready-made BibTeX or APA entry from the new [CITATION.cff](https://github.com/misiektoja/lastfm_monitor/blob/main/CITATION.cff). The new [SUPPORT.md](https://github.com/misiektoja/lastfm_monitor/blob/main/SUPPORT.md) shows where a question, a bug report and a vulnerability each belong and what to include
 
 # Changes in 2.6.2 (04 Aug 2026)
 
