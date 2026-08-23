@@ -194,7 +194,8 @@ class SpotifyWebBackendTests(unittest.TestCase):
 
     # Verifies the Spotify session retries transient failures on idempotent reads including the GraphQL POST
     def test_spotify_session_retries_post(self):
-        methods = getattr(monitor.SPOTIFY_SESSION.get_adapter(monitor.SPOTIFY_WEB_QUERY_URL), "max_retries").allowed_methods
+        # get_adapter is typed as returning BaseAdapter, which does not declare max_retries
+        methods = getattr(monitor.SPOTIFY_SESSION.get_adapter(monitor.SPOTIFY_WEB_QUERY_URL), "max_retries").allowed_methods  # noqa: B009
         self.assertIn("POST", methods)
         self.assertIn("GET", methods)
 
