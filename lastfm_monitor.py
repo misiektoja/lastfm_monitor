@@ -643,7 +643,6 @@ if sys.version_info < (3, 9):
     sys.exit(1)
 
 import time
-import string
 import textwrap
 import json
 import os
@@ -1369,7 +1368,8 @@ def print_cur_ts(ts_str=""):
 def debug_print(message):
     if DEBUG_MODE:
         timestamp = datetime.now().strftime("%H:%M:%S")
-        prefix = f" [{LASTFM_USERNAME_GLOBAL}]" if LASTFM_USERNAME_GLOBAL else ""
+        # Kept for the commented-out per-user debug line directly below
+        prefix = f" [{LASTFM_USERNAME_GLOBAL}]" if LASTFM_USERNAME_GLOBAL else ""  # noqa: F841
         # print(f"[DEBUG {timestamp}]{prefix} {message}")
         print(f"[DEBUG {timestamp}] {message}")
 
@@ -2259,7 +2259,7 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
     p = 0
     duplicate_entries = False
 
-    for previous, t, nxt in previous_and_next(reversed(recent_tracks)):
+    for previous, t, _nxt in previous_and_next(reversed(recent_tracks)):
         i = len(track_entries) + 1
         if i == len(recent_tracks):
             last_played = int(t.timestamp)
@@ -3040,7 +3040,8 @@ def spotify_win_play_song(sp_track_uri_id, method=SPOTIFY_WINDOWS_PLAYING_METHOD
     elif method == "spotify-cmd":   # spotify-cmd
         subprocess.call((f"{WIN_SPOTIFY_APP_PATH} --uri=spotify:track:{sp_track_uri_id}"), shell=True)
     else:                           # trigger-url - just trigger track URL in the client
-        getattr(os, "startfile")(spotify_convert_uri_to_url(f"spotify:track:{sp_track_uri_id}"))
+        # os.startfile exists only on Windows, so the lookup stays dynamic to keep the type checker quiet on other platforms
+        getattr(os, "startfile")(spotify_convert_uri_to_url(f"spotify:track:{sp_track_uri_id}"))  # noqa: B009
 
 
 # Raised when private values cannot be checked or saved safely
@@ -3357,7 +3358,6 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
     song_on_loop = 0
     recent_songs_session = []
     sp_track_uri_id = None
-    sp_track_duration = 0
     duration_mark = ""
     pauses_number = 0
     error_500_counter = 0
@@ -3706,7 +3706,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
     if not recent_tracks or len(recent_tracks) == 0:
         print("(No tracks yet)")
     else:
-        for previous, t, nxt in previous_and_next(reversed(recent_tracks)):
+        for previous, t, _nxt in previous_and_next(reversed(recent_tracks)):
             i += 1
             print(f'{i}\t{datetime.fromtimestamp(int(t.timestamp)).strftime("%d %b %Y, %H:%M:%S")}\t{calendar.day_abbr[(datetime.fromtimestamp(int(t.timestamp))).weekday()]}\t{t.track}')
             if previous:
@@ -3931,7 +3931,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     added_entries_list = ""
                     try:
                         recent_tracks_while_offline = lastfm_get_recent_tracks(username, network, 100)
-                        for previous, t, nxt in previous_and_next(reversed(recent_tracks_while_offline)):
+                        for previous, t, _nxt in previous_and_next(reversed(recent_tracks_while_offline)):
                             if int(t.timestamp) > int(last_track_start_ts_old2):
                                 if 0 <= (lf_track_ts_start + LASTFM_ACTIVE_CHECK_INTERVAL - int(t.timestamp)) <= 60:
                                     continue
@@ -3998,7 +3998,6 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     artist = str(playing_track.artist)
                     track = str(playing_track.title)
                     album = str(playing_track.info.get('album', '')) if playing_track.info.get('album') else ""
-                    info = playing_track.info
 
                     played_for_m_body = ""
                     played_for_m_body_html = ""
@@ -4175,7 +4174,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         try:
                             p = 0
                             recent_tracks_while_offline = lastfm_get_recent_tracks(username, network, RECENT_TRACKS_NUMBER)
-                            for previous, t, nxt in previous_and_next(reversed(recent_tracks_while_offline)):
+                            for previous, t, _nxt in previous_and_next(reversed(recent_tracks_while_offline)):
                                 if previous:
                                     if previous.timestamp == t.timestamp:
                                         p += 1
@@ -5357,7 +5356,8 @@ def main():
     # Check for beautifulsoup4 if followers/followings tracking is enabled
     if TRACK_FOLLOWINGS or TRACK_FOLLOWERS:
         try:
-            import bs4  # type: ignore
+            # Imported only to check availability and report a friendly install command when it is missing
+            import bs4  # type: ignore  # noqa: F401
         except ImportError:
             print("* Error: beautifulsoup4 is required for followers/followings tracking")
             print("* Install it with: pip install beautifulsoup4")
