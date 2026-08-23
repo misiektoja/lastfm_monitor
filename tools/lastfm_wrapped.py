@@ -12,9 +12,8 @@ including top artists, tracks and albums.
 import csv
 import argparse
 import sys
-from datetime import datetime, date
+from datetime import datetime
 from collections import Counter
-from pathlib import Path
 
 
 def parse_date(date_str):
@@ -44,9 +43,6 @@ def read_csv_data(csv_file):
 
     try:
         with open(csv_file, 'r', encoding='utf-8') as f:
-            sample = f.read(1024)
-            f.seek(0)
-
             reader = csv.DictReader(f)
 
             required_columns = ['Date', 'Artist', 'Track', 'Album']
