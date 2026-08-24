@@ -4,7 +4,7 @@ This is a high-level summary of the most important changes.
 
 # Changes in 2.6.3 (TBD)
 
-Version **2.6.3** clarifies **ntfy webhook customization**. Release downloads are now verifiable, the repository can be cited directly from its GitHub page and an automated defect check runs on every change. The project itself gains a published security policy with private vulnerability reporting, guided issue and pull request templates, contribution and dependency licensing documentation, and a PyPI release that cannot publish until the full test suite passes.
+Version **2.6.3** clarifies **ntfy webhook customization**. Release downloads are now verifiable, the repository can be cited directly from its GitHub page and an automated defect check runs on every change. **Configuration files are now read as data instead of executed**, so a configuration file sitting in the working directory can no longer run code. The project itself gains a published security policy with private vulnerability reporting, guided issue and pull request templates, contribution and dependency licensing documentation, and a PyPI release that cannot publish until the full test suite passes.
 
 **Features and improvements**:
 
@@ -19,6 +19,7 @@ Version **2.6.3** clarifies **ntfy webhook customization**. Release downloads ar
 
 **Bug fixes**:
 
+- **BUGFIX:** **Declarative configuration files** - Configuration files are now **read as data instead of being executed as Python**. Previously the tool ran the first configuration it found in the current working directory, so starting it in a directory someone else could write to would run their code. Only documented `SETTING = value` lines with plain literal values are accepted, plus a setting that reuses another setting, and imports, function calls, expressions or control flow are now rejected without being run. The rejected line and setting are named, and a file that fails leaves every setting at its previous value instead of applying the lines before the bad one
 - **BUGFIX:** Fixed indentation of ASCII log separators in summary screen
 
 # Changes in 2.6.1 (04 Aug 2026)
