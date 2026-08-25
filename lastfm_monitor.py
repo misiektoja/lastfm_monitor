@@ -1259,6 +1259,15 @@ def build_webhook_headers(provider: str, values: dict) -> dict:
     return headers
 
 
+# Sends one webhook request with the destination, deadline and redirect policy every delivery shares
+def post_webhook_request(**request_kwargs: Any) -> Any:
+    destination = str(WEBHOOK_URL or "").strip()
+    # Revalidated here because a dotenv reload can replace the destination after the delivery started
+    if not validate_webhook_url(destination):
+        raise req.exceptions.InvalidURL("WEBHOOK_URL must contain a complete HTTPS link")
+    return WEBHOOK_SESSION.post(destination, timeout=WEBHOOK_TIMEOUT_SECONDS, allow_redirects=False, **request_kwargs)
+
+
 # Sends one webhook through an isolated bounded retry path
 def send_webhook(title: str, description: str, notification_type: str = "song", force: bool = False, sleeper: Optional[Callable[[float], None]] = None) -> int:
     if not force and not webhook_event_enabled(notification_type):
@@ -1291,11 +1300,11 @@ def send_webhook(title: str, description: str, notification_type: str = "song", 
     for attempt in range(WEBHOOK_MAX_ATTEMPTS):
         try:
             if provider == "ntfy":
-                response = WEBHOOK_SESSION.post(str(WEBHOOK_URL).strip(), data=ntfy_message.encode("utf-8"), params=ntfy_params, headers=request_headers, timeout=WEBHOOK_TIMEOUT_SECONDS)
+                response = post_webhook_request(data=ntfy_message.encode("utf-8"), params=ntfy_params, headers=request_headers)
             elif isinstance(discord_payload, str):
-                response = WEBHOOK_SESSION.post(str(WEBHOOK_URL).strip(), data=discord_payload, headers=request_headers, timeout=WEBHOOK_TIMEOUT_SECONDS)
+                response = post_webhook_request(data=discord_payload, headers=request_headers)
             else:
-                response = WEBHOOK_SESSION.post(str(WEBHOOK_URL).strip(), json=discord_payload, headers=request_headers, timeout=WEBHOOK_TIMEOUT_SECONDS)
+                response = post_webhook_request(json=discord_payload, headers=request_headers)
             if 200 <= response.status_code <= 299:
                 return 0
             retryable = response.status_code == 429 or 500 <= response.status_code <= 599
