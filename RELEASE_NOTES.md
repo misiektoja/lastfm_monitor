@@ -19,6 +19,7 @@ Version **2.6.3** clarifies **ntfy webhook customization**. Release downloads ar
 
 **Bug fixes**:
 
+- **BUGFIX:** **Webhook deliveries refuse redirects** - Every Discord and ntfy delivery now takes one shared request path that **refuses redirects**, so a webhook address that redirects can no longer hand your alert and its headers to another host. The destination is rechecked at delivery time, so a `WEBHOOK_URL` replaced through a dotenv reload cannot be posted to unchecked
 - **BUGFIX:** **Declarative configuration files** - Configuration files are now **read as data instead of being executed as Python**. Previously the tool ran the first configuration it found in the current working directory, so starting it in a directory someone else could write to would run their code. Only documented `SETTING = value` lines with plain literal values are accepted, plus a setting that reuses another setting, and imports, function calls, expressions or control flow are now rejected without being run. The rejected line and setting are named, and a file that fails leaves every setting at its previous value instead of applying the lines before the bad one
 - **BUGFIX:** Fixed indentation of ASCII log separators in summary screen
 
