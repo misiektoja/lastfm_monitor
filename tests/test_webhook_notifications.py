@@ -155,3 +155,28 @@ def test_ntfy_message_is_bounded():
     _, message = monitor.build_ntfy_webhook_message("Title", ("a" * monitor.NTFY_MESSAGE_LIMIT_BYTES) + "x")
     assert len(message.encode("utf-8")) <= monitor.NTFY_MESSAGE_LIMIT_BYTES
     assert message.endswith(monitor.NTFY_TRUNCATION_SUFFIX)
+
+
+# Verifies every delivery carries the deadline and refuses a redirect, which could retarget the payload
+def test_webhook_delivery_is_bounded_and_does_not_follow_redirects(monkeypatch):
+    configure_discord(monkeypatch)
+    post = Mock(return_value=FakeResponse())
+    monkeypatch.setattr(monitor.WEBHOOK_SESSION, "post", post)
+
+    assert monitor.send_webhook("Track changed", "Artist - Song", "song", force=True) == 0
+    request = post.call_args
+    assert request.args == (monitor.WEBHOOK_URL,)
+    assert request.kwargs["timeout"] == monitor.WEBHOOK_TIMEOUT_SECONDS
+    assert request.kwargs["allow_redirects"] is False
+
+
+# Verifies a destination replaced mid-delivery is refused rather than posted to blindly
+def test_webhook_delivery_refuses_a_destination_that_stopped_validating(monkeypatch):
+    configure_discord(monkeypatch)
+    monkeypatch.setattr(monitor, "WEBHOOK_URL", "http://example.test/hook")
+    post = Mock(return_value=FakeResponse())
+    monkeypatch.setattr(monitor.WEBHOOK_SESSION, "post", post)
+
+    with pytest.raises(monitor.req.exceptions.InvalidURL):
+        monitor.post_webhook_request(json={"content": "body"})
+    post.assert_not_called()
