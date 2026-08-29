@@ -4,7 +4,7 @@ This is a high-level summary of the most important changes.
 
 # Changes in 2.6.3 (TBD)
 
-Version **2.6.3** clarifies **ntfy webhook customization**. Release downloads are now verifiable, the repository can be cited directly from its GitHub page and an automated defect check runs on every change. **Configuration files are now read as data instead of executed**, so a configuration file sitting in the working directory can no longer run code. **Follower and following alert emails list each changed user on its own line** again. The project itself gains a published security policy with private vulnerability reporting, guided issue and pull request templates, contribution and dependency licensing documentation, and a PyPI release that cannot publish until the full test suite passes.
+Version **2.6.3** clarifies **ntfy webhook customization**. Release downloads are now verifiable, the repository can be cited directly from its GitHub page and an automated defect check runs on every change. **Configuration files are now read as data instead of executed**, so a configuration file sitting in the working directory can no longer run code. **Secrets exported as environment variables now work without a dotenv file** and take precedence over one. **Follower and following alert emails list each changed user on its own line** again. The project itself gains a published security policy with private vulnerability reporting, guided issue and pull request templates, contribution and dependency licensing documentation, and a PyPI release that cannot publish until the full test suite passes.
 
 **Features and improvements**:
 
@@ -17,6 +17,7 @@ Version **2.6.3** clarifies **ntfy webhook customization**. Release downloads ar
 
 **Bug fixes**:
 
+- **BUGFIX:** **Exported secrets work without a dotenv file and take precedence over one** - Secrets exported as environment variables, such as `LASTFM_API_KEY`, `LASTFM_API_SECRET`, `SP_CLIENT_ID`, `SP_CLIENT_SECRET`, `SMTP_PASSWORD`, `WEBHOOK_URL` or `NTFY_ACCESS_TOKEN`, were applied only when a dotenv file also existed, so an export-only setup silently fell back to the shipped defaults. They are now honored on their own, including with `--env-file none`. An exported value also wins over the same key in the dotenv file, matching how `python-dotenv` and container or service-manager setups already behave. Reloading with **`SIGHUP`** still applies the edited dotenv file, so rotating a secret there keeps working
 - **BUGFIX:** **Readable follower and following alert emails** - Emails reporting **follower and following changes** now put every added or removed user on its own line. Previously the HTML email ran the names together, so `- Angie_Sullivan- HakikazuHatsu` arrived as one line. Each name still links to its Last.fm profile, and the plain text email and webhook messages are unchanged because they were already correct
 
 # Changes in 2.6.2 (04 Aug 2026)
