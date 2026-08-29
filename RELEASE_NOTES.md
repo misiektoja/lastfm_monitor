@@ -4,7 +4,7 @@ This is a high-level summary of the most important changes.
 
 # Changes in 2.6.3 (TBD)
 
-Version **2.6.3** clarifies **ntfy webhook customization**. Release downloads are now verifiable, the repository can be cited directly from its GitHub page and an automated defect check runs on every change. **Configuration files are now read as data instead of executed**, so a configuration file sitting in the working directory can no longer run code. The project itself gains a published security policy with private vulnerability reporting, guided issue and pull request templates, contribution and dependency licensing documentation, and a PyPI release that cannot publish until the full test suite passes.
+Version **2.6.3** clarifies **ntfy webhook customization**. Release downloads are now verifiable, the repository can be cited directly from its GitHub page and an automated defect check runs on every change. **Configuration files are now read as data instead of executed**, so a configuration file sitting in the working directory can no longer run code. **Follower and following alert emails list each changed user on its own line** again. The project itself gains a published security policy with private vulnerability reporting, guided issue and pull request templates, contribution and dependency licensing documentation, and a PyPI release that cannot publish until the full test suite passes.
 
 **Features and improvements**:
 
@@ -14,6 +14,10 @@ Version **2.6.3** clarifies **ntfy webhook customization**. Release downloads ar
 - **IMPROVE:** **Verifiable release downloads** - Each published release now attaches a **`SHA256SUMS.txt`** file next to the `zip` and `tar.gz` archives, and both archives carry a signed build provenance attestation. The attestation bundle is attached too, as an **`.intoto.jsonl`** asset, so provenance can be checked from the downloaded files alone. You can confirm a download really came from this repository before you unpack it with `gh attestation verify lastfm_monitor_<tag>.zip --repo misiektoja/lastfm_monitor`
 - **IMPROVE:** **Automated defect checks on every change** - A pinned [Ruff](https://docs.astral.sh/ruff/) lint pass now runs in CI on every change, reporting unused names, undefined names and common bug patterns. Added optional pre-commit hooks and a shared [.editorconfig](https://github.com/misiektoja/lastfm_monitor/blob/main/.editorconfig) that records the project's existing style
 - **IMPROVE:** **Cite the project and find help faster** - The repository page now offers **Cite this repository**, which exports a ready-made BibTeX or APA entry from the new [CITATION.cff](https://github.com/misiektoja/lastfm_monitor/blob/main/CITATION.cff). The new [SUPPORT.md](https://github.com/misiektoja/lastfm_monitor/blob/main/SUPPORT.md) shows where a question, a bug report and a vulnerability each belong and what to include
+
+**Bug fixes**:
+
+- **BUGFIX:** **Readable follower and following alert emails** - Emails reporting **follower and following changes** now put every added or removed user on its own line. Previously the HTML email ran the names together, so `- Angie_Sullivan- HakikazuHatsu` arrived as one line. Each name still links to its Last.fm profile, and the plain text email and webhook messages are unchanged because they were already correct
 
 # Changes in 2.6.2 (04 Aug 2026)
 
