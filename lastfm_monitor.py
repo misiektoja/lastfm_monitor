@@ -2104,8 +2104,7 @@ def notify_friends_changes(username, changes, skip_initial_line=False):
                 html_parts.append("<br><br>")
                 for user in added:
                     user_url = f"https://www.last.fm/user/{quote_plus(user)}"
-                    html_parts.append(f'- <a href="{user_url}">{escape(user)}</a>')
-                html_parts.append("<br>")
+                    html_parts.append(f'- <a href="{user_url}">{escape(user)}</a><br>')
 
             if removed:
                 if added:
@@ -2114,8 +2113,7 @@ def notify_friends_changes(username, changes, skip_initial_line=False):
                 html_parts.append("<br><br>")
                 for user in removed:
                     user_url = f"https://www.last.fm/user/{quote_plus(user)}"
-                    html_parts.append(f'- <a href="{user_url}">{escape(user)}</a>')
-                html_parts.append("<br>")
+                    html_parts.append(f'- <a href="{user_url}">{escape(user)}</a><br>')
 
             html_parts.append("<br>")
             if check_range:
@@ -2200,8 +2198,7 @@ def notify_friends_changes(username, changes, skip_initial_line=False):
                 html_parts.append("<br><br>")
                 for user in added:
                     user_url = f"https://www.last.fm/user/{quote_plus(user)}"
-                    html_parts.append(f'- <a href="{user_url}">{escape(user)}</a>')
-                html_parts.append("<br>")
+                    html_parts.append(f'- <a href="{user_url}">{escape(user)}</a><br>')
 
             if removed:
                 if added:
@@ -2210,8 +2207,7 @@ def notify_friends_changes(username, changes, skip_initial_line=False):
                 html_parts.append("<br><br>")
                 for user in removed:
                     user_url = f"https://www.last.fm/user/{quote_plus(user)}"
-                    html_parts.append(f'- <a href="{user_url}">{escape(user)}</a>')
-                html_parts.append("<br>")
+                    html_parts.append(f'- <a href="{user_url}">{escape(user)}</a><br>')
 
             html_parts.append("<br>")
             if check_range:
