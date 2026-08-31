@@ -29,8 +29,8 @@ pip install lastfm_monitor
 - Possibility to **automatically play songs** listened by the tracked user in your local Spotify client
 - Information about when a **user pauses or resumes playback** with the option to show a **track progress indicator**
 - Information about the **duration** the user listened to a song and whether the **song was skipped** and if it was **shorter or longer than the track duration**
-- **Tracking** of Last.fm user's **followers** and **followings** with notifications when users are added or removed
-- **Email notifications** for various events (user becomes active or inactive, specific or all songs, songs on loop, new entries appearing while user was offline, followers/followings changes, errors)
+- **Tracking** of a Last.fm user's **followers**, **followings**, **About Me bio** and **display name** with change notifications
+- **Email notifications** for various events (user becomes active or inactive, specific or all songs, songs on loop, new entries appearing while user was offline, friend changes, profile changes, errors)
 - **Webhook notifications** through **Discord**, **ntfy** and compatible integrations with event-specific controls
 - **Saving all listened songs** with timestamps to the **CSV file**
 - **Last.fm Wrapped tool** for generating Spotify Wrapped-style statistics (top artists, tracks, albums) from CSV data
@@ -38,7 +38,7 @@ pip install lastfm_monitor
 - Displaying **basic statistics for the user's playing session** (duration, time span, number of listened and skipped songs, songs on loop, paused playback time and number of pauses, songs played count)
 - Support for detecting **offline mode**
 - Support for detecting **Spotify's private mode** (not 100% accurate)
-- **Status persistence** - automatically saves the last activity status and the number and list of followings/followers to JSON files to track changes across restarts
+- **Status persistence** - automatically saves the last activity status, friend lists and tracked profile fields to JSON files to track changes across restarts
 - **Flexible configuration** - support for config files, dotenv files, environment variables and command-line arguments
 - Possibility to **control the running copy** of the script via signals
 - **Functional, procedural Python** (minimal OOP)
@@ -557,6 +557,14 @@ lastfm_monitor <lastfm_username> --track-followings --notify-followings
 
 Notifications for changed followers and/or followings are only sent if tracking functionality is enabled (`--track-followers` and/or `--track-followings` flags).
 
+To track changes to the editable **About You** text shown publicly as **About Me** or the user's display name:
+
+```sh
+lastfm_monitor <lastfm_username> --track-bio --track-display-name
+```
+
+Set `PROFILE_NOTIFICATION` to `True` or add `--notify-profile` to send email for confirmed profile changes. Each field is independently controlled through `TRACK_BIO` / `--track-bio` and `TRACK_DISPLAY_NAME` / `--track-display-name`. The baseline is stored in `lastfm_<username>_profile.json`.
+
 You can also decide to use Last.fm or Spotify URL in "Last played:" / "Track:" field in HTML email notifications (see `USE_LASTFM_URL_IN_LAST_PLAYED` config option).
 
 Make sure you defined your SMTP settings earlier (see [SMTP settings](#smtp-settings)).
@@ -588,6 +596,7 @@ Choose events with config settings or matching command-line flags:
 | Offline scrobbles arrive | `WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION` | `--webhook-offline-entries` |
 | Followers change | `WEBHOOK_FOLLOWERS_NOTIFICATION` | `--webhook-followers` |
 | Followings change | `WEBHOOK_FOLLOWINGS_NOTIFICATION` | `--webhook-followings` |
+| Tracked bio or display name changes | `WEBHOOK_PROFILE_NOTIFICATION` | `--webhook-profile` |
 | Monitoring error occurs | `WEBHOOK_ERROR_NOTIFICATION` | `--webhook-errors` |
 
 An event flag also enables the master switch for that run. Use `--no-webhook` to disable configured webhook delivery. Use `--no-webhook-error-notify` to disable only error webhooks.
@@ -766,9 +775,9 @@ If you want to change the time required to mark the user as inactive (the timer 
 lastfm_monitor <lastfm_username> -o 120
 ```
 
-Followers/followings tracking functionality uses a separate check interval which you can set via `FRIENDS_CHECK_INTERVAL` configuration option or `--friends-check-interval` flag. This is independent from the music polling intervals.
+Friend and profile tracking uses one separate check interval which you can set via the `FRIENDS_CHECK_INTERVAL` configuration option or `--friends-check-interval` flag. This timer covers followings, followers, the About Me bio and the display name. It is independent from the music polling intervals.
 
-To avoid false notifications caused by transient API glitches, changes are only confirmed after a number of consecutive checks (default: 3). You can configure this via `FRIENDS_CHANGE_COUNTER` option or `--friends-change-counter` flag. This setting also controls the threshold for suppressing repeated error messages.
+To avoid false notifications caused by transient Last.fm responses, friend and profile changes are only confirmed after a number of consecutive checks (default: 3). You can configure this via the `FRIENDS_CHANGE_COUNTER` option or `--friends-change-counter` flag. This setting also controls the threshold for suppressing repeated error messages.
 
 You can also configure the retry timeout used when confirming transient changes or errors via `FRIENDS_RETRY_INTERVAL` configuration option or `--friends-retry-interval` flag.
 
