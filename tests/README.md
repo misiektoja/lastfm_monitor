@@ -29,8 +29,9 @@ and again before anything is published to PyPI.
 
 | File | Area under test |
 | --- | --- |
-| `test_friends_notifications.py` | Follower and following change alerts, one user per line in plain text and HTML |
-| `test_lastfm_friends_scraper.py` | Scrape headers, retry on transient and soft-unavailable pages, following markup parsing |
+| `test_friends_notifications.py` | Friend and profile change alerts plus one user per line in plain text and HTML |
+| `test_lastfm_friends_scraper.py` | Scrape headers, retry behavior, following markup and public profile parsing |
+| `test_profile_tracking.py` | Profile baseline creation, independent field controls and deferred persistence |
 | `test_private_settings.py` | Hidden credential entry, atomic dotenv updates and refusal to save invalid input |
 | `test_repository_contracts.py` | Governance documents, issue templates, action pinning, release gating and the CI contract |
 | `test_repository_metadata.py` | Governance files, citation, funding, line endings, the declared editor style, the pinned linter and release integrity |
