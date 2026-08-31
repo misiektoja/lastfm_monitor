@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.6.3
+v2.7
 
 Tool implementing real-time tracking of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -14,10 +14,10 @@ python-dateutil
 pyotp
 spotipy (optional, only for Spotify-related features)
 python-dotenv (optional)
-beautifulsoup4 (optional, only for followers/followings tracking)
+beautifulsoup4 (optional, only for friends and profile tracking)
 """
 
-VERSION = "2.6.3"
+VERSION = "2.7"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -193,6 +193,10 @@ WEBHOOK_FOLLOWERS_NOTIFICATION = False
 # Whether to send a webhook notification when followings change
 # Can also be enabled via the --webhook-followings flag
 WEBHOOK_FOLLOWINGS_NOTIFICATION = False
+
+# Whether to send a webhook notification when the user's bio or display name changes
+# Can also be enabled via the --webhook-profile flag
+WEBHOOK_PROFILE_NOTIFICATION = False
 
 # Whether to send a webhook notification on monitoring errors
 # Can also be enabled via --webhook-errors or disabled via --no-webhook-error-notify
@@ -456,7 +460,15 @@ TRACK_FOLLOWINGS = False
 # Can also be enabled via the --track-followers flag
 TRACK_FOLLOWERS = False
 
-# How often to check for followers/followings changes; in seconds
+# Whether to track changes in the user's About You bio
+# Can also be enabled via the --track-bio flag
+TRACK_BIO = False
+
+# Whether to track changes in the user's display name
+# Can also be enabled via the --track-display-name flag
+TRACK_DISPLAY_NAME = False
+
+# How often to check for friend and profile changes in seconds
 # Can also be set using the --friends-check-interval flag
 FRIENDS_CHECK_INTERVAL = 900  # 15 minutes
 
@@ -468,7 +480,11 @@ FOLLOWERS_NOTIFICATION = False
 # Can also be enabled via the --notify-followings flag
 FOLLOWINGS_NOTIFICATION = False
 
-# Number of consecutive checks required to confirm a change in followers/followings
+# Whether to send an email when the user's bio or display name changes
+# Can also be enabled via the --notify-profile flag
+PROFILE_NOTIFICATION = False
+
+# Number of consecutive checks required to confirm a friend or profile change
 # to avoid false notifications caused by transient API glitches
 # Also used as the threshold for suppressing repeated error messages
 # Can also be set using the --friends-change-counter flag
@@ -521,6 +537,7 @@ WEBHOOK_SONG_ON_LOOP_NOTIFICATION = False
 WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION = False
 WEBHOOK_FOLLOWERS_NOTIFICATION = False
 WEBHOOK_FOLLOWINGS_NOTIFICATION = False
+WEBHOOK_PROFILE_NOTIFICATION = False
 WEBHOOK_ERROR_NOTIFICATION = False
 WEBHOOK_HEADERS = {}
 WEBHOOK_TEMPLATE = {}
@@ -579,9 +596,12 @@ ENABLE_DEEZER_URL = False
 ENABLE_TIDAL_URL = False
 TRACK_FOLLOWINGS = False
 TRACK_FOLLOWERS = False
+TRACK_BIO = False
+TRACK_DISPLAY_NAME = False
 FRIENDS_CHECK_INTERVAL = 0
 FOLLOWERS_NOTIFICATION = False
 FOLLOWINGS_NOTIFICATION = False
+PROFILE_NOTIFICATION = False
 FRIENDS_CHANGE_COUNTER = 0
 FRIENDS_RETRY_INTERVAL = 0
 DEBUG_MODE = False
@@ -1017,6 +1037,7 @@ def _startup_email_notification_categories() -> List[str]:
         (ERROR_NOTIFICATION, "errors"),
         (FOLLOWERS_NOTIFICATION, "followers"),
         (FOLLOWINGS_NOTIFICATION, "followings"),
+        (PROFILE_NOTIFICATION, "profile"),
     )
     return [label for enabled, label in settings if enabled]
 
@@ -1033,6 +1054,7 @@ def _startup_webhook_notification_categories() -> List[str]:
         (WEBHOOK_ERROR_NOTIFICATION, "errors"),
         (WEBHOOK_FOLLOWERS_NOTIFICATION, "followers"),
         (WEBHOOK_FOLLOWINGS_NOTIFICATION, "followings"),
+        (WEBHOOK_PROFILE_NOTIFICATION, "profile"),
     )
     return [label for enabled, label in settings if WEBHOOK_ENABLED and enabled]
 
@@ -1051,6 +1073,15 @@ def _startup_notification_summary_lines() -> List[str]:
     return [_format_startup_notification_line("Notifications (email):", enabled_email), _format_startup_notification_line("Notifications (webhook):", enabled_webhook)]
 
 
+# Builds two aligned rows for the shared friend and profile check settings
+def _startup_friends_tracking_summary_lines() -> List[str]:
+    interval = f" [interval: {display_time(FRIENDS_CHECK_INTERVAL)}]" if FRIENDS_CHECK_INTERVAL > 0 else ""
+    return [
+        f"* Friends/profile tracking:\t[followings = {TRACK_FOLLOWINGS}] [followers = {TRACK_FOLLOWERS}] [bio = {TRACK_BIO}]",
+        f"\t\t\t\t[display name = {TRACK_DISPLAY_NAME}]{interval}",
+    ]
+
+
 # Returns whether one configured webhook alert is enabled independently of email settings
 def webhook_event_enabled(notification_type: str) -> bool:
     settings = {
@@ -1062,6 +1093,7 @@ def webhook_event_enabled(notification_type: str) -> bool:
         "offline_entries": WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION,
         "followers": WEBHOOK_FOLLOWERS_NOTIFICATION,
         "followings": WEBHOOK_FOLLOWINGS_NOTIFICATION,
+        "profile": WEBHOOK_PROFILE_NOTIFICATION,
         "error": WEBHOOK_ERROR_NOTIFICATION,
     }
     return bool(WEBHOOK_ENABLED and settings.get(notification_type, False))
@@ -1939,6 +1971,45 @@ def lastfm_get_followers(username):
     return _lastfm_scrape_user_list(username, 'followers')
 
 
+# Converts profile bio markup into stable plain text while retaining block line breaks
+def _lastfm_profile_bio_text(bio_element):
+    if bio_element is None:
+        return ''
+    for line_break in bio_element.select('br'):
+        line_break.replace_with('\n')
+    for block in bio_element.select('p, div, li'):
+        block.append('\n')
+    lines = [re.sub(r'[ \t\f\v]+', ' ', line).strip() for line in bio_element.get_text().splitlines()]
+    return '\n'.join(line for line in lines if line)
+
+
+# Returns the current public display name and About Me bio scraped from the user's profile
+def lastfm_get_profile(username):
+    from bs4 import BeautifulSoup  # type: ignore
+
+    url = f"https://www.last.fm/user/{quote_plus(username)}"
+    try:
+        response = _lastfm_http_get_with_retry(url)
+        soup = BeautifulSoup(response.content, 'html.parser')
+        profile_username = soup.select_one('h1.header-title a[href^="/user/"]')
+        if profile_username is None or profile_username.get_text(' ', strip=True).casefold() != username.casefold():
+            raise RuntimeError("Could not validate the Last.fm profile owner (layout may have changed)")
+        display_name_element = soup.select_one('.header-title-display-name')
+        if display_name_element is None:
+            raise RuntimeError("Could not find the display name (layout may have changed)")
+        bio_element = soup.select_one('.about-me-header') or soup.select_one('.about-me-sidebar')
+        return {
+            'display_name': display_name_element.get_text(' ', strip=True),
+            'bio': _lastfm_profile_bio_text(bio_element),
+        }
+    except req.RequestException as e:
+        raise RuntimeError(f"Failed to scrape profile from Last.fm: {e}")
+    except RuntimeError:
+        raise
+    except Exception as e:
+        raise RuntimeError(f"Failed to parse profile page: {e}")
+
+
 # Loads previous friends/followers state from JSON file
 def load_friends_state(username, friends_type):
     filename = f"lastfm_{username}_{friends_type}.json"
@@ -1973,16 +2044,59 @@ def save_friends_state(username, friends_type, users_set):
         print(f"* Warning: Cannot save {friends_type} state to '{filename}': {e}")
 
 
-# Checks for changes in friends/followers and returns (changes dict, current sets dict) so callers can persist the exact scraped sets without re-fetching
-def check_friends_changes(username, track_followings, track_followers, save_state=True, raise_on_error=False):
+# Loads the saved profile fields used as the comparison baseline
+def load_profile_state(username):
+    filename = f"lastfm_{username}_profile.json"
+    if not os.path.isfile(filename):
+        return {}
+    try:
+        with open(filename, 'r', encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError("profile state must be a JSON object")
+        return {key: data[key] for key in ('display_name', 'bio') if isinstance(data.get(key), str)}
+    except Exception as e:
+        print(f"* Warning: Cannot load profile state from '{filename}': {e}")
+        return {}
+
+
+# Saves tracked profile fields while retaining baselines for fields disabled during this run
+def save_profile_state(username, profile):
+    filename = f"lastfm_{username}_profile.json"
+    try:
+        data = load_profile_state(username)
+        data.update({key: value for key, value in profile.items() if key in ('display_name', 'bio') and isinstance(value, str)})
+        data['last_updated'] = int(time.time())
+        with open(filename, 'w', encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"* Warning: Cannot save profile state to '{filename}': {e}")
+
+
+# Returns whether at least one friend or profile field is enabled for the shared timer
+def friends_check_enabled():
+    return TRACK_FOLLOWINGS or TRACK_FOLLOWERS or TRACK_BIO or TRACK_DISPLAY_NAME
+
+
+# Persists the exact states produced by one successful shared timer check
+def save_friends_check_states(username, current_states):
+    for key in ('followings', 'followers'):
+        if key in current_states:
+            save_friends_state(username, key, current_states[key])
+    if 'profile' in current_states:
+        save_profile_state(username, current_states['profile'])
+
+
+# Checks friends and profile fields then returns changes with the exact fetched states for later persistence
+def check_friends_changes(username, track_followings, track_followers, track_bio=False, track_display_name=False, save_state=True, raise_on_error=False):
     changes = {}
-    current_sets = {}
+    current_states = {}
 
     if track_followings:
         try:
             previous_friends = load_friends_state(username, 'followings')
             current_friends = lastfm_get_friends(username)
-            current_sets['followings'] = current_friends
+            current_states['followings'] = current_friends
 
             added_friends = current_friends - previous_friends
             removed_friends = previous_friends - current_friends
@@ -2005,7 +2119,7 @@ def check_friends_changes(username, track_followings, track_followers, save_stat
         try:
             previous_followers = load_friends_state(username, 'followers')
             current_followers = lastfm_get_followers(username)
-            current_sets['followers'] = current_followers
+            current_states['followers'] = current_followers
 
             added_followers = current_followers - previous_followers
             removed_followers = previous_followers - current_followers
@@ -2024,10 +2138,32 @@ def check_friends_changes(username, track_followings, track_followers, save_stat
             if raise_on_error:
                 raise e
 
-    return changes, current_sets
+    if track_bio or track_display_name:
+        try:
+            previous_profile = load_profile_state(username)
+            fetched_profile = lastfm_get_profile(username)
+            current_profile = {}
+            profile_changes = {}
+            tracked_fields = (('display_name', track_display_name), ('bio', track_bio))
+            for field, enabled in tracked_fields:
+                if not enabled:
+                    continue
+                current_profile[field] = fetched_profile[field]
+                if field in previous_profile and previous_profile[field] != fetched_profile[field]:
+                    profile_changes[field] = {'previous': previous_profile[field], 'current': fetched_profile[field]}
+            current_states['profile'] = current_profile
+            if profile_changes:
+                changes['profile'] = profile_changes
+            if save_state:
+                save_profile_state(username, current_profile)
+        except Exception as e:
+            if raise_on_error:
+                raise e
+
+    return changes, current_states
 
 
-# Sends notification about friends/followers changes
+# Sends console and configured channel notifications for confirmed friend or profile changes
 def notify_friends_changes(username, changes, skip_initial_line=False):
     if not changes:
         return
@@ -2219,6 +2355,58 @@ def notify_friends_changes(username, changes, skip_initial_line=False):
 
             print()
             send_notification_channels("followers", subject, body, body_html, email_enabled=FOLLOWERS_NOTIFICATION)
+
+        if check_range:
+            print(f"\nCheck interval:\t\t\t{check_interval_str} ({check_range})")
+        print_cur_ts("Timestamp:\t\t\t")
+
+    # Handle public profile changes
+    if 'profile' in changes:
+        profile_changes = changes['profile']
+        labels = {'display_name': 'Display name', 'bio': 'Bio'}
+        if not skip_initial_line:
+            print("─" * HORIZONTAL_LINE)
+        print(f"* Public profile changed for user {username}")
+        for field in ('display_name', 'bio'):
+            if field not in profile_changes:
+                continue
+            field_change = profile_changes[field]
+            previous_value = field_change['previous'] or "(empty)"
+            current_value = field_change['current'] or "(empty)"
+            print(f"\n{labels[field]} changed:")
+            print(f"Previous: {previous_value}")
+            print(f"Current: {current_value}")
+
+        if PROFILE_NOTIFICATION or webhook_event_enabled("profile"):
+            changed_labels = [labels[field].lower() for field in ('display_name', 'bio') if field in profile_changes]
+            subject = f"Last.fm user {username} profile has changed! ({' and '.join(changed_labels)})"
+            body_parts = [f"Public profile changed for user {username}", ""]
+            html_parts = [f'Public profile changed for user <a href="https://www.last.fm/user/{quote_plus(username)}">{escape(username)}</a>', "<br><br>"]
+            rendered_fields = []
+            for field in ('display_name', 'bio'):
+                if field not in profile_changes:
+                    continue
+                if rendered_fields:
+                    body_parts.append("")
+                    html_parts.append("<br>")
+                field_change = profile_changes[field]
+                previous_value = field_change['previous'] or "(empty)"
+                current_value = field_change['current'] or "(empty)"
+                body_parts.extend([f"{labels[field]} changed:", f"Previous: {previous_value}", f"Current: {current_value}"])
+                previous_html = escape(previous_value).replace('\n', '<br>')
+                current_html = escape(current_value).replace('\n', '<br>')
+                html_parts.extend([f"<b>{labels[field]} changed:</b><br>", f"Previous: {previous_html}<br>", f"Current: {current_html}<br>"])
+                rendered_fields.append(field)
+            body_parts.append("")
+            if check_range:
+                body_parts.append(f"Check interval: {check_interval_str} ({check_range})")
+                html_parts.append(f"<br>Check interval: <b>{check_interval_str}</b> ({check_range})")
+            body_parts.append(f"Timestamp: {get_cur_ts('')}")
+            html_parts.append(f"<br>Timestamp: {get_cur_ts('')}")
+            body = "\n".join(body_parts)
+            body_html = f"<html><head></head><body>{''.join(html_parts)}</body></html>"
+            print()
+            send_notification_channels("profile", subject, body, body_html, email_enabled=PROFILE_NOTIFICATION)
 
         if check_range:
             print(f"\nCheck interval:\t\t\t{check_interval_str} ({check_range})")
@@ -3818,14 +4006,15 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
     tracks_upper = {t.upper() for t in tracks}
 
-    # Initialize friends/followers tracking if enabled
-    if TRACK_FOLLOWINGS or TRACK_FOLLOWERS:
-        print(f"* Friends/followers tracking enabled")
+    # Initialize friend and profile tracking if enabled
+    if friends_check_enabled():
+        print("* Friends/profile tracking enabled")
 
         # Do initial check
         try:
             followings_file_exists = os.path.isfile(f"lastfm_{username}_followings.json")
             followers_file_exists = os.path.isfile(f"lastfm_{username}_followers.json")
+            profile_file_exists = os.path.isfile(f"lastfm_{username}_profile.json")
 
             # Load existing state if available
             if TRACK_FOLLOWINGS and followings_file_exists:
@@ -3838,9 +4027,14 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 followers_count = len(followers_loaded)
                 print(f"* Loading followers for user {username} from file lastfm_{username}_followers.json ({followers_count})")
 
+            if (TRACK_BIO or TRACK_DISPLAY_NAME) and profile_file_exists:
+                profile_loaded = load_profile_state(username)
+                profile_fields = ', '.join(field for field in ('display_name', 'bio') if field in profile_loaded)
+                print(f"* Loading profile baseline for user {username} from file lastfm_{username}_profile.json ({profile_fields or 'no valid fields'})")
+
             # Perform initial check to build baseline
             # We use raise_on_error=True so initialization failures (e.g. scraping issues) are visible
-            initial_changes, _ = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, save_state=True, raise_on_error=True)
+            initial_changes, _ = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, save_state=True, raise_on_error=True)
 
             # Announce baseline creation for missing files
             if TRACK_FOLLOWINGS and not followings_file_exists:
@@ -3852,6 +4046,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 if os.path.isfile(f"lastfm_{username}_followers.json"):
                     followers_count = len(load_friends_state(username, 'followers'))
                     print(f"* Saving followers for user {username} to file lastfm_{username}_followers.json ({followers_count})")
+
+            if (TRACK_BIO or TRACK_DISPLAY_NAME) and not profile_file_exists and os.path.isfile(f"lastfm_{username}_profile.json"):
+                print(f"* Saving profile baseline for user {username} to file lastfm_{username}_profile.json")
 
             # Only notify if there are real changes (not initial fetch/baseline build)
             if initial_changes:
@@ -3867,6 +4064,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 elif 'followers' in initial_changes:
                     to_notify['followers'] = initial_changes['followers']
 
+                if 'profile' in initial_changes:
+                    to_notify['profile'] = initial_changes['profile']
+
                 if to_notify:
                     notify_friends_changes(username, to_notify, skip_initial_line=True)
                 else:
@@ -3876,7 +4076,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 # No changes detected during baseline build
                 print_cur_ts("\nTimestamp:\t\t\t")
         except Exception as e:
-            print(f"* Warning: Initial friends check failed: {e}")
+            print(f"* Warning: Initial friends/profile check failed: {e}")
             print_cur_ts("\nTimestamp:\t\t\t")
 
         friends_check_last_ts = int(time.time())
@@ -3888,8 +4088,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
     while True:
         try:
-            # Check for friends/followers changes if enabled and interval has passed
-            if (TRACK_FOLLOWINGS or TRACK_FOLLOWERS) and FRIENDS_CHECK_INTERVAL > 0:
+            # Check for friend or profile changes if enabled and interval has passed
+            if friends_check_enabled() and FRIENDS_CHECK_INTERVAL > 0:
                 current_ts = int(time.time())
 
                 # Determine if it's time for a regular check or a retry check
@@ -3909,8 +4109,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     try:
                         # Use save_state=False by default to avoid saving to file during suspected transient changes
                         # Use raise_on_error=True to detect check failures and avoid resetting streak
-                        # current_sets holds the exact sets we just scraped, so we can persist them without a second scrape (which could glitch and corrupt state)
-                        changes, current_sets = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, save_state=False, raise_on_error=True)
+                        # current_states holds the exact data we just fetched so confirmation never needs a second request
+                        changes, current_states = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, save_state=False, raise_on_error=True)
 
                         # Reset error streak on any successful check
                         if friends_streak < 0:
@@ -3924,10 +4124,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                                 friends_streak = 1
 
                             if friends_streak >= FRIENDS_CHANGE_COUNTER:
-                                # Final confirmation after enough checks; persist the exact sets we just scraped rather than re-fetching
-                                for key in ('followings', 'followers'):
-                                    if key in current_sets:
-                                        save_friends_state(username, key, current_sets[key])
+                                # Final confirmation after enough checks then persist the exact fetched state
+                                save_friends_check_states(username, current_states)
                                 notify_friends_changes(username, changes, skip_initial_line=not PROGRESS_INDICATOR)
                                 friends_streak = 0
                                 friends_pending_changes = None
@@ -3946,6 +4144,10 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                                         diff_str = f"{diff:+d}" if diff != 0 else "0"
                                         change_details.append(f"{key}: {c['previous_count']} -> {c['current_count']} ({diff_str})")
 
+                                if 'profile' in changes:
+                                    changed_fields = ', '.join('display name' if field == 'display_name' else 'bio' for field in changes['profile'])
+                                    change_details.append(f"profile: {changed_fields}")
+
                                 detail_str = "; ".join(change_details)
                                 print(f"* Suspected transient change ({detail_str}) (streak {friends_streak}/{FRIENDS_CHANGE_COUNTER}); will confirm in {display_time(retry_interval)}")
                                 print_cur_ts("Timestamp:\t\t\t")
@@ -3953,17 +4155,15 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             # No changes or back to baseline
                             if friends_streak > 0:
                                 # Recovered from a suspected change
-                                print(f"* Friend/follower count recovered back to normal baseline after {friends_streak} suspected transient checks")
+                                print(f"* Friend/profile state recovered back to the baseline after {friends_streak} suspected transient checks")
                                 print_cur_ts("Timestamp:\t\t\t")
 
                             friends_streak = 0
                             friends_pending_changes = None
                             if not is_retry:
                                 friends_check_last_ts = current_ts
-                                # Persist the scraped sets to refresh the baseline file timestamp; reuse what we just fetched instead of re-scraping (which could glitch and overwrite state)
-                                for key in ('followings', 'followers'):
-                                    if key in current_sets:
-                                        save_friends_state(username, key, current_sets[key])
+                                # Refresh baseline timestamps with the exact data fetched by this check
+                                save_friends_check_states(username, current_states)
                     except Exception as e:
                         if friends_streak == 0:
                             # Start measuring error streak (negative values)
@@ -3976,7 +4176,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             # We were tracking a change but hit an error
                             retry_interval = FRIENDS_RETRY_INTERVAL
                             friends_next_check_ts = current_ts + retry_interval
-                            print(f"* Error during friends check: {e}")
+                            print(f"* Error during friend/profile check: {e}")
                             print(f"* Preserving confirmation streak ({friends_streak}/{FRIENDS_CHANGE_COUNTER}) despite error; will retry in {display_time(retry_interval)}")
                             print_cur_ts("Timestamp:\t\t\t")
                         else:
@@ -3985,7 +4185,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
                             # Throttling: Alert on threshold, then every 10 attempts
                             if current_error_streak == FRIENDS_CHANGE_COUNTER or (current_error_streak > FRIENDS_CHANGE_COUNTER and (current_error_streak - FRIENDS_CHANGE_COUNTER) % 10 == 0):
-                                print(f"* Error confirming friends (attempt {current_error_streak}): {e}")
+                                print(f"* Error confirming friend/profile state (attempt {current_error_streak}): {e}")
                                 print_cur_ts("Timestamp:\t\t\t")
 
                             retry_interval = FRIENDS_RETRY_INTERVAL
@@ -4799,7 +4999,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
 # Applies validated one-run webhook command-line overrides to runtime settings
 def apply_webhook_cli_overrides(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
-    global WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION
+    global WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_PROFILE_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION
     if args.webhook_provider is not None:
         WEBHOOK_PROVIDER = str(args.webhook_provider)
     if args.webhook_url is not None:
@@ -4818,6 +5018,7 @@ def apply_webhook_cli_overrides(args: argparse.Namespace, parser: argparse.Argum
         (args.webhook_offline_entries, "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION"),
         (args.webhook_followers, "WEBHOOK_FOLLOWERS_NOTIFICATION"),
         (args.webhook_followings, "WEBHOOK_FOLLOWINGS_NOTIFICATION"),
+        (args.webhook_profile, "WEBHOOK_PROFILE_NOTIFICATION"),
     )
     for enabled, setting in event_overrides:
         if enabled is True:
@@ -4837,7 +5038,7 @@ def apply_webhook_cli_overrides(args: argparse.Namespace, parser: argparse.Argum
 
 # Runs the command-line interface
 def main():
-    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
+    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_PROFILE_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, PROFILE_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
 
     private_setup_flags = ("--set-webhook-url", "--set-lastfm-credentials", "--set-spotify-credentials")
     if "--generate-config" in sys.argv and not any(flag in sys.argv for flag in private_setup_flags):
@@ -5008,6 +5209,13 @@ def main():
         help="Email when followings (friends) change"
     )
     notify.add_argument(
+        "--notify-profile",
+        dest="notify_profile",
+        action="store_true",
+        default=None,
+        help="Email when a tracked bio or display name changes"
+    )
+    notify.add_argument(
         "-e", "--no-error-notify",
         action="store_false",
         dest="notify_errors",
@@ -5035,6 +5243,7 @@ def main():
     webhook_notify.add_argument("--webhook-offline-entries", dest="webhook_offline_entries", action="store_true", default=None, help="Send a webhook alert when new scrobbles arrive while the user is offline")
     webhook_notify.add_argument("--webhook-followers", dest="webhook_followers", action="store_true", default=None, help="Send a webhook alert when followers change")
     webhook_notify.add_argument("--webhook-followings", dest="webhook_followings", action="store_true", default=None, help="Send a webhook alert when followings change")
+    webhook_notify.add_argument("--webhook-profile", dest="webhook_profile", action="store_true", default=None, help="Send a webhook alert when a tracked bio or display name changes")
     webhook_error_toggle = webhook_notify.add_mutually_exclusive_group()
     webhook_error_toggle.add_argument("--webhook-errors", dest="webhook_errors", action="store_true", default=None, help="Send webhook alerts when monitoring has a problem")
     webhook_error_toggle.add_argument("--no-webhook-error-notify", dest="webhook_errors", action="store_false", default=None, help="Disable webhook alerts when monitoring has a problem")
@@ -5075,21 +5284,21 @@ def main():
         dest="friends_check_interval",
         metavar="SECONDS",
         type=int,
-        help="How often to check for followers/followings changes"
+        help="How often to check for friend and profile changes"
     )
     times.add_argument(
         "--friends-change-counter",
         dest="friends_change_counter",
         metavar="N",
         type=int,
-        help="Number of consecutive checks to confirm friend changes"
+        help="Number of consecutive checks to confirm friend or profile changes"
     )
     times.add_argument(
         "--friends-retry-interval",
         dest="friends_retry_interval",
         metavar="SECONDS",
         type=int,
-        help="Retry timeout for friend change confirmation"
+        help="Retry timeout for friend or profile change confirmation"
     )
 
     # Listing mode
@@ -5166,6 +5375,20 @@ def main():
         action="store_true",
         default=None,
         help="Track changes in user's followers"
+    )
+    opts.add_argument(
+        "--track-bio",
+        dest="track_bio",
+        action="store_true",
+        default=None,
+        help="Track changes in user's About You bio"
+    )
+    opts.add_argument(
+        "--track-display-name",
+        dest="track_display_name",
+        action="store_true",
+        default=None,
+        help="Track changes in user's public display name"
     )
     opts.add_argument(
         "-d", "--disable-logging",
@@ -5437,19 +5660,28 @@ def main():
     if args.notify_followings is True:
         FOLLOWINGS_NOTIFICATION = True
 
+    if args.notify_profile is True:
+        PROFILE_NOTIFICATION = True
+
     if args.track_followings is True:
         TRACK_FOLLOWINGS = True
 
     if args.track_followers is True:
         TRACK_FOLLOWERS = True
 
-    # Check for beautifulsoup4 if followers/followings tracking is enabled
-    if TRACK_FOLLOWINGS or TRACK_FOLLOWERS:
+    if args.track_bio is True:
+        TRACK_BIO = True
+
+    if args.track_display_name is True:
+        TRACK_DISPLAY_NAME = True
+
+    # Check for beautifulsoup4 if friend or profile tracking is enabled
+    if friends_check_enabled():
         try:
             # Imported only to check availability and report a friendly install command when it is missing
             import bs4  # type: ignore  # noqa: F401
         except ImportError:
-            print("* Error: beautifulsoup4 is required for followers/followings tracking")
+            print("* Error: beautifulsoup4 is required for friend and profile tracking")
             print("* Install it with: pip install beautifulsoup4")
             sys.exit(1)
 
@@ -5484,11 +5716,13 @@ def main():
         TRACK_NOTIFICATION = False
         OFFLINE_ENTRIES_NOTIFICATION = False
         SONG_ON_LOOP_NOTIFICATION = False
+        PROFILE_NOTIFICATION = False
         ERROR_NOTIFICATION = False
 
     print(f"* Last.fm polling intervals:\t[offline check: {display_time(LASTFM_CHECK_INTERVAL)}] [active check: {display_time(LASTFM_ACTIVE_CHECK_INTERVAL)}]\n*\t\t\t\t[inactivity: {display_time(LASTFM_INACTIVITY_CHECK)}]")
-    if TRACK_FOLLOWINGS or TRACK_FOLLOWERS:
-        print(f"* Friends/followers tracking:\t[followings = {TRACK_FOLLOWINGS}] [followers = {TRACK_FOLLOWERS}]" + (f" [interval: {display_time(FRIENDS_CHECK_INTERVAL)}]" if FRIENDS_CHECK_INTERVAL > 0 else ""))
+    if friends_check_enabled():
+        for tracking_summary_line in _startup_friends_tracking_summary_lines():
+            print(tracking_summary_line)
     for notification_summary_line in _startup_notification_summary_lines():
         print(notification_summary_line)
     if WEBHOOK_ENABLED and not validate_webhook_url():
