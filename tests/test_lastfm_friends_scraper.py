@@ -25,6 +25,16 @@ UNAVAILABLE_HTML = b"""<!doctype html>
 <body><h1>Temporarily unavailable</h1><div id="error">Error 503</div></body>
 </html>"""
 
+PROFILE_HTML = b"""<!doctype html>
+<html>
+<body>
+<h1 class="header-title"><a href="/user/NeonCipher">NeonCipher</a></h1>
+<p class="header-title-secondary"><span class="header-title-display-name">Neon Cipher</span></p>
+<div class="about-me-header"><p>First line</p><p>Second &amp; <a href="/tag/final">final</a> line</p></div>
+<section class="about-me-sidebar"><h2>About Me</h2><p>Duplicate mobile bio</p></section>
+</body>
+</html>"""
+
 
 class FakeResponse:
     # Stores the minimal requests response fields used by the Last.fm scraper
@@ -68,6 +78,18 @@ class LastfmFriendsScraperTests(unittest.TestCase):
         with patch.object(monitor, '_lastfm_http_get_with_retry', return_value=FakeResponse()):
             users = monitor._lastfm_scrape_user_list("NeonCipher", "following")
         self.assertEqual(users, {"EchoInTheShell"})
+
+    # Verifies profile tracking reads the public display name and one canonical About Me copy
+    def test_current_profile_markup_is_parsed(self):
+        with patch.object(monitor, '_lastfm_http_get_with_retry', return_value=FakeResponse(content=PROFILE_HTML)):
+            profile = monitor.lastfm_get_profile("NeonCipher")
+        self.assertEqual(profile, {"display_name": "Neon Cipher", "bio": "First line\nSecond & final line"})
+
+    # Verifies a page for another account cannot replace the requested profile baseline
+    def test_profile_owner_is_validated(self):
+        with patch.object(monitor, '_lastfm_http_get_with_retry', return_value=FakeResponse(content=PROFILE_HTML)):
+            with self.assertRaisesRegex(RuntimeError, "profile owner"):
+                monitor.lastfm_get_profile("DifferentUser")
 
 
 if __name__ == '__main__':
