@@ -35,7 +35,7 @@ def configure_discord(monkeypatch):
 # Verifies the generated config exposes webhook settings while retaining private placeholders
 def test_config_block_contains_complete_webhook_settings():
     compile(monitor.CONFIG_BLOCK, "<generated-config>", "exec")
-    for setting in ("WEBHOOK_ENABLED", "WEBHOOK_PROVIDER", "WEBHOOK_URL", "WEBHOOK_USERNAME", "WEBHOOK_AVATAR_URL", "WEBHOOK_ACTIVE_NOTIFICATION", "WEBHOOK_INACTIVE_NOTIFICATION", "WEBHOOK_TRACK_NOTIFICATION", "WEBHOOK_SONG_NOTIFICATION", "WEBHOOK_SONG_ON_LOOP_NOTIFICATION", "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION", "WEBHOOK_FOLLOWERS_NOTIFICATION", "WEBHOOK_FOLLOWINGS_NOTIFICATION", "WEBHOOK_ERROR_NOTIFICATION", "WEBHOOK_HEADERS", "WEBHOOK_TEMPLATE", "WEBHOOK_TRANSFORMS", "NTFY_ACCESS_TOKEN", "NTFY_SHORT"):
+    for setting in ("WEBHOOK_ENABLED", "WEBHOOK_PROVIDER", "WEBHOOK_URL", "WEBHOOK_USERNAME", "WEBHOOK_AVATAR_URL", "WEBHOOK_ACTIVE_NOTIFICATION", "WEBHOOK_INACTIVE_NOTIFICATION", "WEBHOOK_TRACK_NOTIFICATION", "WEBHOOK_SONG_NOTIFICATION", "WEBHOOK_SONG_ON_LOOP_NOTIFICATION", "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION", "WEBHOOK_FOLLOWERS_NOTIFICATION", "WEBHOOK_FOLLOWINGS_NOTIFICATION", "WEBHOOK_PROFILE_NOTIFICATION", "WEBHOOK_ERROR_NOTIFICATION", "WEBHOOK_HEADERS", "WEBHOOK_TEMPLATE", "WEBHOOK_TRANSFORMS", "NTFY_ACCESS_TOKEN", "NTFY_SHORT"):
         assert f"{setting} =" in monitor.CONFIG_BLOCK
     assert "WEBHOOK_URL" in monitor.SECRET_KEYS
     assert "NTFY_ACCESS_TOKEN" in monitor.SECRET_KEYS
@@ -43,15 +43,29 @@ def test_config_block_contains_complete_webhook_settings():
 
 # Verifies startup summaries use short labels and unstarred bounded continuation lines
 def test_startup_notification_summaries_use_compact_rollups(monkeypatch):
-    email_settings = {"ACTIVE_NOTIFICATION": True, "INACTIVE_NOTIFICATION": True, "TRACK_NOTIFICATION": True, "SONG_NOTIFICATION": True, "SONG_ON_LOOP_NOTIFICATION": True, "OFFLINE_ENTRIES_NOTIFICATION": True, "ERROR_NOTIFICATION": True, "FOLLOWERS_NOTIFICATION": True, "FOLLOWINGS_NOTIFICATION": True}
-    webhook_settings = {"WEBHOOK_ENABLED": True, "WEBHOOK_ACTIVE_NOTIFICATION": True, "WEBHOOK_INACTIVE_NOTIFICATION": True, "WEBHOOK_TRACK_NOTIFICATION": True, "WEBHOOK_SONG_NOTIFICATION": True, "WEBHOOK_SONG_ON_LOOP_NOTIFICATION": True, "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION": True, "WEBHOOK_ERROR_NOTIFICATION": True, "WEBHOOK_FOLLOWERS_NOTIFICATION": True, "WEBHOOK_FOLLOWINGS_NOTIFICATION": True}
+    email_settings = {"ACTIVE_NOTIFICATION": True, "INACTIVE_NOTIFICATION": True, "TRACK_NOTIFICATION": True, "SONG_NOTIFICATION": True, "SONG_ON_LOOP_NOTIFICATION": True, "OFFLINE_ENTRIES_NOTIFICATION": True, "ERROR_NOTIFICATION": True, "FOLLOWERS_NOTIFICATION": True, "FOLLOWINGS_NOTIFICATION": True, "PROFILE_NOTIFICATION": True}
+    webhook_settings = {"WEBHOOK_ENABLED": True, "WEBHOOK_ACTIVE_NOTIFICATION": True, "WEBHOOK_INACTIVE_NOTIFICATION": True, "WEBHOOK_TRACK_NOTIFICATION": True, "WEBHOOK_SONG_NOTIFICATION": True, "WEBHOOK_SONG_ON_LOOP_NOTIFICATION": True, "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION": True, "WEBHOOK_ERROR_NOTIFICATION": True, "WEBHOOK_FOLLOWERS_NOTIFICATION": True, "WEBHOOK_FOLLOWINGS_NOTIFICATION": True, "WEBHOOK_PROFILE_NOTIFICATION": True}
     for setting, value in {**email_settings, **webhook_settings}.items():
         monkeypatch.setattr(monitor, setting, value)
-    expected_email = "* Notifications (email):        On (active, inactive, tracked, songs, loops, offline, errors,\n                                followers, followings)"
-    expected_webhook = "* Notifications (webhook):      On (active, inactive, tracked, songs, loops, offline, errors,\n                                followers, followings)"
+    expected_email = "* Notifications (email):        On (active, inactive, tracked, songs, loops, offline, errors,\n                                followers, followings, profile)"
+    expected_webhook = "* Notifications (webhook):      On (active, inactive, tracked, songs, loops, offline, errors,\n                                followers, followings, profile)"
     assert monitor._startup_notification_summary_lines() == [expected_email, expected_webhook]
     assert all(len(line) <= 100 for summary in (expected_email, expected_webhook) for line in summary.splitlines())
     assert "\n*" not in expected_email + expected_webhook
+
+
+# Verifies the shared timer wraps before display name with an aligned continuation row
+def test_startup_profile_tracking_rows_are_aligned(monkeypatch):
+    monkeypatch.setattr(monitor, "TRACK_FOLLOWINGS", True)
+    monkeypatch.setattr(monitor, "TRACK_FOLLOWERS", False)
+    monkeypatch.setattr(monitor, "TRACK_BIO", True)
+    monkeypatch.setattr(monitor, "TRACK_DISPLAY_NAME", True)
+    monkeypatch.setattr(monitor, "FRIENDS_CHECK_INTERVAL", 10800)
+
+    assert monitor._startup_friends_tracking_summary_lines() == [
+        "* Friends/profile tracking:\t[followings = True] [followers = False] [bio = True]",
+        "\t\t\t\t[display name = True] [interval: 3 hours]",
+    ]
 
 
 # Verifies webhook categories remain off while the master switch is disabled
@@ -72,14 +86,14 @@ def test_webhook_url_validation_and_detection():
 
 
 # Verifies every Last.fm-specific event has an independent webhook switch
-@pytest.mark.parametrize("notification_type,setting", [("active", "WEBHOOK_ACTIVE_NOTIFICATION"), ("inactive", "WEBHOOK_INACTIVE_NOTIFICATION"), ("track", "WEBHOOK_TRACK_NOTIFICATION"), ("song", "WEBHOOK_SONG_NOTIFICATION"), ("loop", "WEBHOOK_SONG_ON_LOOP_NOTIFICATION"), ("offline_entries", "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION"), ("followers", "WEBHOOK_FOLLOWERS_NOTIFICATION"), ("followings", "WEBHOOK_FOLLOWINGS_NOTIFICATION"), ("error", "WEBHOOK_ERROR_NOTIFICATION")])
+@pytest.mark.parametrize("notification_type,setting", [("active", "WEBHOOK_ACTIVE_NOTIFICATION"), ("inactive", "WEBHOOK_INACTIVE_NOTIFICATION"), ("track", "WEBHOOK_TRACK_NOTIFICATION"), ("song", "WEBHOOK_SONG_NOTIFICATION"), ("loop", "WEBHOOK_SONG_ON_LOOP_NOTIFICATION"), ("offline_entries", "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION"), ("followers", "WEBHOOK_FOLLOWERS_NOTIFICATION"), ("followings", "WEBHOOK_FOLLOWINGS_NOTIFICATION"), ("profile", "WEBHOOK_PROFILE_NOTIFICATION"), ("error", "WEBHOOK_ERROR_NOTIFICATION")])
 def test_webhook_event_switches_are_independent(monkeypatch, notification_type, setting):
-    for variable in ("WEBHOOK_ACTIVE_NOTIFICATION", "WEBHOOK_INACTIVE_NOTIFICATION", "WEBHOOK_TRACK_NOTIFICATION", "WEBHOOK_SONG_NOTIFICATION", "WEBHOOK_SONG_ON_LOOP_NOTIFICATION", "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION", "WEBHOOK_FOLLOWERS_NOTIFICATION", "WEBHOOK_FOLLOWINGS_NOTIFICATION", "WEBHOOK_ERROR_NOTIFICATION"):
+    for variable in ("WEBHOOK_ACTIVE_NOTIFICATION", "WEBHOOK_INACTIVE_NOTIFICATION", "WEBHOOK_TRACK_NOTIFICATION", "WEBHOOK_SONG_NOTIFICATION", "WEBHOOK_SONG_ON_LOOP_NOTIFICATION", "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION", "WEBHOOK_FOLLOWERS_NOTIFICATION", "WEBHOOK_FOLLOWINGS_NOTIFICATION", "WEBHOOK_PROFILE_NOTIFICATION", "WEBHOOK_ERROR_NOTIFICATION"):
         monkeypatch.setattr(monitor, variable, False)
     monkeypatch.setattr(monitor, "WEBHOOK_ENABLED", True)
     monkeypatch.setattr(monitor, setting, True)
     assert monitor.webhook_event_enabled(notification_type)
-    assert sum(monitor.webhook_event_enabled(event) for event in ("active", "inactive", "track", "song", "loop", "offline_entries", "followers", "followings", "error")) == 1
+    assert sum(monitor.webhook_event_enabled(event) for event in ("active", "inactive", "track", "song", "loop", "offline_entries", "followers", "followings", "profile", "error")) == 1
 
 
 # Verifies Discord payloads preserve customization while disabling mentions
@@ -140,7 +154,7 @@ def test_notification_channels_are_independent_and_ntfy_short_is_scoped(monkeypa
 # Verifies runtime webhook flags enable selected events and correct known provider mismatches
 def test_webhook_cli_overrides(monkeypatch):
     configure_discord(monkeypatch)
-    args = monitor.argparse.Namespace(webhook_provider=None, webhook_url="https://ntfy.sh/private-topic", webhook_enabled=None, webhook_active=True, webhook_inactive=None, webhook_track=None, webhook_song_changes=None, webhook_loop=None, webhook_offline_entries=None, webhook_followers=None, webhook_followings=None, webhook_errors=False)
+    args = monitor.argparse.Namespace(webhook_provider=None, webhook_url="https://ntfy.sh/private-topic", webhook_enabled=None, webhook_active=True, webhook_inactive=None, webhook_track=None, webhook_song_changes=None, webhook_loop=None, webhook_offline_entries=None, webhook_followers=None, webhook_followings=None, webhook_profile=None, webhook_errors=False)
     parser = Mock()
     monitor.apply_webhook_cli_overrides(args, parser)
     assert monitor.WEBHOOK_PROVIDER == "ntfy"
