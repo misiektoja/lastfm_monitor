@@ -16,6 +16,7 @@ def capture_notifications(monkeypatch, changes):
     monkeypatch.setattr(monitor, "send_notification_channels", fake_send)
     monkeypatch.setattr(monitor, "FOLLOWINGS_NOTIFICATION", True)
     monkeypatch.setattr(monitor, "FOLLOWERS_NOTIFICATION", True)
+    monkeypatch.setattr(monitor, "PROFILE_NOTIFICATION", True)
     monkeypatch.setattr(monitor, "FRIENDS_CHECK_INTERVAL", 10800)
     monitor.notify_friends_changes("NeonCipher", changes)
     return {entry["type"]: entry for entry in captured}
@@ -86,3 +87,14 @@ def test_html_links_to_each_changed_user_profile(monkeypatch, event):
     body_html = notifications[event]["body_html"]
     assert '<a href="https://www.last.fm/user/Angie+Sullivan">Angie Sullivan</a><br>' in body_html
     assert '<a href="https://www.last.fm/user/OldFan">OldFan</a><br>' in body_html
+
+
+# Verifies one profile alert reports both old and new values without treating bio markup as HTML
+def test_profile_notification_reports_display_name_and_bio_safely(monkeypatch):
+    changes = {"profile": {"display_name": {"previous": "Old Name", "current": "New Name"}, "bio": {"previous": "Old bio", "current": "New <b>bio</b>\nSecond line"}}}
+    notifications = capture_notifications(monkeypatch, changes)
+
+    notification = notifications["profile"]
+    assert "Display name changed:\nPrevious: Old Name\nCurrent: New Name" in notification["body"]
+    assert "Bio changed:\nPrevious: Old bio\nCurrent: New <b>bio</b>\nSecond line" in notification["body"]
+    assert "New &lt;b&gt;bio&lt;/b&gt;<br>Second line" in notification["body_html"]
