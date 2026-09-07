@@ -41,7 +41,7 @@ A change to the monitoring loop, authentication or Last.fm data handling is not 
 ## What a change needs
 
 - **Tests.** New behavior needs a test. A bug fix needs a test that fails without it. Match the existing files in `tests/`.
-- **Documentation.** User-facing behavior belongs in [README.md](README.md), which is the reference for this project. Document a new configuration setting or command-line option in the section that covers its feature.
+- **Documentation.** User-facing behavior belongs in [docs/](docs/), which is published at [misiektoja.github.io/lastfm_monitor](https://misiektoja.github.io/lastfm_monitor/). Document a new configuration setting or command-line option on the page that covers its feature. The README is a landing page, so it changes only when the feature list or the page map does. Build the site with `mkdocs build --strict` before opening the pull request.
 - **A release-notes entry.** Add it under the unreleased section of [RELEASE_NOTES.md](RELEASE_NOTES.md), following the existing category and prefix style. Write it for a user, not as an implementation log.
 - **A Conventional Commits message.** Use the scope the repository already uses for that area.
 
