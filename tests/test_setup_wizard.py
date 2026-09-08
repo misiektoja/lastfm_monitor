@@ -1,4 +1,4 @@
-"""The guided setup: answers held until Save, the mail server sign-in, the escape from every rejected answer, the review summary, per-section editing and the files it writes."""
+"""The guided setup: answers held until Save, the mail server sign-in, the escape from every rejected answer, the frame around its questions, the review summary, per-section editing and the files it writes."""
 
 import ast
 import smtplib
@@ -565,3 +565,105 @@ class TestTheHiddenPrompt:
         with pytest.raises(KeyboardInterrupt):
             monitor._wizard_ask_secret("Last.fm API key", getpass_func=interrupt)
         assert monitor.DEBUG_MODE is True
+
+
+# Answers each question the way a terminal does, echoing the prompt and the answer into the transcript
+class Terminal:
+    def __init__(self, answers):
+        self.answers = list(answers)
+
+    def __call__(self, prompt=""):
+        assert self.answers, f"the wizard asked more than the script answers: {prompt!r}"
+        answer = self.answers.pop(0)
+        print(f"{prompt}{answer}")
+        return answer
+
+
+# Echoes a hidden prompt without its answer, which is what a terminal shows while a secret is typed
+class HiddenTerminal(Terminal):
+    def __call__(self, prompt=""):
+        answer = self.answers.pop(0)
+        print(prompt)
+        return answer
+
+
+# Runs the wizard against an echoing terminal and returns everything it printed
+@pytest.fixture
+def transcript(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(monitor, "_wizard_verify_lastfm_credentials", lambda api_key, api_secret: None)
+    monkeypatch.setattr(monitor, "run_doctor", lambda **kwargs: 0)
+    monkeypatch.chdir(tmp_path)
+
+    runs = []
+
+    def run(answers, secrets=("api-key", "api-secret")):
+        # Each run gets its own destinations, so a second one is not asked to replace the first one's config
+        workspace = tmp_path / f"run{len(runs)}"
+        workspace.mkdir()
+        runs.append(workspace)
+        monitor.run_setup_wizard(config_file=str(workspace / "lastfm_monitor.conf"), env_file=str(workspace / ".env"), input_func=Terminal(answers), getpass_func=HiddenTerminal(secrets), interactive=True)
+        return capsys.readouterr().out
+
+    return run
+
+
+# The frame is what a user recognizes when they set up the second tool, so it is pinned from the transcript
+class TestTheFrameAroundTheQuestions:
+
+    def test_the_destination_block_shares_one_column(self, transcript, tmp_path):
+        printed = transcript(full_run_answers())
+
+        assert "\nDetected install method: " in printed
+        for label in ("Configuration:", "Dotenv:"):
+            line = next(line for line in printed.splitlines() if line.startswith(label))
+            assert line.index(line.split(":", 1)[1].strip()) == 24
+
+    def test_every_question_group_opens_after_one_blank_line(self, transcript):
+        printed = transcript(full_run_answers())
+
+        for opener in [
+            "Last.fm username or profile URL to monitor",
+            "Polling interval while the user is not listening",
+            "Create or view your Last.fm API key",
+            "Use Spotify for track details?",
+            "Watch for follower changes?",
+            "Write the normal per-user log file?",
+            "Configure email notifications?",
+            "Set up webhook alerts",
+        ]:
+            assert f"\n\n{opener}" in printed, f"{opener!r} does not open a group"
+        assert "\n\n\n" not in printed
+
+    def test_each_block_heading_stands_alone(self, transcript):
+        printed = transcript(full_run_answers())
+
+        for heading in ("Setup summary", "Saved files", "Next steps"):
+            assert f"\n\n{heading}\n\n" in printed
+
+    def test_the_summary_values_share_one_column(self, transcript):
+        printed = transcript(full_run_answers())
+
+        summary = [line for line in printed.split("Setup summary\n\n", 1)[1].split("\n\n", 1)[0].splitlines() if ":" in line]
+
+        offsets = {len(line) - len(line.split(":", 1)[1].lstrip()) for line in summary}
+        # The width comes from the longest label rather than from a constant, so one column is the whole rule
+        assert offsets == {max(len(line.split(":", 1)[0]) for line in summary) + 2}
+
+    # A dotenv file that was never written must not appear as a saved file or in the commands printed under it
+    def test_saved_files_and_the_printed_commands_name_only_what_exists(self, transcript, tmp_path, monkeypatch):
+        monkeypatch.setattr(monitor, "LASTFM_API_KEY", "already-configured")
+        monkeypatch.setattr(monitor, "LASTFM_API_SECRET", "already-configured")
+
+        printed = transcript(full_run_answers(auth=["n"]), secrets=())
+
+        assert not (tmp_path / "run0" / ".env").exists()
+        assert "  Secrets:" not in printed
+        assert "--env-file" not in printed.split("Next steps", 1)[1]
+
+    def test_the_doctor_offer_follows_the_target(self, transcript):
+        with_target = transcript(full_run_answers())
+        without_target = transcript(full_run_answers(target=["", "n"], review=["1"], doctor=[]))
+
+        assert "Run doctor now?" in with_target
+        assert "Run doctor now?" not in without_target
+        assert "\n\n\n" not in without_target
