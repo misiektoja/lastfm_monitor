@@ -334,3 +334,54 @@ class TestTheAnswerNormalizers:
     ])
     def test_a_username_is_read_from_a_name_or_a_profile_url(self, answer, username):
         assert monitor.normalize_lastfm_username(answer) == username
+
+
+class TestEveryRejectedAnswerHasAWayOut:
+
+    # A loop that only re-asks never ends for anyone who cannot answer it, so each one offers the way out itself
+    def test_every_wizard_loop_offers_an_escape(self):
+        # Enter takes the shown default in these two, and the other two end through a helper that offers the escape
+        answered_another_way = {"_wizard_ask_yes_no", "_wizard_ask_choice", "_wizard_collect_email_section", "_wizard_review_setup"}
+        for node in ast.parse(SOURCE).body:
+            if not isinstance(node, ast.FunctionDef) or not node.name.startswith("_wizard_"):
+                continue
+            if not any(isinstance(loop, ast.While) and isinstance(loop.test, ast.Constant) and loop.test.value is True for loop in ast.walk(node)):
+                continue
+            called = {call.func.id for call in ast.walk(node) if isinstance(call, ast.Call) and isinstance(call.func, ast.Name)}
+            assert "_wizard_offer_retry" in called or node.name in answered_another_way, f"{node.name} loops with no way out"
+
+    def test_a_rejected_number_keeps_the_default(self, capsys):
+        script = Script(["70000", "n"])
+
+        assert monitor._wizard_ask_positive_int("SMTP port", 587, maximum=65535, input_func=script) == 587
+        assert "Keeping 587." in capsys.readouterr().out
+        assert script.answers == []
+
+    def test_a_rejected_number_can_be_entered_again(self):
+        assert monitor._wizard_ask_positive_int("SMTP port", 587, maximum=65535, input_func=Script(["70000", "y", "2525"])) == 2525
+
+    def test_a_rejected_duration_keeps_the_default(self, capsys):
+        script = Script(["later", "n"])
+
+        assert monitor._wizard_ask_duration("Polling interval while the user is listening (seconds or use s/m/h/d)", 60, input_func=script) == 60
+        assert "Keeping 60s - 1m." in capsys.readouterr().out
+        # The hint the question carries belongs in the prompt, not in the offer that repeats it
+        assert "Try entering the Polling interval while the user is listening again? [Y/n]: " in script.prompts
+
+    def test_a_rejected_config_destination_keeps_the_current_one(self, tmp_path, capsys):
+        state = monitor.WizardSetupState(str(tmp_path / "lastfm_monitor.conf"), str(tmp_path / ".env"), {})
+
+        monitor._wizard_collect_destination_section(state, input_func=Script([str(tmp_path), "n", ""]))
+
+        assert Path(state.config_path) == tmp_path / "lastfm_monitor.conf"
+        assert f"Keeping {tmp_path / 'lastfm_monitor.conf'}." in capsys.readouterr().out
+
+    @pytest.mark.parametrize("answer", ["none", "{config}"])
+    def test_a_rejected_dotenv_destination_keeps_the_current_one(self, tmp_path, capsys, answer):
+        state = monitor.WizardSetupState(str(tmp_path / "lastfm_monitor.conf"), str(tmp_path / ".env"), {})
+
+        monitor._wizard_collect_destination_section(state, input_func=Script(["", answer.format(config=tmp_path / "lastfm_monitor.conf"), "n"]))
+
+        assert Path(state.env_path) == tmp_path / ".env"
+        assert state.config_values["DOTENV_FILE"] == str(tmp_path / ".env")
+        assert f"Keeping {tmp_path / '.env'}." in capsys.readouterr().out
