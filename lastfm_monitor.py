@@ -632,6 +632,11 @@ LASTFM_API_REGISTRATION_URL = "https://www.last.fm/api/account/create"
 LASTFM_API_ACCOUNTS_URL = "https://www.last.fm/api/accounts"
 SPOTIFY_DASHBOARD_URL = "https://developer.spotify.com/dashboard"
 
+# Install methods the tool can detect, used to tailor every command it prints
+INSTALL_METHOD_PYPI = "pip"
+INSTALL_METHOD_SCRIPT = "manual"
+INSTALL_METHOD_ENV_VAR = "LASTFM_MONITOR_INSTALL_METHOD"
+
 # Below this length a configured value is as likely to be an ordinary word as a credential, so replacing it would corrupt the text it appears in
 MIN_REDACTABLE_SECRET_LENGTH = 12
 
@@ -712,6 +717,7 @@ import platform
 import re
 import ipaddress
 import getpass
+import shlex
 import tempfile
 from itertools import tee, islice, chain
 from collections import namedtuple
@@ -1001,6 +1007,55 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
     return 0
 
 
+# Returns how the tool was started, either as the installed console script or as a downloaded standalone script
+def install_method() -> str:
+    override = os.environ.get(INSTALL_METHOD_ENV_VAR, "").strip().casefold()
+    if override in (INSTALL_METHOD_PYPI, INSTALL_METHOD_SCRIPT):
+        return override
+    if os.path.basename(sys.argv[0] or "").casefold().endswith(".py"):
+        return INSTALL_METHOD_SCRIPT
+    return INSTALL_METHOD_PYPI
+
+
+# Returns the argv prefix that invokes this tool for the detected install method
+def install_command_prefix() -> List[str]:
+    if install_method() == INSTALL_METHOD_SCRIPT:
+        return ["python3", os.path.basename(sys.argv[0]) or "lastfm_monitor.py"]
+    return ["lastfm_monitor"]
+
+
+# Returns one command-line argument quoted for the shell the user is most likely pasting into
+def quote_command_argument(argument: Any) -> str:
+    text = str(argument)
+    # A <placeholder> is documentation for the reader to replace, so quoting it would only be noise
+    if text.startswith("<") and text.endswith(">"):
+        return text
+    if platform.system() == "Windows":
+        return f'"{text}"' if (not text or any(char.isspace() for char in text)) else text
+    return shlex.quote(text)
+
+
+# True when a command writes the dotenv file itself, so it refuses an --env-file that switches dotenv loading off
+def command_writes_dotenv(arguments=()) -> bool:
+    return any(str(argument).startswith("--set-") for argument in arguments)
+
+
+# Returns a copy-pasteable command line for the detected install method, carrying the config and dotenv files this run was given
+def render_command(arguments=None, include_paths: bool = True, config_path=None, env_path=None) -> str:
+    parts = list(install_command_prefix())
+    parts.extend(str(argument) for argument in (arguments or []))
+    # An explicitly passed path is always rendered, while include_paths only governs falling back to the active ones
+    selected_config = config_path if config_path is not None else (CLI_CONFIG_PATH if include_paths else None)
+    selected_env = env_path if env_path is not None else (DOTENV_FILE if include_paths else None)
+    if selected_config:
+        parts.extend(["--config-file", str(selected_config)])
+    # The "none" sentinel is carried so a printed command reads the setup this run read, except into a command
+    # that writes the dotenv file, since those refuse the sentinel at their own argument gate
+    if selected_env and not (str(selected_env).casefold() == "none" and command_writes_dotenv(arguments or ())):
+        parts.extend(["--env-file", str(selected_env)])
+    return " ".join(quote_command_argument(part) for part in parts)
+
+
 # Returns the private values worth replacing wherever they appear, skipping any too short to tell apart from an ordinary word
 def known_secret_values() -> List[str]:
     values = []
@@ -1112,29 +1167,29 @@ def classify_recovery_error(error=None, context="runtime", detail=""):
 
     if context == "config":
         if "does not exist" in message or "no such file" in message:
-            return advice("config.missing", safe_detail or "The configuration file was not found", "Create one with 'lastfm_monitor --generate-config' or correct the --config-file path", False, CONFIG_FILE_GUIDE_URL)
-        return advice("config.invalid", safe_detail or "The configuration file could not be read", "Correct the reported line, or start from a fresh template with 'lastfm_monitor --generate-config'", False, CONFIG_FILE_GUIDE_URL)
+            return advice("config.missing", safe_detail or "The configuration file was not found", f"Create one with '{render_command(['--generate-config', DEFAULT_CONFIG_FILENAME], include_paths=False)}' or correct the --config-file path", False, CONFIG_FILE_GUIDE_URL)
+        return advice("config.invalid", safe_detail or "The configuration file could not be read", f"Correct the reported line, or start from a fresh template with '{render_command(['--generate-config', DEFAULT_CONFIG_FILENAME], include_paths=False)}'", False, CONFIG_FILE_GUIDE_URL)
 
     if context in ("set_lastfm_credentials", "set_spotify_credentials", "set_webhook_url"):
         flag = f"--{context.replace('_', '-')}"
         guide = {"set_lastfm_credentials": LASTFM_API_GUIDE_URL, "set_spotify_credentials": SPOTIFY_APP_GUIDE_URL}.get(context, WEBHOOK_GUIDE_URL)
         if "interactive terminal" in message:
-            return advice("secret.entry", safe_detail or f"{flag} requires an interactive terminal", f"Run {flag} in a terminal window so the value stays hidden while you paste it", False, guide)
+            return advice("secret.entry", safe_detail or f"{flag} requires an interactive terminal", f"Run {render_command([flag])} in a terminal window so the value stays hidden while you paste it", False, guide)
         if "cancelled" in message:
-            return advice("secret.entry", safe_detail or "Setup was cancelled and the dotenv file was not changed", f"Run {flag} again when you have the value ready", False, guide)
+            return advice("secret.entry", safe_detail or "Setup was cancelled and the dotenv file was not changed", f"Run {render_command([flag])} again when you have the value ready", False, guide)
         if "--env-file none" in message:
-            return advice("secret.entry", safe_detail or "There is nowhere to save the value", f"Drop --env-file none, or name a writable dotenv file with --env-file PATH, then run {flag} again", False, SECRETS_GUIDE_URL)
+            return advice("secret.entry", safe_detail or "There is nowhere to save the value", f"Drop --env-file none, or name a writable dotenv file with --env-file PATH, then run {render_command([flag])} again", False, SECRETS_GUIDE_URL)
         if "could not save" in message or "could not read" in message:
             return advice("file.unwritable", safe_detail or "The private settings file could not be updated", "Check file permissions or choose another path with --env-file PATH", False, SECRETS_GUIDE_URL)
         if context == "set_webhook_url":
-            return advice("webhook.invalid", safe_detail or "The webhook URL was not changed", f"Copy a complete Discord or ntfy webhook URL then run {flag} again", False, guide)
-        return advice("secret.entry", safe_detail or "No value was saved and the dotenv file was not changed", f"Run {flag} again and paste each value when it is asked for", False, guide)
+            return advice("webhook.invalid", safe_detail or "The webhook URL was not changed", f"Copy a complete Discord or ntfy webhook URL then run {render_command([flag])} again", False, guide)
+        return advice("secret.entry", safe_detail or "No value was saved and the dotenv file was not changed", f"Run {render_command([flag])} again and paste each value when it is asked for", False, guide)
 
     if context == "target.missing":
-        return advice("target.missing", safe_detail or "No Last.fm username was provided", "Pass the username to monitor: lastfm_monitor <lastfm_username>", False, QUICK_START_GUIDE_URL)
+        return advice("target.missing", safe_detail or "No Last.fm username was provided", f"Pass the username to monitor: {render_command(['<lastfm_username>'])}", False, QUICK_START_GUIDE_URL)
 
     if context == "secret.missing":
-        return advice("secret.missing", safe_detail or "A required Last.fm credential is missing", "Save the API key and shared secret with 'lastfm_monitor --set-lastfm-credentials'", False, LASTFM_API_GUIDE_URL)
+        return advice("secret.missing", safe_detail or "A required Last.fm credential is missing", f"Save the API key and shared secret with '{render_command(['--set-lastfm-credentials'])}'", False, LASTFM_API_GUIDE_URL)
 
     if context == "connectivity":
         # Classified from the error, because the detail names the endpoint rather than the failure
@@ -1154,10 +1209,10 @@ def classify_recovery_error(error=None, context="runtime", detail=""):
         if http_status == 429 or "rate limit" in message:
             return advice("webhook.rate_limited", "The webhook service is rate limiting deliveries", "Reduce how many alert types are enabled, or wait for the service to accept deliveries again", True, WEBHOOK_GUIDE_URL)
         if any(term in message for term in ("must contain", "must be discord", "could not be formatted", "could not apply", "header", "priority", "tags")):
-            return advice("webhook.invalid", safe_detail or "The webhook configuration is not usable", "Check WEBHOOK_URL, WEBHOOK_PROVIDER and the alert settings, then verify with 'lastfm_monitor --send-test-webhook'", False, WEBHOOK_GUIDE_URL)
+            return advice("webhook.invalid", safe_detail or "The webhook configuration is not usable", f"Check WEBHOOK_URL, WEBHOOK_PROVIDER and the alert settings, then verify with '{render_command(['--send-test-webhook'])}'", False, WEBHOOK_GUIDE_URL)
         if any(term in message for term in ("could not be reached", "connection", "timed out")):
             return advice("webhook.connection", "The webhook service could not be reached", "Check connectivity and the webhook host, then try again", True, WEBHOOK_GUIDE_URL)
-        return advice("webhook.rejected", safe_detail or "The webhook service refused the delivery", "Confirm the webhook still exists and the URL is current, then verify with 'lastfm_monitor --send-test-webhook'", http_status is not None and http_status >= 500, WEBHOOK_GUIDE_URL)
+        return advice("webhook.rejected", safe_detail or "The webhook service refused the delivery", f"Confirm the webhook still exists and the URL is current, then verify with '{render_command(['--send-test-webhook'])}'", http_status is not None and http_status >= 500, WEBHOOK_GUIDE_URL)
 
     if context == "file":
         if any(term in message for term in ("cannot load", "cannot be opened", "unreadable", "not valid utf-8", "no such file", "cannot be read")):
@@ -1169,7 +1224,7 @@ def classify_recovery_error(error=None, context="runtime", detail=""):
     if lastfm_status == 17:
         return advice("target.not_visible", "The monitored user hides their recent listening information", "Ask the user to turn off 'Hide recent listening information' in their Last.fm privacy settings", False, PRIVACY_GUIDE_URL)
     if lastfm_status in (10, 13, 26):
-        return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", "Save a working pair with 'lastfm_monitor --set-lastfm-credentials'", False, LASTFM_API_GUIDE_URL)
+        return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", f"Save a working pair with '{render_command(['--set-lastfm-credentials'])}'", False, LASTFM_API_GUIDE_URL)
     if lastfm_status == 29:
         return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. Increase the check intervals if this repeats", True)
     if lastfm_status in (6, 7):
@@ -1180,7 +1235,7 @@ def classify_recovery_error(error=None, context="runtime", detail=""):
     if http_status == 429 or "rate limit" in message or "too many requests" in message:
         return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. Increase the check intervals if this repeats", True)
     if "invalid api key" in message or "api key suspended" in message or "invalid method signature" in message:
-        return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", "Save a working pair with 'lastfm_monitor --set-lastfm-credentials'", False, LASTFM_API_GUIDE_URL)
+        return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", f"Save a working pair with '{render_command(['--set-lastfm-credentials'])}'", False, LASTFM_API_GUIDE_URL)
     if "user required to be logged in" in message:
         return advice("target.not_visible", "The monitored user hides their recent listening information", "Ask the user to turn off 'Hide recent listening information' in their Last.fm privacy settings", False, PRIVACY_GUIDE_URL)
     if "user not found" in message or "no user with that name" in message or http_status == 404:
@@ -3634,7 +3689,7 @@ def run_set_webhook_url(env_file=None, interactive=None, input_func=None, getpas
         raise PrivateSettingsError(f"Could not save the webhook URL in '{destination}'. Check file permissions or choose another path with --env-file") from None
     print("* Webhook URL looks valid")
     print(f"* Updated private settings file: {destination}")
-    print("* Test it with: lastfm_monitor --send-test-webhook")
+    print(f"* Test it with: {render_command(['--send-test-webhook'], env_path=destination)}")
     return str(destination)
 
 
