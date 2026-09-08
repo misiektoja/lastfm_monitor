@@ -771,3 +771,52 @@ class TestEveryRequiredQuestionCanBeAbandoned:
         # Half a mail server must not survive the answer that was abandoned
         assert state.config_values["SMTP_HOST"] == monitor._config_template_defaults()["SMTP_HOST"]
         assert "Email notifications stay off until every mail server setting is answered." in capsys.readouterr().out
+
+
+# A blank answer at a hidden prompt means keep what is stored, which is only true if nothing is queued for it
+class TestABlankSecretAnswer:
+
+    def test_the_queue_helper_refuses_an_empty_value(self, tmp_path):
+        env_path = tmp_path / ".env"
+        env_path.write_text("SMTP_PASSWORD=saved-password\n", encoding="utf-8")
+        state = monitor.WizardSetupState(str(tmp_path / "lastfm_monitor.conf"), str(env_path), {})
+        script = Script([])
+
+        assert monitor._wizard_queue_secret(state, "SMTP_PASSWORD", "", input_func=script) is False
+        assert script.prompts == []
+        assert state.secret_updates == {}
+
+    # The sign-in proves the stored password, so a blank answer must not be read as a replacement
+    def test_a_blank_password_keeps_the_saved_one(self, tmp_path, monkeypatch):
+        checked = []
+        monkeypatch.setattr(monitor, "_wizard_verify_smtp", lambda values, password: checked.append(password))
+        env_path = tmp_path / ".env"
+        env_path.write_text("SMTP_PASSWORD=saved-password\n", encoding="utf-8")
+        state = monitor.WizardSetupState(str(tmp_path / "lastfm_monitor.conf"), str(env_path), dict(monitor._config_template_defaults()))
+        script = Script(["y", "smtp.example.test", "", "", "user", "from@example.test", "to@example.test", "1"])
+
+        monitor._wizard_collect_email_section(state, input_func=script, getpass_func=Script([""]))
+
+        assert checked == [""]
+        assert state.secret_updates == {}
+        assert not any("Replace" in prompt for prompt in script.prompts)
+        assert env_path.read_text(encoding="utf-8") == "SMTP_PASSWORD=saved-password\n"
+
+    def test_a_blank_ntfy_token_queues_nothing(self, tmp_path):
+        state = monitor.WizardSetupState(str(tmp_path / "lastfm_monitor.conf"), str(tmp_path / ".env"), {})
+
+        monitor._wizard_collect_ntfy_access_token(state, input_func=Script(["y"]), getpass_func=Script([""]))
+
+        assert state.secret_updates == {}
+
+    def test_a_secret_free_rerun_leaves_an_existing_dotenv_untouched(self, wizard, tmp_path, monkeypatch):
+        monkeypatch.setattr(monitor, "LASTFM_API_KEY", "already-configured")
+        monkeypatch.setattr(monitor, "LASTFM_API_SECRET", "already-configured")
+        env_path = tmp_path / ".env"
+        original = 'LASTFM_API_KEY="already-configured"\nSMTP_PASSWORD="saved-password"\n'
+        env_path.write_text(original, encoding="utf-8")
+
+        code, _script = wizard(full_run_answers(auth=["n"]), secrets=())
+
+        assert code == 0
+        assert env_path.read_bytes() == original.encode("utf-8")
