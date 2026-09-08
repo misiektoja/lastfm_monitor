@@ -689,7 +689,8 @@ SPOTIFY_WEB_QUERY_URL = "https://api-partner.spotify.com/pathfinder/v2/query"
 SPOTIFY_WEB_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 SPOTIFY_WEB_TOKEN_EXPIRY_WINDOW = 60
 
-LIVENESS_CHECK_COUNTER = LIVENESS_CHECK_INTERVAL / LASTFM_CHECK_INTERVAL
+# Seconds rather than checks, because an active user is polled on a different interval than an inactive one
+LIVENESS_REMINDER_SECONDS = LIVENESS_CHECK_INTERVAL if LIVENESS_CHECK_INTERVAL > 0 else 0
 
 stdout_bck = None
 csvfieldnames = ['Date', 'Artist', 'Track', 'Album']
@@ -1353,6 +1354,12 @@ def print_recovery_error(error=None, context="runtime", debug=None, detail=""):
     advice = classify_recovery_error(error, context, detail)
     print(render_recovery_error(RecoveryError(advice), debug=debug))
     return advice
+
+
+# Reports that nothing changed, so a quiet run still says it is alive on the liveness cadence
+def print_liveness_banner(message):
+    print(f"* {sanitize_error_text(message)}")
+    print_cur_ts("Liveness check, timestamp:\t")
 
 
 # Tracks the last uninterrupted recovery category so a long outage cannot repeat the same hint every cycle
@@ -4020,7 +4027,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
     lf_track_ts_start_old = 0
     lf_track_ts_start_after_resume = 0
     lf_user_online = False
-    alive_counter = 0
+    alive_since = int(time.time())
     track_duration = 0
     playing_paused = False
     playing_paused_ts = 0
@@ -4648,6 +4655,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         send_notification_channels("offline_entries", m_subject, m_body, email_enabled=OFFLINE_ENTRIES_NOTIFICATION, subject_short=f"{username}: {i} new offline scrobbles", body_short=added_entries_list.strip())
 
                     print_cur_ts("\nTimestamp:\t\t\t")
+                    alive_since = int(time.time())
 
             # User is online (plays music at the moment)
             if new_track is not None:
@@ -4678,7 +4686,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 # Track has changed
                 if (new_track != playing_track or (last_track_start_ts > last_track_start_ts_old and last_track_start_ts > lf_track_ts_start_old - 20)):
 
-                    alive_counter = 0
+                    alive_since = int(time.time())
 
                     if new_track == playing_track:
                         song_on_loop += 1
@@ -5104,8 +5112,6 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             # User is offline (does not play music at the moment)
             else:
 
-                alive_counter += 1
-
                 # User paused playing the music
                 if ((int(time.time()) - lf_active_ts_last) > (LASTFM_ACTIVE_CHECK_INTERVAL * LASTFM_BREAK_CHECK_MULTIPLIER)) and lf_user_online and lf_active_ts_last > 0 and lf_active_ts_start > 0 and (LASTFM_ACTIVE_CHECK_INTERVAL * LASTFM_BREAK_CHECK_MULTIPLIER) < LASTFM_INACTIVITY_CHECK and LASTFM_BREAK_CHECK_MULTIPLIER > 0 and playing_paused is False:
                     playing_paused = True
@@ -5301,10 +5307,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     pauses_number = 0
                     recent_songs_session = []
                     print_cur_ts("\nTimestamp:\t\t\t")
-
-                if LIVENESS_CHECK_COUNTER and alive_counter >= LIVENESS_CHECK_COUNTER:
-                    print_cur_ts("Liveness check, timestamp:\t")
-                    alive_counter = 0
+                    alive_since = int(time.time())
 
             # Stuff to do regardless if the user is online or offline
             if last_track_start_ts > 0:
@@ -5325,6 +5328,11 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             if error_network_issue_start_ts and ((int(time.time()) - error_network_issue_start_ts) >= ERROR_NETWORK_ZERO_TIME_LIMIT):
                 error_network_issue_start_ts = 0
                 error_network_issue_counter = 0
+
+            # Not gated on the user being offline, since a user who listens for days is exactly when a silent run looks dead
+            if LIVENESS_REMINDER_SECONDS and int(time.time()) - alive_since >= LIVENESS_REMINDER_SECONDS:
+                print_liveness_banner(f"Monitoring healthy for {username}. The user is {'active' if lf_user_online else 'inactive'} with no activity change since the last check")
+                alive_since = int(time.time())
 
         except Exception as e:
 
@@ -5441,7 +5449,7 @@ def apply_webhook_cli_overrides(args: argparse.Namespace, parser: argparse.Argum
 
 # Runs the command-line interface
 def main():
-    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_PROFILE_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, PROFILE_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
+    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_REMINDER_SECONDS, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_PROFILE_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, PROFILE_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
 
     private_setup_flags = ("--set-webhook-url", "--set-lastfm-credentials", "--set-spotify-credentials")
     if "--generate-config" in sys.argv and not any(flag in sys.argv for flag in private_setup_flags):
@@ -5976,7 +5984,6 @@ def main():
 
     if args.check_interval:
         LASTFM_CHECK_INTERVAL = args.check_interval
-        LIVENESS_CHECK_COUNTER = LIVENESS_CHECK_INTERVAL / LASTFM_CHECK_INTERVAL
 
     if args.active_interval:
         LASTFM_ACTIVE_CHECK_INTERVAL = args.active_interval
@@ -5986,6 +5993,9 @@ def main():
 
     if args.break_multiplier:
         LASTFM_BREAK_CHECK_MULTIPLIER = args.break_multiplier
+
+    # The interval can come from a config file, so the reminder is settled once every layer has been applied
+    LIVENESS_REMINDER_SECONDS = LIVENESS_CHECK_INTERVAL if LIVENESS_CHECK_INTERVAL > 0 else 0
 
     network = pylast.LastFMNetwork(LASTFM_API_KEY, LASTFM_API_SECRET)
     user = network.get_user(args.username)
