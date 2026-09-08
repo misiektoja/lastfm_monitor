@@ -1512,7 +1512,7 @@ def classify_recovery_error(error=None, context="runtime", detail=""):
     if lastfm_status in (8, 11, 16) or (lastfm_status is not None and lastfm_status >= 500):
         return advice("lastfm.unavailable", "The Last.fm API is temporarily unavailable", "This is usually a Last.fm outage. The tool will keep retrying", True)
 
-    if http_status == 429 or "rate limit" in message or "too many requests" in message:
+    if http_status == 429 or "http code 429" in message or "429 client" in message or "rate limit" in message or "too many requests" in message:
         return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. Increase the check intervals if this repeats", True)
     if "invalid api key" in message or "api key suspended" in message or "invalid method signature" in message:
         return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", f"Save a working pair with '{render_command(['--set-lastfm-credentials'])}'", False, LASTFM_API_GUIDE_URL)
@@ -1520,11 +1520,11 @@ def classify_recovery_error(error=None, context="runtime", detail=""):
         return advice("target.not_visible", "The monitored user hides their recent listening information", "Ask the user to turn off 'Hide recent listening information' in their Last.fm privacy settings", False, PRIVACY_GUIDE_URL)
     if "user not found" in message or "no user with that name" in message or http_status == 404:
         return advice("target.not_found", safe_detail or "Last.fm has no user with that name", "Check the username, since a deleted or renamed account cannot be monitored", False, USAGE_GUIDE_URL)
-    if (http_status is not None and http_status >= 500) or "temporarily unavailable" in message or "service unavailable" in message or "bad gateway" in message:
+    if (http_status is not None and http_status >= 500) or re.search(r"http code 5\d\d", message) or "temporarily unavailable" in message or "service unavailable" in message or "bad gateway" in message:
         return advice("lastfm.unavailable", "The Last.fm API is temporarily unavailable", "This is usually a Last.fm outage. The tool will keep retrying", True)
     if "timed out" in message or "timeout" in message:
         return advice("network.timeout", "The Last.fm request timed out", "Check connectivity. The tool will keep retrying", True)
-    if any(term in message for term in ("connection", "name resolution", "failed to resolve", "network is unreachable", "no connectivity")):
+    if any(term in message for term in ("connection", "name resolution", "failed to resolve", "network is unreachable", "no connectivity", "family not supported", "aborted")):
         return advice("network.unavailable", "Last.fm could not be reached", "Check connectivity, DNS and any proxy. The tool will keep retrying", True)
     if "invalid" in message and "username" in message:
         return advice("target.invalid", safe_detail or "That is not a usable Last.fm username", f"Pass the {LASTFM_TARGET_FORMS}", False, USAGE_GUIDE_URL)
@@ -1552,6 +1552,71 @@ def print_recovery_error(error=None, context="runtime", debug=None, detail=""):
 def print_liveness_banner(message):
     print(f"* {sanitize_error_text(message)}")
     print_cur_ts("Liveness check, timestamp:\t")
+
+
+# Renders one monitoring failure as the shared report line, carrying the retry schedule and optionally the fix
+def render_monitor_recovery(advice, retry_note="", with_fix=True, label="Error"):
+    lines = [f"* {label}: {advice.summary}" + (f" ({retry_note})" if retry_note else "")]
+    if with_fix:
+        lines.append(f"To fix: {advice.fix}")
+        if DEBUG_MODE and advice.detail:
+            lines.append(f"Technical detail: {sanitize_error_text(advice.detail)}")
+    return "\n".join(lines)
+
+
+# Prints one monitoring failure, repeating the fix only when the failure category changes
+def print_monitor_recovery(error, context, tracker, retry_note="", label="Error"):
+    advice = classify_recovery_error(error, context)
+    print(render_monitor_recovery(advice, retry_note, tracker is None or tracker.should_render(advice), label))
+
+
+# Reports a lasting failure on the liveness cadence, so a broken run still says it is alive without repeating itself
+def print_outage_liveness(target, advice, since):
+    print(f"* Monitoring degraded for {target}. {advice.summary} since {get_date_from_ts(since)}")
+    print_cur_ts("Liveness check, timestamp:\t")
+
+
+# Reports that a failure cleared, since a throttled failure no longer stops printing when it is over
+def print_outage_recovery(target, lasted):
+    print(f"* Monitoring recovered for {target} after {display_time(max(1, lasted))}")
+    print_cur_ts("Timestamp:\t\t\t")
+
+
+# Tracks one failure category over time, so a lasting outage is reported once instead of on every check
+class OutageReporter:
+    # Starts with no failure recorded, so the first failure of any category is reported in full
+    def __init__(self):
+        self.code = None
+        self.since = 0
+        self.reported_at = 0
+
+    # Records one failed check and returns "full" for a new failure, "degraded" once the liveness interval has passed,
+    # "repeat" while the liveness banner is switched off or "" while the same failure is merely continuing
+    def failed(self, advice, liveness_interval):
+        now = int(time.time())
+        if advice.code != self.code:
+            self.code = advice.code
+            self.since = now
+            self.reported_at = now
+            return "full"
+        # With the liveness banner off there is nothing to carry the reminder, so the summary keeps its old cadence
+        if not liveness_interval:
+            return "repeat"
+        # Timed rather than counted, because a failing run usually retries on a different interval than a healthy one
+        if now - self.reported_at >= liveness_interval:
+            self.reported_at = now
+            return "degraded"
+        return ""
+
+    # Clears the failure after a successful check and returns how long it lasted, or None when none was active
+    def recovered(self):
+        if not self.code:
+            return None
+        lasted = int(time.time()) - self.since
+        self.code = None
+        self.since = 0
+        self.reported_at = 0
+        return lasted
 
 
 # Tracks the last uninterrupted recovery category so a long outage cannot repeat the same hint every cycle
@@ -5028,6 +5093,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
     friends_pending_changes = None
     friends_streak = 0
     friends_failure_announced = False
+    outage = OutageReporter()
+    recovery_hint_tracker = RecoveryHintTracker()
     friends_next_check_ts = 0
 
     while True:
@@ -5149,6 +5216,13 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
             debug_print("Now playing and recent tracks fetch", user=username)
             recent_tracks = lastfm_get_recent_tracks(username, network, 1)
+
+            # A throttled failure stops printing, so nothing else marks the moment it cleared
+            outage_lasted = outage.recovered()
+            if outage_lasted is not None:
+                print_outage_recovery(username, outage_lasted)
+                alive_since = int(time.time())
+            recovery_hint_tracker.reset()
             # Handle case where user still has no tracks
             if not recent_tracks or len(recent_tracks) == 0:
                 # Wait for first track to appear
@@ -5881,66 +5955,63 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
             debug_print("Monitoring cycle", check=f"#{check_count + 1}", user=username, outcome="failed", error=f"{type(e).__name__}: {e}")
 
-            str_matches = ["http code 500", "http code 504", "http code 503", "http code 502"]
-            if any(x in str(e).lower() for x in str_matches):
+            advice = classify_recovery_error(e, context="runtime")
+            sleep_interval = LASTFM_ACTIVE_CHECK_INTERVAL if lf_user_online else LASTFM_CHECK_INTERVAL
+            retry_note = f"retrying in {display_time(sleep_interval)}"
+
+            if advice.code == "lastfm.unavailable":
                 if not error_500_start_ts:
                     error_500_start_ts = int(time.time())
                     error_500_counter = 1
-                    # A streak below its threshold prints nothing at all, which reads as a run that stopped working
-                    verbose_notice("Last.fm returned a temporary service error, so automatic retries are active")
                 else:
                     error_500_counter += 1
 
-            str_matches = ["timed out", "timeout", "name resolution", "failed to resolve", "family not supported", "429 client", "aborted"]
-            if any(x in str(e).lower() for x in str_matches) or str(e) == '':
+            if advice.code in ("network.unavailable", "network.timeout", "lastfm.rate_limited") or str(e) == '':
                 if not error_network_issue_start_ts:
                     error_network_issue_start_ts = int(time.time())
                     error_network_issue_counter = 1
-                    verbose_notice("The Last.fm request could not complete, so automatic retries are active")
                 else:
                     error_network_issue_counter += 1
 
-            if error_500_start_ts and (error_500_counter >= ERROR_500_NUMBER_LIMIT and (int(time.time()) - error_500_start_ts) >= ERROR_500_TIME_LIMIT):
-                print(f"* Error 50x ({error_500_counter}x times in the last {display_time((int(time.time()) - error_500_start_ts))}): '{e}'")
-                if webhook_event_enabled("error") and not webhook_sent:
-                    m_subject = f"lastfm_monitor: Last.fm service error (user: {username})"
-                    m_body = f"Repeated Last.fm 50x errors: {sanitize_error_text(e)}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                    _, webhook_attempted = send_notification_channels("error", m_subject, m_body, webhook_enabled=True)
-                    webhook_sent = webhook_sent or webhook_attempted
-                print_cur_ts("Timestamp:\t\t\t")
-                error_500_start_ts = 0
-                error_500_counter = 0
+            # A failure that has not changed is left to the liveness cadence rather than repeated on every check
+            outage_outcome = outage.failed(advice, LIVENESS_REMINDER_SECONDS)
+            report_in_full = outage_outcome == "full"
 
-            elif error_network_issue_start_ts and (error_network_issue_counter >= ERROR_NETWORK_ISSUES_NUMBER_LIMIT and (int(time.time()) - error_network_issue_start_ts) >= ERROR_NETWORK_ISSUES_TIME_LIMIT):
-                print(f"* Error with network ({error_network_issue_counter}x times in the last {display_time((int(time.time()) - error_network_issue_start_ts))}): '{e}'")
-                if webhook_event_enabled("error") and not webhook_sent:
-                    m_subject = f"lastfm_monitor: network error (user: {username})"
-                    m_body = f"Repeated network errors: {sanitize_error_text(e)}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                    _, webhook_attempted = send_notification_channels("error", m_subject, m_body, webhook_enabled=True)
-                    webhook_sent = webhook_sent or webhook_attempted
-                print_cur_ts("Timestamp:\t\t\t")
-                error_network_issue_start_ts = 0
-                error_network_issue_counter = 0
+            # With the liveness banner off the aggregated 50x and network summaries keep their old cadence
+            if outage_outcome == "repeat":
+                if error_500_start_ts and (error_500_counter >= ERROR_500_NUMBER_LIMIT and (int(time.time()) - error_500_start_ts) >= ERROR_500_TIME_LIMIT):
+                    print_monitor_recovery(e, "runtime", recovery_hint_tracker, retry_note, f"Error 50x ({error_500_counter}x times in the last {display_time((int(time.time()) - error_500_start_ts))})")
+                    print_cur_ts("Timestamp:\t\t\t")
+                    error_500_start_ts = 0
+                    error_500_counter = 0
 
-            elif not error_500_start_ts and not error_network_issue_start_ts:
-                print(f"* Error: '{e}'")
+                elif error_network_issue_start_ts and (error_network_issue_counter >= ERROR_NETWORK_ISSUES_NUMBER_LIMIT and (int(time.time()) - error_network_issue_start_ts) >= ERROR_NETWORK_ISSUES_TIME_LIMIT):
+                    print_monitor_recovery(e, "runtime", recovery_hint_tracker, retry_note, f"Error with network ({error_network_issue_counter}x times in the last {display_time((int(time.time()) - error_network_issue_start_ts))})")
+                    print_cur_ts("Timestamp:\t\t\t")
+                    error_network_issue_start_ts = 0
+                    error_network_issue_counter = 0
 
-                if 'Invalid API key' in str(e) or 'API Key Suspended' in str(e):
-                    print("* API key might not be valid anymore!")
-                    error_email_enabled = ERROR_NOTIFICATION and not email_sent
-                    error_webhook_enabled = webhook_event_enabled("error") and not webhook_sent
-                    if error_email_enabled or error_webhook_enabled:
+                elif not error_500_start_ts and not error_network_issue_start_ts:
+                    report_in_full = True
+
+            if outage_outcome == "degraded":
+                print_outage_liveness(username, advice, outage.since)
+                alive_since = int(time.time())
+
+            elif report_in_full:
+                print_monitor_recovery(e, "runtime", recovery_hint_tracker, retry_note)
+
+                error_email_enabled = ERROR_NOTIFICATION and not email_sent and advice.code == "auth.api_key_invalid"
+                error_webhook_enabled = webhook_event_enabled("error") and not webhook_sent
+                if error_email_enabled or error_webhook_enabled:
+                    if advice.code == "auth.api_key_invalid":
                         m_subject = f"lastfm_monitor: API key error! (user: {username})"
-                        safe_error = sanitize_error_text(e)
-                        m_body = f"API key might not be valid anymore: {safe_error}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>API key might not be valid anymore: {escape(safe_error)}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
-                        email_attempted, webhook_attempted = send_notification_channels("error", m_subject, m_body, m_body_html, email_enabled=error_email_enabled, webhook_enabled=error_webhook_enabled)
-                        email_sent = email_sent or email_attempted
-                        webhook_sent = webhook_sent or webhook_attempted
-                elif webhook_event_enabled("error") and not webhook_sent:
-                    m_subject = f"lastfm_monitor: monitoring error (user: {username})"
-                    m_body = f"Monitoring error: {sanitize_error_text(e)}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                    _, webhook_attempted = send_notification_channels("error", m_subject, m_body, webhook_enabled=True)
+                    else:
+                        m_subject = f"lastfm_monitor: monitoring error (user: {username})"
+                    m_body = f"{advice.summary}{nl_ch}{nl_ch}To fix: {advice.fix}{nl_ch}{nl_ch}Last.fm Monitor will retry in {display_time(sleep_interval)}.{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                    m_body_html = f"<html><head></head><body>{escape(advice.summary)}<br><br>To fix: {escape(advice.fix)}<br><br>Last.fm Monitor will retry in {escape(display_time(sleep_interval))}.{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                    email_attempted, webhook_attempted = send_notification_channels("error", m_subject, m_body, m_body_html, email_enabled=error_email_enabled, webhook_enabled=error_webhook_enabled)
+                    email_sent = email_sent or email_attempted
                     webhook_sent = webhook_sent or webhook_attempted
                 print_cur_ts("Timestamp:\t\t\t")
 
@@ -8548,7 +8619,7 @@ def main():
         SONG_ON_LOOP_NOTIFICATION = False
         PROFILE_NOTIFICATION = False
         ERROR_NOTIFICATION = False
-        verbose_print("Email notifications are off because SMTP_HOST is still the shipped placeholder")
+        verbose_notice("Email notifications are off because SMTP_HOST is still the shipped placeholder")
 
     emit_startup_summary(build_startup_summary(args.username, cfg_path, env_path, FINAL_LOG_PATH), show_full=full_startup_summary_enabled())
 
