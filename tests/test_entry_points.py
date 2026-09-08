@@ -1,5 +1,6 @@
-"""What a bare, mistaken or one-shot invocation prints: the welcome screen, the missing-target block and the screen clear."""
+"""What a bare, mistaken or one-shot invocation prints: the welcome screen, the missing-target block, a refused argument combination and the screen clear."""
 
+import argparse
 import io
 import subprocess
 import sys
@@ -292,3 +293,22 @@ class TestConfigDiscoveryDisabled:
         labels = [check.label for check in monitor.doctor_check_configuration()]
         assert "No configuration file selected" in labels
         assert "No dotenv file selected" in labels
+
+
+class TestArgumentConflicts:
+
+    # The error has to name something the user could have typed: --debug is stored as debug_mode
+    @pytest.mark.parametrize("argument, named", [("--debug", "--debug"), ("--webhook", "--webhook"), ("someuser", "LASTFM_USERNAME")])
+    def test_a_refused_combination_names_the_argument_that_was_typed(self, tmp_path, argument, named):
+        result = subprocess.run([sys.executable, str(PROJECT_ROOT / "lastfm_monitor.py"), "--set-webhook-url", argument], capture_output=True, text=True, cwd=tmp_path)
+
+        assert result.returncode == 2
+        # Compared to the end of the line, since the old name '--debug-mode' contains the flag it should have named
+        assert result.stderr.strip().endswith(f"--set-webhook-url cannot be combined with {named}")
+
+    def test_an_unparsed_destination_falls_back_to_its_own_name(self):
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--webhook", dest="webhook_enabled", action="store_true")
+
+        assert monitor.conflicting_argument_name(parser, "webhook_enabled", argv=[]) == "--webhook"
+        assert monitor.conflicting_argument_name(parser, "not_an_argument", argv=[]) == "--not-an-argument"
