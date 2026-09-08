@@ -2165,7 +2165,7 @@ def reload_secrets_signal_handler(sig, frame):
         detected_provider = detect_webhook_provider(WEBHOOK_URL)
         if detected_provider and detected_provider != normalized_webhook_provider():
             WEBHOOK_PROVIDER = detected_provider
-            print(f"* Updated webhook provider to {detected_provider}")
+            print(f"* Updated webhook provider to {webhook_provider_display_name(detected_provider)}")
 
     print_cur_ts("Timestamp:\t\t\t")
 
