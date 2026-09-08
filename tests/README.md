@@ -41,6 +41,7 @@ and again before anything is published to PyPI.
 | `test_lastfm_friends_scraper.py` | Scrape headers, retry behavior, following markup and public profile parsing |
 | `test_liveness_banner.py` | What a quiet run prints, when it prints it and what restarts the countdown |
 | `test_recovery_errors.py` | Failure classification, the advice each failure produces and the error block it renders |
+| `test_properties.py` | Generated inputs for the answer normalizers: every profile form, every duration unit, path completion and the dotenv round trip |
 | `test_profile_tracking.py` | Profile baseline creation, independent field controls and deferred persistence |
 | `test_private_settings.py` | Hidden credential entry with debug output silenced, atomic dotenv updates and refusal to save invalid input |
 | `test_repository_contracts.py` | Governance documents, issue templates, action pinning, release gating and the CI contract |
