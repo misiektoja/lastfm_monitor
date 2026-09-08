@@ -539,3 +539,29 @@ class TestASecretSwitchedOff:
 
         assert code == 0
         assert not (tmp_path / ".env").exists()
+
+
+class TestTheHiddenPrompt:
+
+    # A debug trace fired while a secret is being typed is the one thing the tool must not print
+    def test_the_wizard_reads_a_secret_with_debug_off(self, monkeypatch):
+        monkeypatch.setattr(monitor, "DEBUG_MODE", True)
+        seen = []
+
+        def hidden(prompt=""):
+            seen.append(monitor.DEBUG_MODE)
+            return "api-key-value"
+
+        assert monitor._wizard_ask_secret("Last.fm API key", getpass_func=hidden) == "api-key-value"
+        assert seen == [False]
+        assert monitor.DEBUG_MODE is True
+
+    def test_an_interrupt_restores_the_debug_mode(self, monkeypatch):
+        monkeypatch.setattr(monitor, "DEBUG_MODE", True)
+
+        def interrupt(prompt=""):
+            raise KeyboardInterrupt
+
+        with pytest.raises(KeyboardInterrupt):
+            monitor._wizard_ask_secret("Last.fm API key", getpass_func=interrupt)
+        assert monitor.DEBUG_MODE is True

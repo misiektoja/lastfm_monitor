@@ -1,3 +1,4 @@
+import ast
 import os
 import subprocess
 import sys
@@ -347,3 +348,65 @@ class TestNoTargetIsNeeded:
         result = subprocess.run([sys.executable, str(monitor.Path(__file__).resolve().parents[1] / "lastfm_monitor.py"), flag], capture_output=True, text=True, cwd=tmp_path, stdin=subprocess.DEVNULL)
         assert "No Last.fm username was provided" not in result.stdout
         assert "requires an interactive terminal" in result.stdout
+
+
+# Records the debug mode in force each time a hidden prompt is answered
+class DebugRecordingPrompt:
+    def __init__(self, answers):
+        self.debug_modes = []
+        self._answers = iter(answers)
+
+    def __call__(self, prompt):
+        self.debug_modes.append(monitor.DEBUG_MODE)
+        answer = next(self._answers)
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+
+
+# A trace fired while someone is typing a secret is the one thing the tool must not print
+class TestDebugIsSilentWhileASecretIsTyped:
+
+    @pytest.mark.parametrize("command, answers", [
+        ("run_set_webhook_url", ["https://discord.com/api/webhooks/123/private-token"]),
+        ("run_set_lastfm_credentials", ["api-key-value", "api-secret-value"]),
+        ("run_set_spotify_credentials", ["client-id-value", "client-secret-value"]),
+    ])
+    def test_the_hidden_reader_runs_with_debug_off(self, tmp_path, monkeypatch, command, answers):
+        monkeypatch.setattr(monitor, "DEBUG_MODE", True)
+        prompt = DebugRecordingPrompt(answers)
+
+        getattr(monitor, command)(env_file=tmp_path / ".env", interactive=True, getpass_func=prompt)
+
+        assert prompt.debug_modes == [False] * len(answers)
+        assert monitor.DEBUG_MODE is True
+
+    def test_the_password_reader_runs_with_debug_off(self, tmp_path, monkeypatch, configured_mail):
+        monkeypatch.setattr(monitor, "DEBUG_MODE", True)
+        prompt = DebugRecordingPrompt(["mail-secret-value"])
+
+        monitor.run_set_smtp_password(env_file=tmp_path / ".env", interactive=True, getpass_func=prompt, sign_in=lambda password, timeout=15: "monitor@example.test")
+
+        assert prompt.debug_modes == [False]
+        assert monitor.DEBUG_MODE is True
+
+    def test_an_interrupt_at_the_prompt_restores_the_debug_mode(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(monitor, "DEBUG_MODE", True)
+
+        with pytest.raises(monitor.RecoveryError):
+            monitor.run_set_webhook_url(env_file=tmp_path / ".env", interactive=True, getpass_func=DebugRecordingPrompt([KeyboardInterrupt()]))
+
+        assert monitor.DEBUG_MODE is True
+
+    # A new hidden reader that skips the suppression would be invisible in a transcript, so the sweep is structural
+    def test_every_hidden_reader_sits_inside_a_suppressed_scope(self):
+        source = (monitor.Path(__file__).resolve().parents[1] / "lastfm_monitor.py").read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            reads = [call for call in ast.walk(node) if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == "read_secret_interactively"]
+            if not reads:
+                continue
+            decorated = any(isinstance(decorator, ast.Name) and decorator.id == "suppresses_debug_output" for decorator in node.decorator_list)
+            suppressed = any(isinstance(item.context_expr, ast.Call) and isinstance(item.context_expr.func, ast.Name) and item.context_expr.func.id == "debug_output_suppressed" for block in ast.walk(node) if isinstance(block, ast.With) for item in block.items)
+            assert decorated or suppressed, f"{node.name} reads a secret with debug output still on"
