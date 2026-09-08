@@ -3,6 +3,8 @@
 ## Requirements
 
 * Python 3.9 or higher
+
+Running an older Python stops the tool at startup with a message naming the version it found. Python 3.9 still works, but `pip` will resolve older releases of `pylast`, `requests` and `python-dotenv` there, because their current releases require Python 3.10 or newer. Prefer a newer Python where you can choose.
 * Libraries: [pyLast](https://github.com/pylast/pylast), `requests`, `python-dateutil`, [PyOTP](https://github.com/pyauth/pyotp), [Spotipy](https://github.com/spotipy-dev/spotipy), `python-dotenv`, `beautifulsoup4`
 
 Tested on:

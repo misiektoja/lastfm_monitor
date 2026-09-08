@@ -38,7 +38,7 @@ and again before anything is published to PyPI.
 | `test_profile_tracking.py` | Profile baseline creation, independent field controls and deferred persistence |
 | `test_private_settings.py` | Hidden credential entry, atomic dotenv updates and refusal to save invalid input |
 | `test_repository_contracts.py` | Governance documents, issue templates, action pinning, release gating and the CI contract |
-| `test_repository_metadata.py` | Governance files, citation, funding, line endings, the declared editor style, the pinned linter and release integrity |
+| `test_repository_metadata.py` | Governance files, citation, funding, line endings, the declared editor style, the pinned linter, the declared Python floor and release integrity |
 | `test_secret_sources.py` | The placeholder predicate, where each secret resolved from and how the sources are reported |
 | `test_spotify_web_backend.py` | TOTP generation and config override, anonymous token handling and caching |
 | `test_tls_verification.py` | The TLS verification switch, the call sites that read it and the library sessions it reaches |
