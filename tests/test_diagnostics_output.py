@@ -619,7 +619,10 @@ class FakeNetwork:
 
 
 # Runs the real monitoring loop on a fake clock advanced by each patched sleep and returns what it printed
-def drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles, check_interval=30, liveness=0, fail_after=None, friends_fail_after=None):
+def drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles, check_interval=30, liveness=0, fail_after=None, friends_fail_after=None, friends_recover_after=None, friends_failing_calls=None):
+    if friends_failing_calls is not None:
+        friends_fail_after = 0
+
     clock = FakeClock()
     user = FakeUser(clock, (clock.now - 600, FakeTrack()), fail_after=fail_after)
     monkeypatch.chdir(tmp_path)
@@ -647,7 +650,12 @@ def drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles, check_interval=30,
         friends_calls = count(1)
 
         def failing_friends(_username):
-            if next(friends_calls) > friends_fail_after:
+            call = next(friends_calls)
+            if friends_failing_calls is not None:
+                failing = call in friends_failing_calls
+            else:
+                failing = call > friends_fail_after and (friends_recover_after is None or call <= friends_recover_after)
+            if failing:
                 raise RuntimeError("Cannot read the friends list")
             return {"someone"}
 
@@ -798,3 +806,48 @@ class TestAVerboseNoticeNeverFloats:
         assert len(repeats) > 1
         assert "attempt=#2" in repeats[0]
         assert "RuntimeError" in repeats[0]
+
+
+class TestARecoveryIsNewsOnlyIfTheFailureWas:
+    # A recovery for a failure the reader never saw explains nothing and reads as an event of its own
+    def test_the_recovery_follows_a_notice_the_reader_saw(self, verbose_on, monkeypatch, tmp_path, capsys):
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=5, friends_fail_after=1, friends_recover_after=3).splitlines()
+        assert len([line for line in transcript if "cannot fire" in line]) == 1
+        recovered = [number for number, line in enumerate(transcript) if "available again" in line]
+        assert len(recovered) == 1
+        assert transcript[recovered[0]].startswith("* Friends/profile check is available again")
+        assert transcript[recovered[0] + 1].startswith("Timestamp:")
+
+    def test_a_failure_nobody_saw_recovers_quietly(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=5, friends_fail_after=1, friends_recover_after=3)
+        assert "cannot fire" not in transcript
+        assert "available again" not in transcript
+
+    # The threshold error line is printed whatever the mode, so its recovery has to be too
+    def test_an_error_the_run_printed_gets_its_recovery_without_verbose(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=6, friends_fail_after=1, friends_recover_after=4)
+        assert "Error confirming friend/profile state (attempt 3)" in transcript
+        assert transcript.count("* Friends/profile check is available again") == 1
+
+    # Whatever verbose stops printing, debug still has to carry, or a support transcript loses the recovery
+    def test_the_recovery_is_traced_even_when_it_is_not_printed(self, debug_on, monkeypatch, tmp_path, capsys):
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=5, friends_fail_after=1, friends_recover_after=3)
+        recovered = [line for line in transcript.splitlines() if "Friends/profile check" in line and "outcome=OK" in line]
+        assert len(recovered) == 1
+        assert "failures=2" in recovered[0]
+
+    # A second outage nobody saw must not inherit the first one's announcement
+    def test_the_announcement_does_not_carry_into_the_next_outage(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=9, friends_failing_calls={2, 3, 4, 6, 7})
+        assert transcript.count("Error confirming friend/profile state (attempt 3)") == 1
+        assert transcript.count("* Friends/profile check is available again") == 1
+
+    def test_a_run_that_never_failed_says_nothing_about_recovering(self, verbose_on, monkeypatch, tmp_path, capsys):
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=5, friends_fail_after=99)
+        assert "available again" not in transcript
