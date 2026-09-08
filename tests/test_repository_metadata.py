@@ -125,6 +125,45 @@ def test_support_document_routes_every_request_type():
         assert concept in support
 
 
+# Returns the lowest Python version the packaging metadata, the workflow matrix and the documentation each claim
+def declared_python_floors() -> dict:
+    pyproject = read_asset("pyproject.toml")
+    requires = re.search(r'requires-python = ">=(\d+\.\d+)"', pyproject)
+    assert requires is not None, "pyproject.toml declares no requires-python floor"
+    classifiers = sorted(tuple(int(part) for part in version.split(".")) for version in re.findall(r'"Programming Language :: Python :: (\d+\.\d+)"', pyproject))
+    assert classifiers, "pyproject.toml lists no versioned Python classifiers"
+    matrix = read_yaml_asset(".github/workflows/tests.yml")["jobs"]["test"]["strategy"]["matrix"]["python-version"]
+    documented = re.search(r"Python (\d+\.\d+) or higher", read_asset("docs/installation.md"))
+    assert documented is not None, "the installation page states no Python requirement"
+    return {
+        "requires-python": requires.group(1),
+        "lowest classifier": ".".join(str(part) for part in classifiers[0]),
+        "workflow matrix": min(matrix, key=lambda version: tuple(int(part) for part in str(version).split("."))),
+        "installation page": documented.group(1),
+    }
+
+
+# A floor claimed in four places and enforced in a fifth drifts silently, so every declaration is checked against the constant
+def test_every_declaration_of_the_python_floor_agrees_with_the_runtime_gate():
+    import lastfm_monitor as monitor
+
+    disagreeing = {where: claimed for where, claimed in declared_python_floors().items() if claimed != monitor.MINIMUM_PYTHON_VERSION_TEXT}
+    assert disagreeing == {}, f"declarations that disagree with MINIMUM_PYTHON_VERSION ({monitor.MINIMUM_PYTHON_VERSION_TEXT}): {disagreeing}"
+
+
+# Claiming support for a version nothing tests is a claim nobody checked
+def test_the_test_matrix_starts_at_the_supported_floor():
+    floors = declared_python_floors()
+    assert floors["workflow matrix"] == floors["requires-python"]
+
+
+# The gate is the only thing standing between an old interpreter and a syntax error it cannot explain
+def test_the_runtime_gate_reads_the_constant():
+    source = read_asset("lastfm_monitor.py")
+    assert "if sys.version_info < MINIMUM_PYTHON_VERSION:" in source
+    assert not re.search(r"sys\.version_info < \(\d+, \d+\)", source), "the gate compares against a literal instead of the constant"
+
+
 # Verifies the optional local hooks run the same linter version CI installs, or a clean commit still fails CI
 def test_local_hooks_match_the_pinned_linter():
     pinned = re.search(r'lint = \["ruff==([^"]+)"\]', read_asset("pyproject.toml"))
