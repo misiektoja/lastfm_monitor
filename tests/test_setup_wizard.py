@@ -667,3 +667,55 @@ class TestTheFrameAroundTheQuestions:
         assert "Run doctor now?" in with_target
         assert "Run doctor now?" not in without_target
         assert "\n\n\n" not in without_target
+
+
+# Typing a secret only to be asked whether it may be stored is one question too late
+class TestASavedCredentialIsSettledBeforeTheHiddenPrompt:
+
+    # Builds a state whose dotenv file already holds the named secrets
+    def state_with_saved_secrets(self, tmp_path, names, in_effect=True):
+        env_path = tmp_path / ".env"
+        env_path.write_text("".join(f"{name}=saved-{name.casefold()}\n" for name in names), encoding="utf-8")
+        values = dict(monitor._config_template_defaults())
+        if in_effect:
+            values.update({name: f"saved-{name.casefold()}" for name in names})
+        return monitor.WizardSetupState(str(tmp_path / "lastfm_monitor.conf"), str(env_path), values)
+
+    def test_the_lastfm_pair_is_asked_about_once(self, tmp_path):
+        state = self.state_with_saved_secrets(tmp_path, ("LASTFM_API_KEY", "LASTFM_API_SECRET"))
+        script = Script(["y"])
+
+        monitor._wizard_collect_auth_section(state, input_func=script, getpass_func=Script(["new-key", "new-secret"]), validator=lambda api_key, api_secret: None)
+
+        assert script.prompts == ["Replace the Last.fm API credentials already configured? [y/N]: "]
+        assert state.secret_updates == {"LASTFM_API_KEY": "new-key", "LASTFM_API_SECRET": "new-secret"}
+
+    def test_the_spotify_pair_is_asked_about_once(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(monitor, "spotify_get_access_token", lambda client_id, client_secret: "token")
+        state = self.state_with_saved_secrets(tmp_path, ("SP_CLIENT_ID", "SP_CLIENT_SECRET"))
+        script = Script(["y", "y", "n", "y", ""])
+
+        monitor._wizard_collect_spotify_section(state, input_func=script, getpass_func=Script(["new-id", "new-secret"]))
+
+        assert script.prompts[3] == "Replace the Spotify app credentials already configured? [y/N]: "
+        assert len(script.prompts) == 5
+        assert state.secret_updates == {"SP_CLIENT_ID": "new-id", "SP_CLIENT_SECRET": "new-secret"}
+
+    # A dotenv file the run never loaded still holds the value the wizard would overwrite
+    def test_a_pair_saved_only_in_the_dotenv_file_still_gets_the_question(self, tmp_path):
+        state = self.state_with_saved_secrets(tmp_path, ("LASTFM_API_KEY", "LASTFM_API_SECRET"), in_effect=False)
+        script = Script(["n"])
+
+        monitor._wizard_collect_auth_section(state, input_func=script, getpass_func=Script([]), validator=lambda api_key, api_secret: None)
+
+        assert script.prompts == ["Replace the Last.fm API credentials already configured? [y/N]: "]
+        assert state.secret_updates == {}
+
+    def test_declining_the_replacement_never_opens_the_hidden_prompt(self, tmp_path):
+        state = self.state_with_saved_secrets(tmp_path, ("LASTFM_API_KEY", "LASTFM_API_SECRET"))
+        hidden = Script([])
+
+        monitor._wizard_collect_auth_section(state, input_func=Script(["n"]), getpass_func=hidden, validator=lambda api_key, api_secret: None)
+
+        assert hidden.prompts == []
+        assert state.secret_updates == {}
