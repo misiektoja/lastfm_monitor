@@ -194,3 +194,77 @@ def test_webhook_delivery_refuses_a_destination_that_stopped_validating(monkeypa
     with pytest.raises(monitor.req.exceptions.InvalidURL):
         monitor.post_webhook_request(json={"content": "body"})
     post.assert_not_called()
+
+
+DISCORD_DESTINATION = "https://discord.com/api/webhooks/123/private-token"
+NTFY_DESTINATION = "https://ntfy.sh/a-private-topic"
+UNRECOGNISED_DESTINATION = "https://hooks.example.test/services/an-unrecognised-destination"
+
+
+# Points the reload at one dotenv file and restores every global it can change
+@pytest.fixture
+def reloadable(tmp_path, monkeypatch):
+    env = tmp_path / ".env"
+    monkeypatch.setattr(monitor, "DOTENV_FILE", str(env))
+    monkeypatch.setattr(monitor, "WEBHOOK_URL", DISCORD_DESTINATION)
+    monkeypatch.setattr(monitor, "WEBHOOK_PROVIDER", "discord")
+    monkeypatch.setattr(monitor, "SECRET_SOURCES", {})
+    for secret in monitor.SECRET_KEYS:
+        monkeypatch.delenv(secret, raising=False)
+    return env
+
+
+class TestSecretReload:
+
+    # A destination edited into the dotenv file can belong to the other service
+    def test_a_reloaded_url_moves_the_provider_with_it(self, reloadable, capsys):
+        reloadable.write_text(f'WEBHOOK_URL="{NTFY_DESTINATION}"\n', encoding="utf-8")
+        monitor.reload_secrets_signal_handler(monitor.signal.SIGHUP, None)
+        assert monitor.WEBHOOK_URL == NTFY_DESTINATION
+        assert monitor.WEBHOOK_PROVIDER == "ntfy"
+        assert "* Updated webhook provider to ntfy" in capsys.readouterr().out
+
+    # The stored value is casefolded for comparisons, which is not how the service spells itself
+    def test_the_message_uses_the_service_spelling(self, reloadable, capsys, monkeypatch):
+        monkeypatch.setattr(monitor, "WEBHOOK_URL", NTFY_DESTINATION)
+        monkeypatch.setattr(monitor, "WEBHOOK_PROVIDER", "ntfy")
+        reloadable.write_text(f'WEBHOOK_URL="{DISCORD_DESTINATION}"\n', encoding="utf-8")
+        monitor.reload_secrets_signal_handler(monitor.signal.SIGHUP, None)
+        assert monitor.WEBHOOK_PROVIDER == "discord"
+        assert "* Updated webhook provider to Discord" in capsys.readouterr().out
+
+    def test_an_unrecognised_url_leaves_the_configured_provider_alone(self, reloadable, capsys):
+        reloadable.write_text(f'WEBHOOK_URL="{UNRECOGNISED_DESTINATION}"\n', encoding="utf-8")
+        monitor.reload_secrets_signal_handler(monitor.signal.SIGHUP, None)
+        assert monitor.WEBHOOK_URL == UNRECOGNISED_DESTINATION
+        assert monitor.WEBHOOK_PROVIDER == "discord"
+        assert "Updated webhook provider" not in capsys.readouterr().out
+
+    def test_a_url_for_the_configured_provider_says_nothing(self, reloadable, capsys):
+        reloadable.write_text(f'WEBHOOK_URL="{DISCORD_DESTINATION}"\n', encoding="utf-8")
+        monitor.reload_secrets_signal_handler(monitor.signal.SIGHUP, None)
+        assert "Updated webhook provider" not in capsys.readouterr().out
+
+    # The cached handler holds tokens issued to the previous application
+    def test_new_spotify_app_credentials_drop_the_cached_handler(self, reloadable, monkeypatch):
+        monkeypatch.setattr(monitor, "SP_OAUTH_MEMORY_CACHE_HANDLER", object())
+        monkeypatch.setattr(monitor, "SP_CLIENT_ID", "old-client-id")
+        reloadable.write_text('SP_CLIENT_ID="new-client-id"\n', encoding="utf-8")
+        monitor.reload_secrets_signal_handler(monitor.signal.SIGHUP, None)
+        assert monitor.SP_CLIENT_ID == "new-client-id"
+        assert monitor.SP_OAUTH_MEMORY_CACHE_HANDLER is None
+
+    def test_a_reloaded_secret_is_reported_as_coming_from_the_dotenv_file(self, reloadable):
+        reloadable.write_text(f'WEBHOOK_URL="{NTFY_DESTINATION}"\n', encoding="utf-8")
+        monitor.reload_secrets_signal_handler(monitor.signal.SIGHUP, None)
+        assert monitor.SECRET_SOURCES["WEBHOOK_URL"] == "dotenv file"
+
+    def test_the_sentinel_switches_the_reload_off(self, reloadable, monkeypatch, capsys):
+        reloadable.write_text(f'WEBHOOK_URL="{NTFY_DESTINATION}"\n', encoding="utf-8")
+        # A file actually named 'none', so the sentinel cannot be satisfied by the path simply not existing
+        (reloadable.parent / "none").write_text(f'WEBHOOK_URL="{NTFY_DESTINATION}"\n', encoding="utf-8")
+        monkeypatch.chdir(reloadable.parent)
+        monkeypatch.setattr(monitor, "DOTENV_FILE", "none")
+        monitor.reload_secrets_signal_handler(monitor.signal.SIGHUP, None)
+        assert monitor.WEBHOOK_URL == DISCORD_DESTINATION
+        assert "Reloaded" not in capsys.readouterr().out
