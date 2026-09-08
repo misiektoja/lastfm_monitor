@@ -39,6 +39,7 @@ python -m pytest -m e2e
 | `test_config_loading.py` | Config files read as data and never executed |
 | `test_config_writers.py` | The timestamped config backup, the atomic replace, the secrets the generated config drops and the dotenv file that is deliberately not backed up |
 | `test_doctor.py` | The preflight row contract, every check's failure branches, the section order and the verdict |
+| `test_family_contract.py` | The output contract shared with the sibling monitors: the four status markers, the report shape and the sentences every tool prints |
 | `test_entry_points.py` | The welcome screen an empty command prints, the missing-target block, the argument combinations a secret command refuses and when the screen is cleared |
 | `test_diagnostics_output.py` | The verbose and debug printers: the grammar every debug line follows, what each mode covers and what neither prints when both are off |
 | `test_delivery_tests.py` | The messages both test commands send, the doctor's delivery tests and what each does with nothing to send |

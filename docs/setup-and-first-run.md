@@ -25,6 +25,7 @@ Things worth knowing before you run it:
 - Secrets go to the dotenv file. Non-secret settings go to the config file. An existing config is replaced only after you agree, and a timestamped backup is kept.
 - Credentials are checked while you enter them: the Last.fm pair against Last.fm, the mail server through a real sign-in that sends nothing.
 - A credential already saved is offered for replacement before the hidden prompt, so nothing is typed only to be discarded. Declining keeps the saved value without displaying it.
+- For an ntfy webhook the topic name alone is enough when the topic lives on `ntfy.sh`: typing `my-topic` saves `https://ntfy.sh/my-topic`. Any other host needs its complete HTTPS topic URL.
 - Every answer it cannot use is explained and offered again. Declining the retry moves on: a value question keeps the default it showed, a channel such as email or webhook is switched off with its alerts, and a required answer ends its section.
 - The summary can be reviewed section by section, so one answer can be changed without repeating the rest. Re-entering a section starts it over from the settings the run began with.
 - After saving it offers [Doctor Preflight](troubleshooting.md#doctor-preflight), then prints the commands that check and start monitoring.
