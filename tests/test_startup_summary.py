@@ -1,6 +1,7 @@
 """The startup summary: the rows a run prints, the order they come in and which view each one belongs to."""
 
 import ast
+import io
 import re
 import sys
 from pathlib import Path
@@ -65,6 +66,17 @@ def restored_globals():
     yield
     for name, value in saved.items():
         setattr(monitor, name, value)
+
+
+# Runs main with the output log switched on and returns the log file the run wrote
+def run_main_with_logging(tmp_path, arguments=()):
+    log_path = tmp_path / "run_someuser.log"
+    saved_stdout = sys.stdout
+    try:
+        run_main_to_the_loop(tmp_path, config_body='DISABLE_LOGGING = False\nLF_LOGFILE = "run"\n', arguments=arguments)
+    finally:
+        sys.stdout = saved_stdout
+    return log_path
 
 
 def labels(rows):
@@ -289,3 +301,55 @@ class TestWhatEachViewPrints:
         assert lines[0].startswith("* Notifications (email):        On (active, inactive")
         assert lines[1].startswith(" " * 32)
         assert all(len(line) <= 100 for line in lines)
+
+
+class TestTheLogAlwaysGetsTheFullView:
+    def test_the_logger_writes_each_channel_on_its_own(self, tmp_path, capsys):
+        stream = monitor.Logger(str(tmp_path / "split.log"))
+        stream.terminal_only("terminal\n")
+        stream.log_only("log\n")
+        stream.write("both\n")
+        assert capsys.readouterr().out == "terminal\nboth\n"
+        assert (tmp_path / "split.log").read_text(encoding="utf-8") == "log\nboth\n"
+
+    # The log file is written for a reader with no terminal, so it gets the same tab expansion as every other line
+    def test_the_log_channel_expands_tabs_like_the_shared_writer(self, tmp_path, capsys):
+        stream = monitor.Logger(str(tmp_path / "tabs.log"))
+        stream.log_only("a\tb\n")
+        capsys.readouterr()
+        assert (tmp_path / "tabs.log").read_text(encoding="utf-8") == "a       b\n"
+
+    # A log attached to a bug report has to carry every effective setting, whichever view the reporter saw
+    def test_a_full_view_row_reaches_the_log_but_not_the_terminal(self, restored_globals, tmp_path, capsys):
+        log_path = run_main_with_logging(tmp_path)
+        printed = capsys.readouterr().out
+        logged = log_path.read_text(encoding="utf-8")
+        assert "* Install method:" in logged
+        assert "* Install method:" not in printed
+        assert "* Output logging:" in logged
+        assert "* Output logging:" not in printed
+
+    # Both pointer rows orient a reader at a terminal, so neither belongs in the file that already answers them
+    def test_the_two_pointer_rows_stay_out_of_the_log(self, restored_globals, tmp_path, capsys):
+        log_path = run_main_with_logging(tmp_path)
+        printed = capsys.readouterr().out
+        logged = log_path.read_text(encoding="utf-8")
+        assert "* More details:" in printed
+        assert "* More details:" not in logged
+        assert "* Output:" in printed
+        assert "* Output:" not in logged
+
+    def test_the_full_view_run_logs_the_same_rows(self, restored_globals, tmp_path, capsys):
+        log_path = run_main_with_logging(tmp_path, arguments=["--verbose"])
+        capsys.readouterr()
+        logged = log_path.read_text(encoding="utf-8")
+        rendered = {line.split(":", 1)[0][2:] for line in logged.splitlines() if line.startswith("* ") and ":" in line}
+        assert set(SHARED_ROW_ORDER) - {"Output", "More details"} <= rendered
+        assert set(OWN_ROWS) <= rendered
+
+    # A plain buffer has no log channel, which is what lets a test render the summary without capturing stdout
+    def test_a_stream_without_the_two_channels_still_gets_the_terminal_view(self):
+        buffer = io.StringIO()
+        monitor.emit_startup_summary(monitor.build_startup_summary("someuser"), show_full=False, stream=buffer)
+        assert "* More details:" in buffer.getvalue()
+        assert "* Install method:" not in buffer.getvalue()
