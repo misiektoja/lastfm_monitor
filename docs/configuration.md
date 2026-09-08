@@ -38,6 +38,17 @@ By default the tool looks for a configuration file named `lastfm_monitor.conf` i
 - home directory (`~`)
 - script directory
 
+### The Monitored User
+
+`LASTFM_USERNAME` in the config file saves the user to monitor, so the command needs no argument:
+
+```sh
+lastfm_monitor
+```
+
+A username passed on the command line overrides the saved one for that run. With neither, the tool prints the
+welcome screen instead of starting.
+
 If you saved it under a different name or in a different directory, select it with `--config-file`:
 
 ```sh

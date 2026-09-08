@@ -33,6 +33,7 @@ pip install lastfm_monitor
 - **CSV export** of every listened song with timestamps, plus the **Last.fm Wrapped tool** for top artists, tracks and albums
 - **Clickable music and lyrics URLs** for Last.fm, Apple Music, YouTube Music, Amazon Music, Deezer, Tidal, Genius, AZLyrics, Tekstowo.pl, Musixmatch and Lyrics.com, configurable per service
 - **Session statistics** and detection of **offline mode** and **Spotify private mode**
+- **Guided setup wizard** that writes a ready-to-run configuration, and a **doctor preflight** that checks it before the first run
 - **Status persistence** across restarts, **flexible configuration** through config files, dotenv files, environment variables and command-line arguments, and **signal controls** for the running copy
 
 ## Documentation
