@@ -18,6 +18,18 @@ lastfm_monitor --generate-config lastfm_monitor.conf
 
 When you include the filename, Last.fm Monitor writes the template directly as UTF-8. This avoids PowerShell changing the file encoding during redirection.
 
+### Replacing an Existing Config
+
+Passing a filename never replaces an existing file silently. On a terminal the tool asks first. Outside one, in a script or a container, it stops and names `--force`:
+
+```sh
+lastfm_monitor --generate-config lastfm_monitor.conf --force
+```
+
+Either way the previous file is copied to `lastfm_monitor.conf.<timestamp>.bak` before the new template is written, and the backup path is printed. Both files are readable only by their owner.
+
+Shell redirection works differently: `> lastfm_monitor.conf` truncates the file before the tool starts, so nothing can back it up. Pass the filename when the destination already exists.
+
 Edit the `lastfm_monitor.conf` file and change any desired configuration options (detailed comments are provided for each).
 
 By default the tool looks for a configuration file named `lastfm_monitor.conf` in:
@@ -183,6 +195,8 @@ lastfm_monitor --set-smtp-password
 ```
 
 Each command accepts `--env-file PATH`. Existing values require confirmation and the update is atomic. `--env-file none` is rejected because these commands must save their values.
+
+The dotenv file is replaced in one step and is never backed up, so a rotated secret is not left behind in a second file. Keep your own copy if you need one.
 
 Answering `n` to the replacement question keeps the saved value and says so. Pressing Ctrl+C at any prompt cancels the command and exits with a failure code. Neither answer changes the dotenv file.
 
