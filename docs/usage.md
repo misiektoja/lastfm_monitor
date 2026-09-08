@@ -24,6 +24,8 @@ Settings come from a configuration file when one is found. [Configuration File](
 
 If a run does not start, `--doctor` reports every check the tool makes before monitoring. See [Doctor Preflight](troubleshooting.md#doctor-preflight).
 
+Before monitoring starts the tool prints the settings in effect: the monitored user, the polling intervals, both alert channels, the files the run reads and writes, and each optional feature that is switched on. `--verbose` and `--debug` print the complete list instead, including the settings left at their defaults and where each secret came from. See [Verbose Output](troubleshooting.md#verbose-output).
+
 To enable tracking of followers and/or followings changes:
 - set `TRACK_FOLLOWERS` and/or `TRACK_FOLLOWINGS` to `True`
 - or use the `--track-followers` and/or `--track-followings` flags
