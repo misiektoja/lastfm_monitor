@@ -1,6 +1,7 @@
-"""The guided setup: answers held until Save, the review summary, per-section editing and the files it writes."""
+"""The guided setup: answers held until Save, the mail server sign-in, the escape from every rejected answer, the review summary, per-section editing and the files it writes."""
 
 import ast
+import smtplib
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +12,19 @@ import lastfm_monitor as monitor
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (PROJECT_ROOT / "lastfm_monitor.py").read_text(encoding="utf-8")
+REAL_VERIFY_SMTP = monitor._wizard_verify_smtp
+
+
+# Keeps the wizard's mail server sign-in offline, so no scripted setup run opens a connection
+@pytest.fixture(autouse=True)
+def accepted_smtp_sign_in(monkeypatch):
+    monkeypatch.setattr(monitor, "_wizard_verify_smtp", lambda values, password: None)
+
+
+# Hands the real sign-in check back to the one test that drives it against a stub connection
+@pytest.fixture
+def real_smtp_sign_in(monkeypatch):
+    monkeypatch.setattr(monitor, "_wizard_verify_smtp", REAL_VERIFY_SMTP)
 
 
 # Answers one scripted question per call and fails the test when the wizard asks more than the script covers
@@ -47,7 +61,6 @@ def full_run_answers(**overrides):
 @pytest.fixture
 def wizard(tmp_path, monkeypatch):
     monkeypatch.setattr(monitor, "_wizard_verify_lastfm_credentials", lambda api_key, api_secret: None)
-    monkeypatch.setattr(monitor, "_wizard_verify_smtp", lambda values, password: None)
     monkeypatch.setattr(monitor, "run_doctor", lambda **kwargs: 0)
     monkeypatch.chdir(tmp_path)
 
@@ -385,3 +398,144 @@ class TestEveryRejectedAnswerHasAWayOut:
         assert Path(state.env_path) == tmp_path / ".env"
         assert state.config_values["DOTENV_FILE"] == str(tmp_path / ".env")
         assert f"Keeping {tmp_path / '.env'}." in capsys.readouterr().out
+
+
+# Builds the state an email section starts from, with one shipped placeholder among the saved values
+def email_state(**overrides):
+    values = dict(monitor._config_template_defaults())
+    values.update({"SMTP_HOST": "mail.example.test", "SMTP_PORT": 2525, "SMTP_USER": "user@example.test", "SENDER_EMAIL": "your_sender_email", "RECEIVER_EMAIL": "to@example.test"})
+    values.update(overrides)
+    return monitor.WizardSetupState("config", "env", values)
+
+
+# The advice a failing sign-in returns, either kind
+def smtp_advice(retryable):
+    code = "smtp.connection" if retryable else "smtp.authentication"
+    return monitor.make_recovery_advice(code, "The mail server refused the sign-in", "Use an app password", retryable)
+
+
+class TestTheMailServerSignIn:
+
+    def test_the_questions_come_in_one_order_with_the_saved_values_offered(self):
+        state = email_state()
+        script = Script(["y", "", "", "", "", "sender@example.test", "", "1"])
+
+        monitor._wizard_collect_email_section(state, input_func=script, getpass_func=Script([""]))
+
+        assert script.prompts == [
+            "Configure email notifications? [Y/n]: ",
+            "SMTP host [mail.example.test]: ",
+            "SMTP port [2525]: ",
+            "Enable TLS/SSL for SMTP? [Y/n]: ",
+            "SMTP username [user@example.test]: ",
+            # The shipped placeholder is filtered out, so setup never offers 'your_sender_email' back
+            "Sender email: ",
+            "Receiver email [to@example.test]: ",
+            "Choose [1-3]: ",
+        ]
+
+    # The hidden prompt comes last, so every visible answer is on screen before the password is typed
+    def test_the_password_is_asked_after_the_last_visible_answer(self):
+        state = email_state()
+        secrets = Script(["typed-password"])
+
+        monitor._wizard_collect_email_section(state, input_func=Script(["y", "", "", "", "", "sender@example.test", "", "1"]), getpass_func=secrets)
+
+        assert secrets.prompts == ["SMTP password: "]
+
+    def test_the_sign_in_gets_the_collected_settings_once(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(monitor, "_wizard_verify_smtp", lambda values, password: calls.append((values, password)))
+        state = email_state()
+
+        monitor._wizard_collect_email_section(state, input_func=Script(["y", "smtp.example.test", "587", "", "user", "from@example.test", "to@example.test", "1"]), getpass_func=Script(["typed-password"]))
+
+        assert len(calls) == 1
+        assert calls[0] == ({"SMTP_HOST": "smtp.example.test", "SMTP_PORT": 587, "SMTP_SSL": True, "SMTP_USER": "user", "SENDER_EMAIL": "from@example.test", "RECEIVER_EMAIL": "to@example.test"}, "typed-password")
+
+    def test_a_refused_sign_in_asks_the_settings_again(self, monkeypatch):
+        outcomes = [smtp_advice(False), None]
+        monkeypatch.setattr(monitor, "_wizard_verify_smtp", lambda values, password: outcomes.pop(0))
+        state = email_state()
+        # Answer the section, accept the retry, then answer it again with a different host
+        script = Script(["y", "", "", "", "", "sender@example.test", "", "y", "smtp.second.test", "", "", "", "sender@example.test", "", "1"])
+
+        monitor._wizard_collect_email_section(state, input_func=script, getpass_func=Script(["", ""]))
+
+        assert outcomes == []
+        assert state.config_values["SMTP_HOST"] == "smtp.second.test"
+        assert state.config_values["ACTIVE_NOTIFICATION"] is True
+
+    # A host that cannot be reached is usually a laptop offline, so six correct answers are not thrown away
+    def test_declining_a_retryable_failure_keeps_the_settings(self, monkeypatch, capsys):
+        monkeypatch.setattr(monitor, "_wizard_verify_smtp", lambda values, password: smtp_advice(True))
+        state = email_state()
+
+        monitor._wizard_collect_email_section(state, input_func=Script(["y", "smtp.example.test", "", "", "user", "from@example.test", "to@example.test", "n", "1"]), getpass_func=Script([""]))
+
+        assert state.config_values["SMTP_HOST"] == "smtp.example.test"
+        assert state.config_values["ACTIVE_NOTIFICATION"] is True
+        assert "Run --doctor to check the sign-in again." in capsys.readouterr().out
+
+    # A rejected sign-in cannot start working on its own, so half a mail server is never written
+    def test_declining_a_rejected_sign_in_switches_every_email_alert_off(self, wizard, tmp_path, monkeypatch):
+        monkeypatch.setattr(monitor, "_wizard_verify_smtp", lambda values, password: smtp_advice(False))
+
+        code, _script = wizard(full_run_answers(email=["y", "smtp.example.test", "", "", "user", "from@example.test", "to@example.test", "n"]), secrets=("api-key", "api-secret", ""))
+
+        assert code == 0
+        written = config_values(tmp_path / "lastfm_monitor.conf")
+        assert all(written[key] is False for key in monitor.WIZARD_EMAIL_NOTIFICATION_KEYS)
+        assert written["SMTP_HOST"] == monitor._config_template_defaults()["SMTP_HOST"]
+
+    # The check has to go through the same sign-in the real send uses, and leave no setting applied behind it
+    def test_the_check_uses_the_real_sign_in_and_restores_the_globals(self, real_smtp_sign_in, monkeypatch):
+        calls = []
+
+        def sign_in(ssl_enabled, smtp_timeout=None):
+            calls.append((ssl_enabled, smtp_timeout, monitor.SMTP_HOST, monitor.SMTP_PASSWORD))
+            raise smtplib.SMTPAuthenticationError(535, b"denied")
+
+        monkeypatch.setattr(monitor, "smtp_connect_and_login", sign_in)
+        monkeypatch.setattr(monitor, "SMTP_HOST", "before.example.test")
+        monkeypatch.setattr(monitor, "SMTP_PASSWORD", "saved-password")
+
+        advice = monitor._wizard_verify_smtp({"SMTP_HOST": "typed.example.test", "SMTP_SSL": True}, "")
+
+        assert calls == [(True, monitor.WIZARD_SMTP_TIMEOUT, "typed.example.test", "saved-password")]
+        assert advice is not None and advice.code == "smtp.authentication"
+        assert (monitor.SMTP_HOST, monitor.SMTP_PASSWORD) == ("before.example.test", "saved-password")
+
+
+class TestASecretSwitchedOff:
+
+    def test_the_disable_option_queues_an_empty_value(self, monkeypatch, tmp_path):
+        env_path = tmp_path / ".env"
+        env_path.write_text("NTFY_ACCESS_TOKEN=saved-token\n", encoding="utf-8")
+        state = monitor.WizardSetupState(str(tmp_path / "lastfm_monitor.conf"), str(env_path), {})
+
+        monitor._wizard_collect_ntfy_access_token(state, input_func=Script(["3"]), getpass_func=Script([]))
+
+        assert state.secret_updates == {"NTFY_ACCESS_TOKEN": ""}
+
+    def test_saving_removes_the_assignment_from_the_dotenv_file(self, tmp_path):
+        env_path = tmp_path / ".env"
+        env_path.write_text("NTFY_ACCESS_TOKEN=saved-token\nSMTP_PASSWORD=kept\n", encoding="utf-8")
+
+        monitor.update_dotenv_file(env_path, {"NTFY_ACCESS_TOKEN": ""})
+
+        assert env_path.read_text(encoding="utf-8") == "SMTP_PASSWORD=kept\n"
+        assert monitor._dotenv_contains_key(env_path, "NTFY_ACCESS_TOKEN") is False
+
+    # Nothing to remove and nothing to store means no file, so a cleared secret cannot create an empty one
+    def test_a_run_that_only_clears_a_missing_secret_writes_no_dotenv_file(self, wizard, tmp_path, monkeypatch):
+        monkeypatch.setattr(monitor, "LASTFM_API_KEY", "already-configured")
+        monkeypatch.setattr(monitor, "LASTFM_API_SECRET", "already-configured")
+        monkeypatch.setenv("NTFY_ACCESS_TOKEN", "exported-token")
+        monkeypatch.setenv("WEBHOOK_URL", "https://ntfy.sh/private-topic")
+
+        # Keep the saved webhook URL, then switch the exported ntfy token off, so the only queued secret is the clear
+        code, _script = wizard(full_run_answers(auth=["n"], webhook=["y", "2", "1", "3", "1"]), secrets=())
+
+        assert code == 0
+        assert not (tmp_path / ".env").exists()
