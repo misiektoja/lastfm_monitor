@@ -52,6 +52,7 @@ and again before anything is published to PyPI.
 | `test_secret_sources.py` | The placeholder predicate, where each secret resolved from and how the sources are reported |
 | `test_notification_delivery.py` | What the two-channel sender reports and which channel a later attempt sends again |
 | `test_untrusted_text.py` | Text arriving from Last.fm: terminal control sequences stripped at every writer and markup escaped in email bodies |
+| `test_terminal_color.py` | Coloured output: the theme and its template block, which colour lands on which token, the single colour pass through the writers and the plain log file |
 | `test_spotify_web_backend.py` | TOTP generation and config override, anonymous token handling and caching |
 | `test_tls_verification.py` | The TLS verification switch, the call sites that read it and the library sessions it reaches |
 | `test_webhook_notifications.py` | Webhook settings coverage, startup rollups, URL validation and independent event switches |
