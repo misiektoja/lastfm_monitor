@@ -45,7 +45,7 @@ and again before anything is published to PyPI.
 | `test_private_settings.py` | Hidden credential entry with debug output silenced, atomic dotenv updates and refusal to save invalid input |
 | `test_repository_contracts.py` | Governance documents, issue templates, action pinning, release gating and the CI contract |
 | `test_repository_metadata.py` | Governance files, citation, funding, line endings, the declared editor style, the pinned linter, the declared Python floor and release integrity |
-| `test_setup_wizard.py` | The guided setup: answers held until Save, the mail server sign-in, the escape from every rejected answer, the review summary, per-section editing and the files it writes |
+| `test_setup_wizard.py` | The guided setup: answers held until Save, the mail server sign-in, the escape from every rejected answer, the frame around its questions, the review summary, per-section editing and the files it writes |
 | `test_secret_sources.py` | The placeholder predicate, where each secret resolved from and how the sources are reported |
 | `test_spotify_web_backend.py` | TOTP generation and config override, anonymous token handling and caching |
 | `test_tls_verification.py` | The TLS verification switch, the call sites that read it and the library sessions it reaches |
