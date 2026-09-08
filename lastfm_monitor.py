@@ -1299,7 +1299,7 @@ RECOVERY_CODES = frozenset({
     "target.missing", "target.invalid", "target.not_found", "target.not_visible",
     "smtp.invalid", "smtp.authentication", "smtp.connection",
     "webhook.invalid", "webhook.rejected", "webhook.rate_limited", "webhook.connection",
-    "file.unreadable", "file.unwritable",
+    "file.unreadable", "file.unwritable", "file.exists",
     "unknown",
 })
 
@@ -1378,7 +1378,7 @@ def classify_recovery_error(error=None, context="runtime", detail=""):
     if context == "config":
         if "does not exist" in message or "no such file" in message:
             return advice("config.missing", safe_detail or "The configuration file was not found", f"Create one with '{render_command(['--generate-config', DEFAULT_CONFIG_FILENAME], include_paths=False)}' or correct the --config-file path", False, CONFIG_FILE_GUIDE_URL)
-        return advice("config.invalid", safe_detail or "The configuration file could not be read", f"Correct the reported line, or start from a fresh template with '{render_command(['--generate-config', DEFAULT_CONFIG_FILENAME], include_paths=False)}'", False, CONFIG_FILE_GUIDE_URL)
+        return advice("config.invalid", safe_detail or "The configuration file could not be read", f"Correct the reported line, or write a fresh template to a different path with '{render_command(['--generate-config', '<new-file>'], include_paths=False)}'", False, CONFIG_FILE_GUIDE_URL)
 
     if context in ("set_lastfm_credentials", "set_spotify_credentials", "set_webhook_url", "set_smtp_password"):
         flag = f"--{context.replace('_', '-')}"
@@ -1430,6 +1430,9 @@ def classify_recovery_error(error=None, context="runtime", detail=""):
         if any(term in message for term in ("could not be reached", "connection", "timed out")):
             return advice("webhook.connection", "The webhook service could not be reached", "Check connectivity and the webhook host, then try again", True, WEBHOOK_GUIDE_URL)
         return advice("webhook.rejected", safe_detail or "The webhook service refused the delivery", f"Confirm the webhook still exists and the URL is current, then verify with '{render_command(['--send-test-webhook'])}'", http_status is not None and http_status >= 500, WEBHOOK_GUIDE_URL)
+
+    if context == "file.exists":
+        return advice("file.exists", safe_detail or "The destination file already exists", f"Re-run with --force to replace it after a timestamped backup, or write to a different path with '{render_command(['--generate-config', '<new-file>'], include_paths=False)}'", False, CONFIG_FILE_GUIDE_URL)
 
     if context == "file":
         if any(term in message for term in ("cannot load", "cannot be opened", "unreadable", "not valid utf-8", "no such file", "cannot be read")):
@@ -2543,6 +2546,89 @@ def lastfm_get_profile(username):
         raise RuntimeError(f"Failed to parse profile page: {e}")
 
 
+# Copies an existing file to a timestamped private backup before it is replaced, returning the backup path or None
+def create_timestamped_backup(destination, attempts=100):
+    destination_path = Path(destination).expanduser()
+    if not destination_path.is_file():
+        return None
+    existing_bytes = destination_path.read_bytes()
+    stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    for attempt in range(attempts):
+        suffix = f".{stamp}.bak" if attempt == 0 else f".{stamp}-{attempt}.bak"
+        backup_path = destination_path.with_name(destination_path.name + suffix)
+        try:
+            # O_EXCL so a backup can never overwrite an earlier one, even under a concurrent run
+            descriptor = os.open(str(backup_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            continue
+        try:
+            with os.fdopen(descriptor, "wb") as backup_file:
+                backup_file.write(existing_bytes)
+                backup_file.flush()
+                os.fsync(backup_file.fileno())
+        except Exception:
+            try:
+                os.unlink(str(backup_path))
+            except OSError as cleanup_error:
+                debug_print(f"Cannot remove the failed backup '{backup_path}': {cleanup_error}")
+            raise
+        debug_print(f"Backed up '{destination_path}' to '{backup_path}'")
+        return str(backup_path)
+    raise OSError(f"Could not create a unique backup for '{destination_path}' after {attempts} attempts")
+
+
+# Writes one file through a temporary file in the same directory, so a crash cannot leave a half-written file
+def write_file_atomically(destination, content, mode=None):
+    destination_path = Path(destination).expanduser()
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", prefix=f".{destination_path.name}.", suffix=".tmp", dir=str(destination_path.parent), delete=False) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write(content)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        if mode is not None and os.name == "posix":
+            os.chmod(str(temporary_path), mode)
+        os.replace(str(temporary_path), str(destination_path))
+        temporary_path = None
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
+    return str(destination_path)
+
+
+# Saves one JSON state file atomically, so an interrupted run cannot strand a half-written file
+def write_json_atomically(destination, payload, ensure_ascii=True):
+    return write_file_atomically(destination, json.dumps(payload, indent=2, ensure_ascii=ensure_ascii) + "\n")
+
+
+# Confirms replacing one existing generated config, or requires --force when there is nobody to ask
+def confirm_generated_config_replacement(destination, force=False, interactive=None, input_func=input):
+    destination_path = Path(destination).expanduser()
+    if not destination_path.exists() or force:
+        return True
+    terminal_is_interactive = bool(sys.stdin.isatty()) if interactive is None else bool(interactive)
+    if not terminal_is_interactive:
+        raise FileExistsError(f"Config file '{destination_path}' already exists and there is no terminal to confirm replacing it")
+    try:
+        answer = str(read_interactively(input_func, f"Config file '{destination_path}' exists. Replace it and keep a timestamped backup? [y/N]: ")).strip().casefold()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        answer = ""
+    return answer in ("y", "yes")
+
+
+# Writes one generated config atomically, backing up whatever was there first
+def write_generated_config(output_file, content, force=False, interactive=None, input_func=input):
+    destination = Path(output_file).expanduser()
+    if not confirm_generated_config_replacement(destination, force, interactive, input_func):
+        return None, False
+    backup_path = create_timestamped_backup(destination)
+    write_file_atomically(destination, content)
+    return backup_path, True
+
+
 # Loads previous friends/followers state from JSON file
 def load_friends_state(username, friends_type):
     filename = f"lastfm_{username}_{friends_type}.json"
@@ -2571,8 +2657,7 @@ def save_friends_state(username, friends_type, users_set):
             'count': len(users_set),
             'last_updated': int(time.time())
         }
-        with open(filename, 'w', encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+        write_json_atomically(filename, data)
     except Exception as e:
         print(f"* Warning: Cannot save {friends_type} state to '{filename}': {e}")
 
@@ -2600,8 +2685,7 @@ def save_profile_state(username, profile):
         data = load_profile_state(username)
         data.update({key: value for key, value in profile.items() if key in ('display_name', 'bio') and isinstance(value, str)})
         data['last_updated'] = int(time.time())
-        with open(filename, 'w', encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        write_json_atomically(filename, data, ensure_ascii=False)
     except Exception as e:
         print(f"* Warning: Cannot save profile state to '{filename}': {e}")
 
@@ -3840,21 +3924,8 @@ def update_dotenv_file(destination, updates):
             output_lines.append(f"{key}={_format_dotenv_value(value)}")
             seen_keys.add(key)
     content = "\n".join(output_lines) + ("\n" if output_lines else "")
-    temporary_path = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", prefix=f".{destination_path.name}.", suffix=".tmp", dir=str(destination_path.parent), delete=False) as temporary_file:
-            temporary_path = Path(temporary_file.name)
-            temporary_file.write(content)
-            temporary_file.flush()
-            os.fsync(temporary_file.fileno())
-        if os.name == "posix":
-            os.chmod(temporary_path, 0o600)
-        os.replace(temporary_path, destination_path)
-        temporary_path = None
-    finally:
-        if temporary_path is not None and temporary_path.exists():
-            temporary_path.unlink()
-    return str(destination_path)
+    # No backup here on purpose: a rotated secret must not be left behind in a second file
+    return write_file_atomically(destination_path, content, mode=0o600)
 
 
 # Collects hidden private values and saves them together after overwrite confirmation
@@ -4403,8 +4474,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             last_activity_to_save.append(album)
 
             try:
-                with open(lastfm_last_activity_file, 'w', encoding="utf-8") as f:
-                    json.dump(last_activity_to_save, f, indent=2)
+                write_json_atomically(lastfm_last_activity_file, last_activity_to_save)
             except Exception as e:
                 print(f"* Cannot save last status to '{lastfm_last_activity_file}' file: {e}")
 
@@ -4571,8 +4641,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             last_activity_to_save.append(album)
 
             try:
-                with open(lastfm_last_activity_file, 'w', encoding="utf-8") as f:
-                    json.dump(last_activity_to_save, f, indent=2)
+                write_json_atomically(lastfm_last_activity_file, last_activity_to_save)
             except Exception as e:
                 print(f"* Cannot save last status to '{lastfm_last_activity_file}' file: {e}")
 
@@ -5088,8 +5157,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     last_activity_to_save.append(track)
                     last_activity_to_save.append(album)
                     try:
-                        with open(lastfm_last_activity_file, 'w', encoding="utf-8") as f:
-                            json.dump(last_activity_to_save, f, indent=2)
+                        write_json_atomically(lastfm_last_activity_file, last_activity_to_save)
                     except Exception as e:
                         print(f"* Cannot save last status to '{lastfm_last_activity_file}' file: {e}")
 
@@ -5486,8 +5554,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     last_activity_to_save.append(track)
                     last_activity_to_save.append(album)
                     try:
-                        with open(lastfm_last_activity_file, 'w', encoding="utf-8") as f:
-                            json.dump(last_activity_to_save, f, indent=2)
+                        write_json_atomically(lastfm_last_activity_file, last_activity_to_save)
                     except Exception as e:
                         print(f"* Cannot save last status to '{lastfm_last_activity_file}' file: {e}")
                     if INACTIVE_NOTIFICATION or webhook_event_enabled("inactive"):
@@ -6416,13 +6483,24 @@ def main():
         try:
             idx = sys.argv.index("--generate-config")
             if idx + 1 < len(sys.argv) and not sys.argv[idx + 1].startswith("-"):
+                # Writing the file directly avoids the UTF-16 output redirection in some Windows PowerShell versions
                 output_file = sys.argv[idx + 1]
-                with open(output_file, "w", encoding="utf-8") as f:
-                    f.write(config_content)
+                backup_path, written = write_generated_config(output_file, config_content, force="--force" in sys.argv)
+                if not written:
+                    print("Config was not replaced. The existing file is unchanged")
+                    sys.exit(1)
                 print(f"Config written to: {output_file}")
+                if backup_path:
+                    print(f"Previous config backed up to: {backup_path}")
                 sys.exit(0)
         except (ValueError, IndexError):
             pass
+        except FileExistsError as exc:
+            print_recovery_error(exc, context="file.exists", detail=str(exc))
+            sys.exit(1)
+        except OSError as exc:
+            print_recovery_error(exc, context="file", detail=f"The config file could not be written: {exc}")
+            sys.exit(1)
         sys.stdout.buffer.write(config_content.encode("utf-8"))
         sys.stdout.buffer.flush()
         sys.exit(0)
@@ -6492,6 +6570,12 @@ def main():
         const=True,
         metavar="FILENAME",
         help="Print default config template and exit (on Windows PowerShell, specify a filename to avoid redirect encoding issues)",
+    )
+    conf.add_argument(
+        "--force",
+        dest="force",
+        action="store_true",
+        help="Let --generate-config replace an existing file, after a timestamped backup",
     )
     conf.add_argument(
         "--env-file",
@@ -7013,13 +7097,8 @@ def main():
         sys.exit(1)
 
     if not DISABLE_LOGGING:
-        log_path = Path(os.path.expanduser(LF_LOGFILE))
-        if log_path.parent != Path('.'):
-            if log_path.suffix == "":
-                log_path = log_path.parent / f"{log_path.name}_{args.username}.log"
-        else:
-            if log_path.suffix == "":
-                log_path = Path(f"{log_path.name}_{args.username}.log")
+        # The same helper the doctor reports from, so the reported destination is the one the run writes to
+        log_path = build_log_path(LF_LOGFILE, args.username)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         FINAL_LOG_PATH = str(log_path)
         sys.stdout = Logger(FINAL_LOG_PATH)
