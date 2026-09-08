@@ -2066,18 +2066,21 @@ def send_webhook(title: str, description: str, notification_type: str = "song", 
 def send_notification_channels(notification_type: str, subject: str, body: str, body_html: str = "", email_enabled: bool = False, webhook_enabled: Optional[bool] = None, subject_short: str = "", body_short: str = "") -> Tuple[bool, bool]:
     email_attempted = bool(email_enabled)
     webhook_attempted = webhook_event_enabled(notification_type) if webhook_enabled is None else bool(webhook_enabled)
+    email_delivered = False
+    webhook_delivered = False
     if email_attempted:
         print(f"Sending email notification to {RECEIVER_EMAIL}")
-        email_result = send_email(subject, body, body_html, SMTP_SSL)
-        debug_print("Notification dispatch", type=notification_type, channel="email", outcome="failed" if email_result else "OK")
+        email_delivered = send_email(subject, body, body_html, SMTP_SSL) == 0
+        debug_print("Notification dispatch", type=notification_type, channel="email", outcome="OK" if email_delivered else "failed")
     if webhook_attempted:
         print("Sending webhook notification")
         use_short_content = NTFY_SHORT is True and normalized_webhook_provider() == "ntfy"
         webhook_subject = (subject_short or subject) if use_short_content else subject
         webhook_body = (body_short or body) if use_short_content else body
-        webhook_result = send_webhook(webhook_subject, webhook_body, notification_type, force=True)
-        debug_print("Notification dispatch", type=notification_type, channel="webhook", outcome="failed" if webhook_result else "OK")
-    return email_attempted, webhook_attempted
+        webhook_delivered = send_webhook(webhook_subject, webhook_body, notification_type, force=True) == 0
+        debug_print("Notification dispatch", type=notification_type, channel="webhook", outcome="OK" if webhook_delivered else "failed")
+    # Delivery rather than the attempt, so a channel that failed is tried again while one that arrived is not sent twice
+    return email_delivered, webhook_delivered
 
 
 # Initializes the CSV file
@@ -5632,9 +5635,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}{album_html_line}{music_section_html}{lyrics_section_html_fresh}{played_for_m_body_html}{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
                         if ACTIVE_NOTIFICATION or webhook_event_enabled("active"):
-                            email_attempted, webhook_attempted = send_notification_channels("active", m_subject, m_body, m_body_html, email_enabled=ACTIVE_NOTIFICATION, subject_short=f"{username} is active", body_short="\n".join(value for value in (track, artist, album) if value))
-                            email_sent = email_sent or email_attempted
-                            webhook_sent = webhook_sent or webhook_attempted
+                            email_delivered, webhook_delivered = send_notification_channels("active", m_subject, m_body, m_body_html, email_enabled=ACTIVE_NOTIFICATION, subject_short=f"{username} is active", body_short="\n".join(value for value in (track, artist, album) if value))
+                            email_sent = email_sent or email_delivered
+                            webhook_sent = webhook_sent or webhook_delivered
 
                     track_matched = track.upper() in tracks_upper or album.upper() in tracks_upper
                     email_song_enabled = ((TRACK_NOTIFICATION and track_matched) or SONG_NOTIFICATION) and not email_sent
@@ -5722,9 +5725,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         album_html_line = f"<br>Album: {album_html}" if album else ""
                         m_body = f"Track: {artist} - {track}{duration_m_body}\n{album_line}{music_section_text}{lyrics_section_text}{played_for_m_body}\n\nUser plays song on LOOP ({song_on_loop} times){timespan_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                         m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}{album_html_line}{music_section_html}{lyrics_section_html}{played_for_m_body_html}<br><br>User plays song on LOOP (<b>{song_on_loop}</b> times){timespan_str_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
-                        email_attempted, webhook_attempted = send_notification_channels("loop", m_subject, m_body, m_body_html, email_enabled=loop_email_enabled, webhook_enabled=loop_webhook_enabled, subject_short=f"{username} is playing a song on loop", body_short="\n".join(value for value in (track, artist, album) if value))
-                        email_sent = email_sent or email_attempted
-                        webhook_sent = webhook_sent or webhook_attempted
+                        email_delivered, webhook_delivered = send_notification_channels("loop", m_subject, m_body, m_body_html, email_enabled=loop_email_enabled, webhook_enabled=loop_webhook_enabled, subject_short=f"{username} is playing a song on loop", body_short="\n".join(value for value in (track, artist, album) if value))
+                        email_sent = email_sent or email_delivered
+                        webhook_sent = webhook_sent or webhook_delivered
 
                     # Send track/song notifications only if loop notification was not sent
                     if track_matched:
@@ -5733,16 +5736,16 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         track_email_enabled = TRACK_NOTIFICATION and not email_sent
                         track_webhook_enabled = webhook_event_enabled("track") and not webhook_sent
                         if track_email_enabled or track_webhook_enabled:
-                            email_attempted, webhook_attempted = send_notification_channels("track", m_subject, m_body, m_body_html, email_enabled=track_email_enabled, webhook_enabled=track_webhook_enabled, subject_short=f"{username}: monitored track", body_short="\n".join(value for value in (track, artist, album) if value))
-                            email_sent = email_sent or email_attempted
-                            webhook_sent = webhook_sent or webhook_attempted
+                            email_delivered, webhook_delivered = send_notification_channels("track", m_subject, m_body, m_body_html, email_enabled=track_email_enabled, webhook_enabled=track_webhook_enabled, subject_short=f"{username}: monitored track", body_short="\n".join(value for value in (track, artist, album) if value))
+                            email_sent = email_sent or email_delivered
+                            webhook_sent = webhook_sent or webhook_delivered
 
                     song_email_enabled = SONG_NOTIFICATION and not email_sent
                     song_webhook_enabled = webhook_event_enabled("song") and not webhook_sent
                     if song_email_enabled or song_webhook_enabled:
-                        email_attempted, webhook_attempted = send_notification_channels("song", m_subject, m_body, m_body_html, email_enabled=song_email_enabled, webhook_enabled=song_webhook_enabled, subject_short=f"{username}: song changed", body_short="\n".join(value for value in (track, artist, album) if value))
-                        email_sent = email_sent or email_attempted
-                        webhook_sent = webhook_sent or webhook_attempted
+                        email_delivered, webhook_delivered = send_notification_channels("song", m_subject, m_body, m_body_html, email_enabled=song_email_enabled, webhook_enabled=song_webhook_enabled, subject_short=f"{username}: song changed", body_short="\n".join(value for value in (track, artist, album) if value))
+                        email_sent = email_sent or email_delivered
+                        webhook_sent = webhook_sent or webhook_delivered
 
                     lf_user_online = True
                     lf_active_ts_last = int(time.time())
@@ -5962,9 +5965,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         m_body = f"Last played: {artist} - {track}{duration_m_body}\n{album_line}{music_section_text}{lyrics_section_text}User got inactive after listening to music for {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}\nUser played music from {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep=' to ')}{paused_mbody}{listened_songs_mbody}{played_for_m_body}{recent_songs_mbody}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}\nInactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
                         m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{last_played_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}{album_html_line}{music_section_html}{lyrics_section_html}User got inactive after listening to music for <b>{calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}</b><br>User played music from <b>{get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep='</b> to <b>')}</b>{paused_mbody_html}{listened_songs_mbody_html}{played_for_m_body_html}{recent_songs_mbody_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b><br>Inactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
-                        email_attempted, webhook_attempted = send_notification_channels("inactive", m_subject, m_body, m_body_html, email_enabled=INACTIVE_NOTIFICATION, subject_short=f"{username} is inactive", body_short="\n".join(value for value in (track, artist, album) if value))
-                        email_sent = email_sent or email_attempted
-                        webhook_sent = webhook_sent or webhook_attempted
+                        email_delivered, webhook_delivered = send_notification_channels("inactive", m_subject, m_body, m_body_html, email_enabled=INACTIVE_NOTIFICATION, subject_short=f"{username} is inactive", body_short="\n".join(value for value in (track, artist, album) if value))
+                        email_sent = email_sent or email_delivered
+                        webhook_sent = webhook_sent or webhook_delivered
                     lf_active_ts_start = 0
                     playing_track = None
                     last_track_start_ts = 0
@@ -6026,18 +6029,19 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             # A failure that has not changed is left to the liveness cadence rather than repeated on every check
             outage_outcome = outage.failed(advice, LIVENESS_REMINDER_SECONDS)
             report_in_full = outage_outcome == "full"
+            reported = False
 
             # With the liveness banner off the aggregated 50x and network summaries keep their old cadence
             if outage_outcome == "repeat":
                 if error_500_start_ts and (error_500_counter >= ERROR_500_NUMBER_LIMIT and (int(time.time()) - error_500_start_ts) >= ERROR_500_TIME_LIMIT):
                     print_monitor_recovery(e, "runtime", recovery_hint_tracker, retry_note, f"Error 50x ({error_500_counter}x times in the last {display_time((int(time.time()) - error_500_start_ts))})")
-                    print_cur_ts("Timestamp:\t\t\t")
+                    reported = True
                     error_500_start_ts = 0
                     error_500_counter = 0
 
                 elif error_network_issue_start_ts and (error_network_issue_counter >= ERROR_NETWORK_ISSUES_NUMBER_LIMIT and (int(time.time()) - error_network_issue_start_ts) >= ERROR_NETWORK_ISSUES_TIME_LIMIT):
                     print_monitor_recovery(e, "runtime", recovery_hint_tracker, retry_note, f"Error with network ({error_network_issue_counter}x times in the last {display_time((int(time.time()) - error_network_issue_start_ts))})")
-                    print_cur_ts("Timestamp:\t\t\t")
+                    reported = True
                     error_network_issue_start_ts = 0
                     error_network_issue_counter = 0
 
@@ -6050,19 +6054,25 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
             elif report_in_full:
                 print_monitor_recovery(e, "runtime", recovery_hint_tracker, retry_note)
+                reported = True
 
-                error_email_enabled = ERROR_NOTIFICATION and not email_sent and advice.code == "auth.api_key_invalid"
-                error_webhook_enabled = webhook_event_enabled("error") and not webhook_sent
-                if error_email_enabled or error_webhook_enabled:
-                    if advice.code == "auth.api_key_invalid":
-                        m_subject = f"lastfm_monitor: API key error! (user: {username})"
-                    else:
-                        m_subject = f"lastfm_monitor: monitoring error (user: {username})"
-                    m_body = f"{advice.summary}{nl_ch}{nl_ch}To fix: {advice.fix}{nl_ch}{nl_ch}Last.fm Monitor will retry in {display_time(sleep_interval)}.{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                    m_body_html = f"<html><head></head><body>{escape(advice.summary)}<br><br>To fix: {escape(advice.fix)}<br><br>Last.fm Monitor will retry in {escape(display_time(sleep_interval))}.{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
-                    email_attempted, webhook_attempted = send_notification_channels("error", m_subject, m_body, m_body_html, email_enabled=error_email_enabled, webhook_enabled=error_webhook_enabled)
-                    email_sent = email_sent or email_attempted
-                    webhook_sent = webhook_sent or webhook_attempted
+            # Attempted on every failing check rather than only on the report, so a channel that failed is tried again
+            error_email_enabled = ERROR_NOTIFICATION and not email_sent and advice.code == "auth.api_key_invalid"
+            error_webhook_enabled = webhook_event_enabled("error") and not webhook_sent
+            if error_email_enabled or error_webhook_enabled:
+                if advice.code == "auth.api_key_invalid":
+                    m_subject = f"lastfm_monitor: API key error! (user: {username})"
+                else:
+                    m_subject = f"lastfm_monitor: monitoring error (user: {username})"
+                m_body = f"{advice.summary}{nl_ch}{nl_ch}To fix: {advice.fix}{nl_ch}{nl_ch}Last.fm Monitor will retry in {display_time(sleep_interval)}.{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                m_body_html = f"<html><head></head><body>{escape(advice.summary)}<br><br>To fix: {escape(advice.fix)}<br><br>Last.fm Monitor will retry in {escape(display_time(sleep_interval))}.{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                email_delivered, webhook_delivered = send_notification_channels("error", m_subject, m_body, m_body_html, email_enabled=error_email_enabled, webhook_enabled=error_webhook_enabled)
+                email_sent = email_sent or email_delivered
+                webhook_sent = webhook_sent or webhook_delivered
+                reported = True
+
+            # One trailer for whatever this check printed, since a retry can be the only thing on the screen
+            if reported:
                 print_cur_ts("Timestamp:\t\t\t")
 
         if lf_user_online:
