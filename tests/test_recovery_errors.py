@@ -29,6 +29,20 @@ def classifier_codes():
     return codes
 
 
+# Returns the codes the doctor rows build directly, which never pass through the classifier
+def doctor_codes():
+    source = (PROJECT_ROOT / "lastfm_monitor.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    codes = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef) or not node.name.startswith(("doctor_", "_doctor_")):
+            continue
+        for inner in ast.walk(node):
+            if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name) and inner.func.id == "make_recovery_advice" and inner.args and isinstance(inner.args[0], ast.Constant):
+                codes.add(inner.args[0].value)
+    return codes
+
+
 # Returns the context every print_recovery_error call site passes, with the default filled in
 def call_site_contexts():
     tree = ast.parse((PROJECT_ROOT / "lastfm_monitor.py").read_text(encoding="utf-8"))
@@ -49,13 +63,29 @@ def call_site_contexts():
 
 
 class TestTheClosedCodeSet:
-    def test_every_declared_code_is_reachable_from_the_classifier(self):
-        unreachable = monitor.RECOVERY_CODES - classifier_codes()
+    # A preflight row states a condition the classifier has no error to route on, so it builds its advice directly
+    def test_every_declared_code_is_reachable(self):
+        unreachable = monitor.RECOVERY_CODES - classifier_codes() - doctor_codes()
         assert unreachable == set(), f"codes nothing can return: {sorted(unreachable)}"
 
-    def test_the_classifier_returns_no_code_outside_the_set(self):
-        undeclared = classifier_codes() - monitor.RECOVERY_CODES
+    def test_no_code_outside_the_set_is_produced(self):
+        undeclared = (classifier_codes() | doctor_codes()) - monitor.RECOVERY_CODES
         assert undeclared == set(), f"codes returned but not declared: {sorted(undeclared)}"
+
+    def test_the_preflight_codes_are_the_ones_the_classifier_cannot_reach(self):
+        assert doctor_codes() - classifier_codes() == {"config.insecure", "dependency.missing"}
+
+    # A call site that adds context used to replace the error text the rules read, so every such failure was unknown
+    @pytest.mark.parametrize("message, expected", [
+        ("User not found", "target.not_found"),
+        ("Invalid API key - You must be granted a valid key by last.fm", "auth.api_key_invalid"),
+        ("Login: User required to be logged in", "target.not_visible"),
+        ("Connection timed out", "network.timeout"),
+    ])
+    def test_a_caller_supplied_detail_does_not_hide_the_error(self, message, expected):
+        advice = monitor.classify_recovery_error(Exception(message), detail="Cannot read the recent tracks of 'someuser'")
+        assert advice.code == expected
+        assert "Cannot read the recent tracks" in advice.detail
 
     def test_an_unsupported_code_is_refused(self):
         with pytest.raises(ValueError):

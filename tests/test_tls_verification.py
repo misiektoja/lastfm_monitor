@@ -81,8 +81,12 @@ class TestEveryCallSiteReadsTheSwitch:
 
     # Anything that speaks TLS without going through requests needs the same switch, and mail was the one that kept verifying
     def test_the_mail_handshake_uses_the_shared_context(self):
-        assert "starttls(context=ssl_context)" in SOURCE
-        assert "ssl_context = tls_context()" in SOURCE
+        assert "smtp_object.starttls(context=tls_context())" in SOURCE
+
+    # One handshake, so the preflight check fails exactly where a real send would
+    def test_one_helper_opens_every_authenticated_mail_session(self):
+        assert SOURCE.count("smtplib.SMTP(") == 1
+        assert SOURCE.count("smtp_connect_and_login(") == 3
 
     # Spotipy owns its session, so it has to be handed the one already carrying the setting
     def test_spotipy_is_handed_the_configured_session(self):
