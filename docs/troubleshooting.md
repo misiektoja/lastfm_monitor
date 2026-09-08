@@ -72,7 +72,7 @@ lastfm_monitor <lastfm_username> --verbose
 
 It reports a channel switched off because its settings cannot work, a tracked field that could not be read together with the alert that silences, and the point where automatic retries start after a Last.fm failure. Nothing is printed per check, so a quiet run stays quiet.
 
-A feature that stays unavailable is reported once, when it stops working, rather than on every check that follows. The repeated failures are left to `--debug`.
+A feature that stays unavailable is reported once, when it stops working, rather than on every check that follows. The repeated failures are left to `--debug`. It is reported again when it starts working, but only when the failure itself was printed, so a recovery never refers to something you never saw.
 
 Verbose mode can also be turned on permanently with the `VERBOSE_MODE` configuration setting. The `--verbose` flag wins over a configuration file that sets `VERBOSE_MODE = False`.
 
