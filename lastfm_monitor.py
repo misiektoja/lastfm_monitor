@@ -357,6 +357,11 @@ CHECK_INTERNET_URL = 'https://ws.audioscrobbler.com/'
 # Timeout used when checking initial internet connectivity; in seconds
 CHECK_INTERNET_TIMEOUT = 5
 
+# Whether to verify TLS certificates on every connection the tool makes, including Last.fm, Spotify, webhooks and the mail server
+# Turn this off only on a network that intercepts TLS with its own certificate authority, since an intercepted
+# connection then cannot be told apart from the real service
+VERIFY_SSL = True
+
 # Threshold for displaying Last.fm 50x errors - it is to suppress sporadic issues with Last.fm API endpoint
 # Adjust the values according to the LASTFM_CHECK_INTERVAL and LASTFM_ACTIVE_CHECK_INTERVAL timers
 # If more than 15 Last.fm API related errors in 2 minutes, show an alert
@@ -567,6 +572,7 @@ SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE = 0
 LIVENESS_CHECK_INTERVAL = 0
 CHECK_INTERNET_URL = ""
 CHECK_INTERNET_TIMEOUT = 0
+VERIFY_SSL = True
 ERROR_500_NUMBER_LIMIT = 0
 ERROR_500_TIME_LIMIT = 0
 ERROR_NETWORK_ISSUES_NUMBER_LIMIT = 0
@@ -623,6 +629,7 @@ PRIVACY_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/#user-privacy-settings
 CONFIG_FILE_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#configuration-file"
 SECRETS_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#storing-secrets"
 SMTP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#smtp-settings"
+TLS_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#tls-verification"
 USAGE_GUIDE_URL = f"{DOCS_BASE_URL}/usage/#monitoring-mode"
 SPOTIFY_APP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#optional-spotify-oauth-app-setup"
 WEBHOOK_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#webhook-settings"
@@ -736,6 +743,7 @@ SPOTIFY_SESSION = req.Session()
 WEBHOOK_SESSION = req.Session()
 
 from requests.adapters import HTTPAdapter
+import urllib3
 from urllib3.util.retry import Retry
 
 # Cap server-provided Retry-After to avoid long blocking sleeps on 429 responses
@@ -820,11 +828,14 @@ def signal_handler(sig, frame):
 
 
 # Checks internet connectivity
-def check_internet(url=CHECK_INTERNET_URL, timeout=CHECK_INTERNET_TIMEOUT):
+def check_internet(url=None, timeout=None):
+    # Resolved here rather than as argument defaults, which would freeze the shipped values before the config file is read
+    selected_url = CHECK_INTERNET_URL if url is None else url
+    selected_timeout = CHECK_INTERNET_TIMEOUT if timeout is None else timeout
     try:
         pylast_version = getattr(pylast, '__version__', 'unknown')
         headers = {'User-Agent': f'pylast/{pylast_version}'}
-        _ = req.get(url, timeout=timeout, headers=headers)
+        _ = req.get(selected_url, timeout=selected_timeout, headers=headers, verify=VERIFY_SSL)
         return True
     except req.RequestException as e:
         print_recovery_error(e, context="connectivity")
@@ -977,7 +988,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
 
     try:
         if use_ssl:
-            ssl_context = ssl.create_default_context()
+            ssl_context = tls_context()
             smtpObj = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=smtp_timeout)
             smtpObj.starttls(context=ssl_context)
         else:
@@ -1005,6 +1016,32 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         print_recovery_error(e, context="email")
         return 1
     return 0
+
+
+# Returns the TLS context every connection outside requests uses, unverified while VERIFY_SSL is off so they follow the same switch
+def tls_context() -> ssl.SSLContext:
+    context = ssl.create_default_context()
+    if not VERIFY_SSL:
+        # check_hostname has to be cleared first, since setting CERT_NONE while it is on raises
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    return context
+
+
+# Applies the configured TLS verification setting to the connections a session or a library owns rather than each call site
+def apply_tls_verification_setting() -> None:
+    SPOTIFY_SESSION.verify = VERIFY_SSL
+    WEBHOOK_SESSION.verify = VERIFY_SSL
+    # pylast builds its own httpx client from this module global, so the switch has to reach it there.
+    # A release that renames it would otherwise leave a new attribute nothing reads, which is worse than an error.
+    if hasattr(pylast, "SSL_CONTEXT"):
+        pylast.SSL_CONTEXT = tls_context()
+    else:
+        debug_print("TLS verification could not be applied to pylast, which no longer exposes SSL_CONTEXT")
+    if not VERIFY_SSL:
+        # Silenced only once the config file has been read, so the shipped default never decides this
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        print(f"* Warning: TLS certificate verification is off, so an intercepted connection cannot be told apart from the real service\nGuide: {TLS_GUIDE_URL}\n")
 
 
 # Returns how the tool was started, either as the installed console script or as a downloaded standalone script
@@ -1595,7 +1632,7 @@ def post_webhook_request(**request_kwargs: Any) -> Any:
     # Revalidated here because a dotenv reload can replace the destination after the delivery started
     if not validate_webhook_url(destination):
         raise req.exceptions.InvalidURL("WEBHOOK_URL must contain a complete HTTPS link")
-    return WEBHOOK_SESSION.post(destination, timeout=WEBHOOK_TIMEOUT_SECONDS, allow_redirects=False, **request_kwargs)
+    return WEBHOOK_SESSION.post(destination, timeout=WEBHOOK_TIMEOUT_SECONDS, verify=VERIFY_SSL, allow_redirects=False, **request_kwargs)
 
 
 # Sends one webhook through an isolated bounded retry path
@@ -2178,7 +2215,7 @@ def _lastfm_http_get_with_retry(url, attempts=3, base_delay=2.0):
     last_exc = None
     for i in range(attempts):
         try:
-            response = req.get(url, headers=_lastfm_scrape_headers(), timeout=FUNCTION_TIMEOUT * 2)
+            response = req.get(url, headers=_lastfm_scrape_headers(), timeout=FUNCTION_TIMEOUT * 2, verify=VERIFY_SSL)
             retryable_error = _lastfm_retryable_response_error(response)
             if retryable_error:
                 last_exc = RuntimeError(retryable_error)
@@ -3008,7 +3045,8 @@ def spotify_get_access_token(sp_client_id, sp_client_secret):
         cache_handler = SP_OAUTH_MEMORY_CACHE_HANDLER
         cache_description = "memory"
 
-    auth_manager = SpotifyClientCredentials(client_id=sp_client_id, client_secret=sp_client_secret, requests_timeout=FUNCTION_TIMEOUT, cache_handler=cache_handler)
+    # Spotipy accepts a Session here and only falls back to building its own when this is a bool, which its annotation does not express
+    auth_manager = SpotifyClientCredentials(client_id=sp_client_id, client_secret=sp_client_secret, requests_timeout=FUNCTION_TIMEOUT, cache_handler=cache_handler, requests_session=SPOTIFY_SESSION)  # pyright: ignore[reportArgumentType]
     access_token = auth_manager.get_access_token(as_dict=False)
     if not access_token:
         raise RuntimeError("Spotify OAuth app token response was empty")
@@ -3117,7 +3155,7 @@ def spotify_discover_web_query_hash(operation_name, force=False):
 
     headers = {"Accept": "text/html,application/xhtml+xml", "User-Agent": SPOTIFY_WEB_USER_AGENT}
     debug_print(f"HTTP GET {SPOTIFY_WEB_PLAYER_URL} [Spotify query discovery operation={operation_name}]")
-    response = SPOTIFY_SESSION.get(SPOTIFY_WEB_PLAYER_URL, headers=headers, timeout=FUNCTION_TIMEOUT)
+    response = SPOTIFY_SESSION.get(SPOTIFY_WEB_PLAYER_URL, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
     debug_print(f"HTTP GET {SPOTIFY_WEB_PLAYER_URL} [Spotify query discovery operation={operation_name}] -> {response.status_code}")
     response.raise_for_status()
 
@@ -3131,7 +3169,7 @@ def spotify_discover_web_query_hash(operation_name, force=False):
         raise RuntimeError("Cannot find the Spotify desktop web-player JavaScript bundle")
 
     debug_print(f"HTTP GET {bundle_url} [Spotify query bundle operation={operation_name}]")
-    bundle_response = SPOTIFY_SESSION.get(bundle_url, headers={"User-Agent": SPOTIFY_WEB_USER_AGENT}, timeout=FUNCTION_TIMEOUT)
+    bundle_response = SPOTIFY_SESSION.get(bundle_url, headers={"User-Agent": SPOTIFY_WEB_USER_AGENT}, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
     debug_print(f"HTTP GET {bundle_url} [Spotify query bundle operation={operation_name}] -> {bundle_response.status_code}")
     bundle_response.raise_for_status()
 
@@ -3177,7 +3215,7 @@ def spotify_web_metadata_query(operation_name, variables):
         headers = {"Accept": "application/json", "App-Platform": "WebPlayer", "Authorization": f"Bearer {token_data['access_token']}", "Client-Id": token_data["client_id"], "Content-Type": "application/json", "User-Agent": SPOTIFY_WEB_USER_AGENT}
         payload = {"extensions": {"persistedQuery": {"sha256Hash": query_hash, "version": 1}}, "operationName": operation_name, "variables": variables}
         debug_print(f"HTTP POST {SPOTIFY_WEB_QUERY_URL} [Spotify web metadata operation={operation_name}]")
-        response = SPOTIFY_SESSION.post(SPOTIFY_WEB_QUERY_URL, headers=headers, json=payload, timeout=FUNCTION_TIMEOUT)
+        response = SPOTIFY_SESSION.post(SPOTIFY_WEB_QUERY_URL, headers=headers, json=payload, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
         debug_print(f"HTTP POST {SPOTIFY_WEB_QUERY_URL} [Spotify web metadata operation={operation_name}] -> {response.status_code}")
 
         try:
@@ -3373,7 +3411,7 @@ def spotify_oauth_search_track_items(access_token, search_query, strategy):
     headers = {"Authorization": f"Bearer {access_token}", "User-Agent": SPOTIFY_WEB_USER_AGENT}
     params = {"q": search_query, "type": "track", "limit": 5}
     debug_print(f"HTTP GET {SPOTIFY_OAUTH_SEARCH_URL} [Spotify OAuth app search strategy={strategy}]")
-    response = req.get(SPOTIFY_OAUTH_SEARCH_URL, params=params, headers=headers, timeout=FUNCTION_TIMEOUT)
+    response = req.get(SPOTIFY_OAUTH_SEARCH_URL, params=params, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
     debug_print(f"HTTP GET {SPOTIFY_OAUTH_SEARCH_URL} [Spotify OAuth app search strategy={strategy}] -> {response.status_code}")
     response.raise_for_status()
     json_response = response.json()
@@ -5736,6 +5774,8 @@ def main():
     if cfg_path:
         if not load_config_file(cfg_path):
             sys.exit(1)
+
+    apply_tls_verification_setting()
 
     if args.env_file:
         DOTENV_FILE = os.path.expanduser(args.env_file)
