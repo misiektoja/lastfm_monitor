@@ -2,6 +2,12 @@
 
 ## Quick Start
 
+Run the tool with no arguments to see the commands to start from:
+
+```sh
+lastfm_monitor
+```
+
 - Grab your [Last.fm API Key and Shared Secret](#lastfm-api-key-and-shared-secret) and track the `lastfm_username` music activities:
 
 ```sh

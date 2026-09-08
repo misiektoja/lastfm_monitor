@@ -241,6 +241,12 @@ VERIFY_SSL = False
 
 The tool then says so at startup, because an intercepted connection can no longer be told apart from the real service. Leave it at the default `True` everywhere else.
 
+## Terminal Output
+
+The tool clears the terminal when monitoring starts. Set `CLEAR_SCREEN` to `False` to keep whatever is already on the screen.
+
+The screen is never cleared when output is redirected to a file or a pipe, in debug mode, or for a command that prints a result and exits, such as `--doctor`, `--help` and the test senders.
+
 ## Check Intervals
 
 If you want to customize music polling intervals, use `-k` and `-c` flags (or corresponding configuration options):
