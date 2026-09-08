@@ -34,6 +34,7 @@ and again before anything is published to PyPI.
 | `test_entry_points.py` | The welcome screen an empty command prints, the missing-target block and when the screen is cleared |
 | `test_documentation.py` | Documentation site structure, its internal links, the links pointing into it from the repository and the guide constants the module prints |
 | `test_install_method_commands.py` | Install detection and the commands the tool prints, including the paths each one carries |
+| `test_help_screen.py` | The argument groups, the shared one-shot help sentences and the examples block |
 | `test_friends_notifications.py` | Friend and profile change alerts plus one user per line in plain text and HTML |
 | `test_lastfm_friends_scraper.py` | Scrape headers, retry behavior, following markup and public profile parsing |
 | `test_liveness_banner.py` | What a quiet run prints, when it prints it and what restarts the countdown |

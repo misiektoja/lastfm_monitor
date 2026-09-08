@@ -32,6 +32,14 @@ If you saved it under a different name or in a different directory, select it wi
 lastfm_monitor <lastfm_username> --config-file /path/lastfm_monitor_new.conf
 ```
 
+To ignore any configuration file and run on the built-in defaults plus command-line flags, disable the search with `none`:
+
+```sh
+lastfm_monitor <lastfm_username> --config-file none
+```
+
+A path that does not exist is still an error. Only the literal `none` selects no file.
+
 **New in v2.3:** The configuration file includes options to enable/disable music service URLs (Last.fm, Spotify, Apple Music, YouTube Music, Amazon Music, Deezer, Tidal) and lyrics service URLs (Genius, AZLyrics, Tekstowo.pl, Musixmatch, Lyrics.com) in console and email outputs.
 
 **New in v2.5:** The [track duration](usage.md#getting-track-duration-from-spotify) and [automatic playback](usage.md#automatic-playback-of-listened-tracks-in-the-spotify-client) features use the official OAuth app Web API when optional app credentials are configured. The anonymous web-player backend is the new automatic fallback and requires no Spotify credentials.
