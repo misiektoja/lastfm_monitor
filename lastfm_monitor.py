@@ -633,6 +633,15 @@ TLS_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#tls-verification"
 USAGE_GUIDE_URL = f"{DOCS_BASE_URL}/usage/#monitoring-mode"
 SPOTIFY_APP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#optional-spotify-oauth-app-setup"
 WEBHOOK_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#webhook-settings"
+DOCTOR_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#doctor-preflight"
+
+# A preflight check waits on the user, so it uses a shorter timeout than a delivery in the monitoring loop
+DOCTOR_SMTP_TIMEOUT = 5
+
+# Check labels shared with the sibling monitors, so one report reads the same as the next
+SMTP_READY_CHECK_LABEL = "SMTP connection and login succeeded"
+WEBHOOK_READY_CHECK_LABEL = "Webhook URL, headers and alert choices look valid"
+EMAIL_UNUSABLE_CHECK_LABEL = "Email alerts are enabled but unusable"
 
 # Pages where the user creates or views the credentials this tool reads
 LASTFM_API_REGISTRATION_URL = "https://www.last.fm/api/account/create"
@@ -731,6 +740,7 @@ from email.mime.text import MIMEText
 import argparse
 import ast
 import csv
+import importlib.util
 try:
     import pylast
 except ModuleNotFoundError:
@@ -844,8 +854,12 @@ def signal_handler(sig, frame):
     sys.exit(0)
 
 
+# The last connectivity failure, so a quiet caller can classify it instead of the check printing it
+LAST_CONNECTIVITY_ERROR = None
+
+
 # Checks internet connectivity
-def check_internet(url=None, timeout=None):
+def check_internet(url=None, timeout=None, quiet=False):
     # Resolved here rather than as argument defaults, which would freeze the shipped values before the config file is read
     selected_url = CHECK_INTERNET_URL if url is None else url
     selected_timeout = CHECK_INTERNET_TIMEOUT if timeout is None else timeout
@@ -855,7 +869,11 @@ def check_internet(url=None, timeout=None):
         _ = req.get(selected_url, timeout=selected_timeout, headers=headers, verify=VERIFY_SSL)
         return True
     except req.RequestException as e:
-        print_recovery_error(e, context="connectivity")
+        # Quiet callers render the failure themselves, which doctor needs so nothing lands on its progress line
+        global LAST_CONNECTIVITY_ERROR
+        LAST_CONNECTIVITY_ERROR = e
+        if not quiet:
+            print_recovery_error(e, context="connectivity")
         return False
 
 
@@ -966,6 +984,22 @@ def calculate_timespan(timestamp1, timestamp2, show_weeks=True, show_hours=True,
 
 
 # Sends email notification
+# Opens one authenticated SMTP session, shared so a preflight check fails where a real send would
+def smtp_connect_and_login(use_ssl, smtp_timeout=15):
+    smtp_object = smtplib.SMTP(SMTP_HOST, int(SMTP_PORT), timeout=smtp_timeout)
+    try:
+        if use_ssl:
+            smtp_object.starttls(context=tls_context())
+        smtp_object.login(SMTP_USER, SMTP_PASSWORD)
+        return smtp_object
+    except Exception:
+        try:
+            smtp_object.quit()
+        except Exception:
+            pass
+        raise
+
+
 # Sends an email notification
 def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
     debug_print(f"Attempting to send email: {subject}")
@@ -1004,13 +1038,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         return 1
 
     try:
-        if use_ssl:
-            ssl_context = tls_context()
-            smtpObj = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=smtp_timeout)
-            smtpObj.starttls(context=ssl_context)
-        else:
-            smtpObj = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=smtp_timeout)
-        smtpObj.login(SMTP_USER, SMTP_PASSWORD)
+        smtpObj = smtp_connect_and_login(use_ssl, smtp_timeout=smtp_timeout)
         email_msg = MIMEMultipart('alternative')
         email_msg["From"] = SENDER_EMAIL
         email_msg["To"] = RECEIVER_EMAIL
@@ -1110,6 +1138,11 @@ def render_command(arguments=None, include_paths: bool = True, config_path=None,
     return " ".join(quote_command_argument(part) for part in parts)
 
 
+# Returns the command that installs one package into the interpreter running this tool
+def install_dependency_command(package_name: str) -> str:
+    return f'{quote_command_argument(sys.executable)} -m pip install "{package_name}"'
+
+
 # True when a setting holds a real value rather than nothing or the placeholder the config template ships
 def doctor_value_is_set(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip()) and not value.strip().startswith("your_")
@@ -1181,7 +1214,8 @@ def sanitize_error_text(value: Any) -> str:
 
 # Every recovery category the tool can report, kept closed so a message is testable, deduplicable and translatable later
 RECOVERY_CODES = frozenset({
-    "config.missing", "config.invalid",
+    "config.missing", "config.invalid", "config.insecure",
+    "dependency.missing",
     "secret.missing", "secret.entry",
     "auth.api_key_invalid",
     "network.unavailable", "network.timeout",
@@ -1245,7 +1279,8 @@ def recovery_lastfm_status(error):
 def classify_recovery_error(error=None, context="runtime", detail=""):
     if isinstance(error, RecoveryError):
         return error.advice
-    message = str(detail or error or "").lower()
+    # Both are matched, since a caller that adds context would otherwise hide the error text the rules read
+    message = " ".join(part for part in (str(detail or ""), str(error or "")) if part).lower()
     safe_detail = sanitize_error_text(detail or error) if (detail or error) else ""
     lastfm_status = recovery_lastfm_status(error)
     http_status = recovery_http_status(error)
@@ -1401,6 +1436,12 @@ def normalized_webhook_provider(provider: Any = None) -> str:
     return normalized if normalized in ("discord", "ntfy") else ""
 
 
+# Returns the spelling each webhook service uses for itself, since the stored value is casefolded for comparisons
+def webhook_provider_display_name(provider: Any = None) -> str:
+    normalized = normalized_webhook_provider(provider)
+    return {"discord": "Discord", "ntfy": "ntfy"}.get(normalized, normalized or "an unset provider")
+
+
 # Detects Discord and public ntfy webhook providers from distinctive URL shapes
 def detect_webhook_provider(url: Any) -> str:
     if not validate_webhook_url(url):
@@ -1434,8 +1475,8 @@ def _startup_email_notification_categories() -> List[str]:
     return [label for enabled, label in settings if enabled]
 
 
-# Returns enabled webhook notification category names in display order
-def _startup_webhook_notification_categories() -> List[str]:
+# Returns the webhook notification categories that are switched on, whether or not the channel itself is
+def _selected_webhook_notification_categories() -> List[str]:
     settings = (
         (WEBHOOK_ACTIVE_NOTIFICATION, "active"),
         (WEBHOOK_INACTIVE_NOTIFICATION, "inactive"),
@@ -1448,7 +1489,12 @@ def _startup_webhook_notification_categories() -> List[str]:
         (WEBHOOK_FOLLOWINGS_NOTIFICATION, "followings"),
         (WEBHOOK_PROFILE_NOTIFICATION, "profile"),
     )
-    return [label for enabled, label in settings if WEBHOOK_ENABLED and enabled]
+    return [label for enabled, label in settings if enabled]
+
+
+# Returns the webhook notification categories a run would actually deliver, for the startup rollup
+def _startup_webhook_notification_categories() -> List[str]:
+    return _selected_webhook_notification_categories() if WEBHOOK_ENABLED else []
 
 
 # Formats one notification row with unstarred continuation lines when needed
@@ -5447,6 +5493,655 @@ def apply_webhook_cli_overrides(args: argparse.Namespace, parser: argparse.Argum
             print(f"* Warning: Configured webhook provider did not match the URL. Using {detected_provider}")
 
 
+# The four shared status markers. A fifth neutral marker is the single biggest source of drift between these
+# tools, because every state it would cover is a state the others already call PASS
+DOCTOR_STATUSES = ("PASS", "WARN", "FAIL", "SKIP")
+
+# The fixed section order the report renders in, chosen so each section depends only on the ones above it
+DOCTOR_SECTIONS = ("Environment", "Configuration", "Authentication", "Spotify metadata", "Connectivity", "Target", "Notifications")
+
+# Delivery results are printed as they happen rather than inside a section, but they still count in the summary
+DOCTOR_DELIVERY_SECTION = "Optional delivery tests"
+
+# Width of the transient progress line currently on screen, so the next write can erase exactly what it drew
+DOCTOR_PROGRESS_WIDTH = 0
+
+
+# One doctor result, held until the whole report is rendered
+DoctorCheck = namedtuple("DoctorCheck", ["section", "status", "label", "detail", "advice"])
+DoctorCheck.__new__.__defaults__ = ("", None)
+
+
+# Collects doctor checks plus the work later checks reuse, so nothing is fetched or authenticated twice
+class DoctorReport:
+    # Starts an empty report with no Last.fm client and no channel marked ready for a delivery test
+    def __init__(self):
+        self.checks: List[Any] = []
+        self.network: Any = None
+        self.user: Any = None
+        # Structural flags, so offering a delivery test never depends on matching a rendered label
+        self.email_ready = False
+        self.webhook_ready = False
+
+
+# Builds one doctor check, keeping construction in one place so the shape cannot drift between sections
+def make_doctor_check(section, status, label, detail="", advice=None):
+    if status not in DOCTOR_STATUSES:
+        raise ValueError(f"Unsupported doctor status: {status}")
+    # A row the user has to act on is useless without an action, so the row is rejected rather than printed bare
+    if status in ("WARN", "FAIL") and (advice is None or not advice.fix):
+        raise ValueError(f"Doctor {status} rows require a fix")
+    # Several advice objects carry the same text as their summary and printing it twice reads as two problems
+    return DoctorCheck(section, status, label, "" if str(detail).strip() == str(label).strip() else sanitize_error_text(detail), advice)
+
+
+# Joins setting names the way every doctor detail and action in this family lists them
+def join_setting_names(names, conjunction):
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} {conjunction} {names[-1]}"
+
+
+# Reports the Python version and every library the tool imports, required ones apart from optional ones
+def doctor_check_environment(version_info=None, spec_finder=None):
+    checks = []
+    selected_version = sys.version_info if version_info is None else version_info
+    version_text = ".".join(str(part) for part in tuple(selected_version)[:3])
+    minimum_detail = f"Minimum supported version: {MINIMUM_PYTHON_VERSION_TEXT}"
+    if tuple(selected_version)[:2] >= MINIMUM_PYTHON_VERSION:
+        checks.append(make_doctor_check("Environment", "PASS", f"Python {version_text} is supported", minimum_detail))
+    else:
+        advice = make_recovery_advice("dependency.missing", f"Python {version_text} is unsupported", recovery_fix_with_guide(f"Install Python {MINIMUM_PYTHON_VERSION_TEXT} or newer then retry", INSTALL_GUIDE_URL), False)
+        checks.append(make_doctor_check("Environment", "FAIL", advice.summary, minimum_detail, advice))
+
+    find_spec = importlib.util.find_spec if spec_finder is None else spec_finder
+
+    # Returns whether one module can be located, treating an unimportable parent as absent
+    def module_present(module_name):
+        try:
+            return find_spec(module_name) is not None
+        except (ImportError, ValueError):
+            return False
+
+    for module_name, package_name in (("pylast", "pylast"), ("requests", "requests"), ("dateutil", "python-dateutil"), ("pyotp", "pyotp")):
+        if module_present(module_name):
+            checks.append(make_doctor_check("Environment", "PASS", f"Required dependency {package_name} is installed"))
+        else:
+            advice = make_recovery_advice("dependency.missing", f"Required dependency {package_name} is missing", recovery_fix_with_guide(f'Install it with: {install_dependency_command(package_name)}', INSTALL_GUIDE_URL), False)
+            checks.append(make_doctor_check("Environment", "FAIL", advice.summary, advice=advice))
+
+    for module_name, package_name, purpose in (
+        ("dotenv", "python-dotenv", "Secrets can only come from environment variables or the configuration file"),
+        ("spotipy", "spotipy", "The Spotify OAuth app metadata backend is unavailable, leaving the anonymous web player"),
+        ("bs4", "beautifulsoup4", "Follower, following and profile tracking cannot run"),
+    ):
+        if module_present(module_name):
+            checks.append(make_doctor_check("Environment", "PASS", f"Optional dependency {package_name} is installed"))
+        else:
+            advice = make_recovery_advice("dependency.missing", f"Optional dependency {package_name} is not installed", recovery_fix_with_guide(f'Install it with: {install_dependency_command(package_name)}', INSTALL_GUIDE_URL), False)
+            checks.append(make_doctor_check("Environment", "WARN", advice.summary, f"{purpose}. Every other feature is unaffected", advice))
+    return checks
+
+
+# The name each secret source is reported under, spelled the way every sibling monitor spells it
+DOCTOR_SECRET_SOURCE_LABELS = {"config file": "configuration file", "dotenv file": "dotenv file", "environment": "environment", "command line": "command line"}
+
+
+# Reports which secrets are in effect and where each one was read from, by name and never by value
+def doctor_secret_checks():
+    checks = [make_doctor_check("Configuration", "PASS", f"Secrets loaded from the {DOCTOR_SECRET_SOURCE_LABELS[source]}", ", ".join(names)) for source, names in secrets_by_source()]
+    if not checks:
+        checks.append(make_doctor_check("Configuration", "PASS", "No secrets loaded", "Nothing was read from a dotenv file, the environment, the configuration file or the command line"))
+    return checks
+
+
+# Returns the log file monitoring will actually write, which needs the target-derived suffix
+def build_log_path(base_path, suffix):
+    log_path = Path(os.path.expanduser(str(base_path)))
+    if log_path.suffix == "" and suffix:
+        log_path = log_path.parent / f"{log_path.name}_{suffix}.log"
+    return log_path
+
+
+# Returns the closest parent that exists, so writability is judged without creating anything
+def nearest_existing_parent(path):
+    candidate = Path(path).expanduser()
+    if candidate.exists():
+        return candidate if candidate.is_dir() else candidate.parent
+    while not candidate.exists() and candidate != candidate.parent:
+        candidate = candidate.parent
+    return candidate
+
+
+# Reports whether one file monitoring will write can be created, without creating anything
+def doctor_destination_check(label, destination, section="Configuration"):
+    selected = Path(destination).expanduser()
+    parent = nearest_existing_parent(selected)
+    if parent.is_dir() and os.access(parent, os.W_OK):
+        return make_doctor_check(section, "PASS", f"{label} appears writable", f"Path: {selected}")
+    advice = classify_recovery_error(context="file", detail=f"{label} is not writable: {selected}")
+    return make_doctor_check(section, "FAIL", advice.summary, advice.detail, advice)
+
+
+# Reports each file monitoring will write or read, resolving the target-derived names once a username is known
+def doctor_output_destination_checks(target_value=None):
+    checks = []
+    suffix = str(target_value) if target_value else ""
+    if DISABLE_LOGGING:
+        checks.append(make_doctor_check("Configuration", "PASS", "Output logging is disabled"))
+    elif LF_LOGFILE:
+        if suffix:
+            checks.append(doctor_destination_check("Log destination", build_log_path(LF_LOGFILE, suffix)))
+        else:
+            checks.append(make_doctor_check("Configuration", "PASS", "Log destination will be finalized after a username is selected", f"Base path: {Path(os.path.expanduser(LF_LOGFILE))}"))
+    if CSV_FILE:
+        checks.append(doctor_destination_check("CSV destination", CSV_FILE))
+    else:
+        checks.append(make_doctor_check("Configuration", "PASS", "CSV logging is disabled"))
+    if suffix:
+        checks.append(doctor_destination_check("Status destination", f"lastfm_{suffix}_last_activity.json"))
+        if friends_check_enabled():
+            checks.append(doctor_destination_check("Profile state destination", f"lastfm_{suffix}_profile.json"))
+    else:
+        checks.append(make_doctor_check("Configuration", "PASS", "Status file will be finalized after a username is selected", "Base name: lastfm_<lastfm_username>_last_activity.json in the working directory"))
+    if MONITOR_LIST_FILE:
+        monitored = Path(os.path.expanduser(MONITOR_LIST_FILE))
+        if monitored.is_file() and os.access(monitored, os.R_OK):
+            checks.append(make_doctor_check("Configuration", "PASS", "Monitored tracks file is readable", f"Path: {monitored}"))
+        else:
+            advice = classify_recovery_error(context="file", detail=f"The file with Last.fm tracks cannot be opened: {monitored}")
+            checks.append(make_doctor_check("Configuration", "FAIL", advice.summary, advice.detail, advice))
+    return checks
+
+
+# Returns all type and range errors in settings that control runtime timing or counts
+def runtime_configuration_errors():
+    errors = []
+    positive_numbers = (("LASTFM_CHECK_INTERVAL", LASTFM_CHECK_INTERVAL), ("LASTFM_ACTIVE_CHECK_INTERVAL", LASTFM_ACTIVE_CHECK_INTERVAL), ("LASTFM_INACTIVITY_CHECK", LASTFM_INACTIVITY_CHECK), ("CHECK_INTERNET_TIMEOUT", CHECK_INTERNET_TIMEOUT))
+    nonnegative_numbers = (("LIVENESS_CHECK_INTERVAL", LIVENESS_CHECK_INTERVAL), ("LASTFM_BREAK_CHECK_MULTIPLIER", LASTFM_BREAK_CHECK_MULTIPLIER), ("FRIENDS_CHECK_INTERVAL", FRIENDS_CHECK_INTERVAL), ("FRIENDS_RETRY_INTERVAL", FRIENDS_RETRY_INTERVAL))
+    for name, value in positive_numbers:
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+            errors.append(f"{name} must be a number greater than zero, not {value!r}")
+    for name, value in nonnegative_numbers:
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+            errors.append(f"{name} must be a number zero or greater, not {value!r}")
+    if not isinstance(SMTP_PORT, int) or isinstance(SMTP_PORT, bool) or not 1 <= SMTP_PORT <= 65535:
+        errors.append(f"SMTP_PORT must be an integer from 1 through 65535, not {SMTP_PORT!r}")
+    return errors
+
+
+# Reports the configuration and dotenv files in effect plus every file the tool will write
+def doctor_check_configuration(config_path=None, env_path=None, target_value=None):
+    checks = []
+    if config_path:
+        checks.append(make_doctor_check("Configuration", "PASS", "Configuration file loaded", f"Path: {config_path}"))
+    else:
+        checks.append(make_doctor_check("Configuration", "PASS", "No configuration file selected", "Using built-in defaults and command-line overrides"))
+    if env_path and os.path.isfile(str(env_path)):
+        checks.append(make_doctor_check("Configuration", "PASS", "Dotenv file loaded", f"Path: {env_path}"))
+    elif env_path:
+        advice = make_recovery_advice("config.missing", "The requested dotenv file was not found", recovery_fix_with_guide("Create the file or select an existing path with --env-file", SECRETS_GUIDE_URL), False, f"Path: {env_path}")
+        checks.append(make_doctor_check("Configuration", "WARN", advice.summary, advice.detail, advice))
+    else:
+        checks.append(make_doctor_check("Configuration", "PASS", "No dotenv file selected", "Using environment variables and other configured sources"))
+    checks.extend(doctor_secret_checks())
+
+    if VERIFY_SSL:
+        checks.append(make_doctor_check("Configuration", "PASS", "TLS certificate verification is on", "Every outbound request checks the server certificate"))
+    else:
+        advice = make_recovery_advice("config.insecure", "TLS certificate verification is off", recovery_fix_with_guide("Set VERIFY_SSL back to True unless this network intercepts TLS with its own certificate authority", TLS_GUIDE_URL), False)
+        checks.append(make_doctor_check("Configuration", "WARN", advice.summary, "VERIFY_SSL is False, so an intercepted connection cannot be told apart from the real service", advice))
+
+    numeric_errors = runtime_configuration_errors()
+    if numeric_errors:
+        numeric_detail = "Invalid numeric settings: " + "; ".join(numeric_errors)
+        advice = make_recovery_advice("config.invalid", "One or more numeric settings are invalid", recovery_fix_with_guide("Correct the reported settings in the configuration file", CONFIG_FILE_GUIDE_URL), False, numeric_detail)
+        checks.append(make_doctor_check("Configuration", "FAIL", advice.summary, numeric_detail, advice))
+
+    checks.extend(doctor_output_destination_checks(target_value))
+    return checks
+
+
+# Confirms the configured connectivity endpoint is reachable, reusing the settings monitoring will use
+def doctor_check_connectivity():
+    global LAST_CONNECTIVITY_ERROR
+    LAST_CONNECTIVITY_ERROR = None
+    if check_internet(quiet=True):
+        return [make_doctor_check("Connectivity", "PASS", "The connectivity endpoint is reachable", f"Endpoint: {CHECK_INTERNET_URL}")]
+    advice = classify_recovery_error(LAST_CONNECTIVITY_ERROR, context="connectivity", detail=f"Could not reach {CHECK_INTERNET_URL}")
+    return [make_doctor_check("Connectivity", "FAIL", "The connectivity endpoint could not be reached", f"Endpoint: {CHECK_INTERNET_URL}", advice)]
+
+
+# Validates the Last.fm credential pair with one real API call and keeps the client for the target check
+def doctor_check_authentication(report):
+    unset = [name for name in ("LASTFM_API_KEY", "LASTFM_API_SECRET") if not doctor_value_is_set(globals().get(name))]
+    if unset:
+        advice = classify_recovery_error(context="secret.missing", detail=f"{join_setting_names(unset, 'or')} is empty or still set to its placeholder")
+        return [make_doctor_check("Authentication", "FAIL", "The Last.fm credentials are incomplete", advice.detail, advice)]
+    try:
+        report.network = pylast.LastFMNetwork(LASTFM_API_KEY, LASTFM_API_SECRET)
+        report.network.get_top_artists(limit=1)
+    except Exception as exc:
+        report.network = None
+        advice = classify_recovery_error(exc)
+        return [make_doctor_check("Authentication", "FAIL", advice.summary, advice.detail, advice)]
+    return [make_doctor_check("Authentication", "PASS", "Last.fm accepted the configured API key", "The shared secret is set. Neither value was displayed")]
+
+
+# Reports which Spotify metadata backend a run will use, and only while a feature actually needs one
+def doctor_check_spotify_metadata(report):
+    if not (TRACK_SONGS or USE_TRACK_DURATION_FROM_SPOTIFY):
+        return []
+    checks = []
+    if not spotify_oauth_app_configured():
+        return [make_doctor_check("Spotify metadata", "PASS", "The anonymous Spotify web player supplies track metadata", "No OAuth app is configured, which needs no credentials")]
+    try:
+        spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET)
+    except Exception as exc:
+        advice = make_recovery_advice("auth.api_key_invalid", "Spotify did not accept the OAuth app credentials", recovery_fix_with_guide(f"Check SP_CLIENT_ID and SP_CLIENT_SECRET, or save a working pair with '{render_command(['--set-spotify-credentials'])}'", SPOTIFY_APP_GUIDE_URL), False, sanitize_error_text(exc))
+        checks.append(make_doctor_check("Spotify metadata", "WARN", advice.summary, "Track metadata falls back to the anonymous Spotify web player", advice))
+    else:
+        checks.append(make_doctor_check("Spotify metadata", "PASS", "Spotify accepted the configured OAuth app credentials", "Track metadata uses the OAuth app first, then the anonymous web player"))
+    if SP_TOKENS_FILE:
+        checks.append(doctor_destination_check("Spotify token cache destination", SP_TOKENS_FILE, section="Spotify metadata"))
+    else:
+        checks.append(make_doctor_check("Spotify metadata", "PASS", "Spotify tokens are cached in memory only", "SP_TOKENS_FILE is empty, so nothing is written to disk"))
+    return checks
+
+
+# Confirms the monitored user exists and their listening history is readable, which is what the loop reads first
+def doctor_check_target(report, target_value=None):
+    if not target_value:
+        advice = classify_recovery_error(context="target.missing")
+        return [make_doctor_check("Target", "WARN", advice.summary, "Nothing will be monitored until one is given", advice)]
+    if report.network is None:
+        return [make_doctor_check("Target", "SKIP", "The monitored profile was not checked", "The Last.fm API key did not validate, so no lookup was attempted")]
+    try:
+        recent_tracks = lastfm_get_recent_tracks(target_value, report.network, 1)
+    except Exception as exc:
+        advice = classify_recovery_error(exc, context="runtime", detail=f"Cannot read the recent tracks of '{target_value}'")
+        return [make_doctor_check("Target", "FAIL", advice.summary, advice.detail, advice)]
+    report.user = report.network.get_user(target_value)
+    checks = [make_doctor_check("Target", "PASS", "The monitored profile exists", f"Last.fm user: {target_value}")]
+    if recent_tracks:
+        checks.append(make_doctor_check("Target", "PASS", "The recent listening history is readable", "Scrobbles are visible, so activity can be detected"))
+    else:
+        checks.append(make_doctor_check("Target", "PASS", "The recent listening history is readable but empty", "No scrobbles yet, so monitoring waits for the first track"))
+    return checks
+
+
+# Returns the doctor row for email alerts whose settings cannot deliver, worded the same way by every sibling monitor
+def doctor_email_unusable_check(detail, fix):
+    advice = make_recovery_advice("smtp.invalid", EMAIL_UNUSABLE_CHECK_LABEL, recovery_fix_with_guide(fix, SMTP_GUIDE_URL), False, detail)
+    return make_doctor_check("Notifications", "WARN", EMAIL_UNUSABLE_CHECK_LABEL, detail, advice)
+
+
+# Checks email alert settings then confirms the SMTP sign-in without sending anything
+def doctor_check_email_notifications(report):
+    enabled_categories = _startup_email_notification_categories()
+    configured = doctor_value_is_set(SMTP_HOST) and doctor_value_is_set(SENDER_EMAIL) and doctor_value_is_set(RECEIVER_EMAIL)
+    # The error alert ships on by default, so it alone cannot mean the channel is switched on
+    deliberate_categories = [category for category in enabled_categories if category != "errors"]
+    if not deliberate_categories and not configured:
+        return [make_doctor_check("Notifications", "PASS", "Email notifications are disabled", "No SMTP connection was attempted and no email was sent")]
+    if not configured:
+        unset = [name for name, value in (("SMTP_HOST", SMTP_HOST), ("SENDER_EMAIL", SENDER_EMAIL), ("RECEIVER_EMAIL", RECEIVER_EMAIL)) if not doctor_value_is_set(value)]
+        return [doctor_email_unusable_check(f"{join_setting_names(unset, 'or')} is empty or still set to its placeholder", f"Set {join_setting_names(unset, 'and')} or turn the email alerts off")]
+    if not enabled_categories:
+        advice = make_recovery_advice("smtp.invalid", "Email is configured but no alert types are selected", recovery_fix_with_guide("Turn on at least one email alert in the configuration file", SMTP_GUIDE_URL), False)
+        return [make_doctor_check("Notifications", "WARN", advice.summary, "Nothing would ever be emailed", advice)]
+    if not doctor_value_is_set(SMTP_USER) or not doctor_value_is_set(SMTP_PASSWORD):
+        return [doctor_email_unusable_check("SMTP_USER or SMTP_PASSWORD is empty or still set to its placeholder", "Set SMTP_USER and SMTP_PASSWORD or turn the email alerts off")]
+    smtp_object = None
+    try:
+        smtp_object = smtp_connect_and_login(SMTP_SSL, smtp_timeout=DOCTOR_SMTP_TIMEOUT)
+    except Exception as exc:
+        advice = classify_recovery_error(exc, "email")
+        return [make_doctor_check("Notifications", "FAIL", advice.summary, advice.detail, advice)]
+    finally:
+        if smtp_object is not None:
+            try:
+                smtp_object.quit()
+            except Exception:
+                pass
+    report.email_ready = True
+    return [make_doctor_check("Notifications", "PASS", SMTP_READY_CHECK_LABEL, f"Alerts: {', '.join(enabled_categories)}. No email was sent during this passive check")]
+
+
+# Checks webhook alert settings without sending anything, asking whether the channel can fire before validating it
+def doctor_check_webhook_notifications(report):
+    selected_categories = _selected_webhook_notification_categories()
+    deliberate_categories = [category for category in selected_categories if category != "errors"]
+    if not WEBHOOK_ENABLED and not deliberate_categories:
+        return [make_doctor_check("Notifications", "PASS", "Webhook alerts are disabled")]
+    if not WEBHOOK_ENABLED:
+        advice = make_recovery_advice("webhook.invalid", "Webhook alert types are selected but webhooks are switched off", recovery_fix_with_guide("Set WEBHOOK_ENABLED to True, or turn the alert types off", WEBHOOK_GUIDE_URL), False)
+        return [make_doctor_check("Notifications", "WARN", advice.summary, "Nothing would ever be delivered", advice)]
+    if not normalized_webhook_provider():
+        advice = classify_recovery_error(context="webhook", detail="WEBHOOK_PROVIDER must be discord or ntfy")
+        return [make_doctor_check("Notifications", "FAIL", advice.summary, advice.detail, advice)]
+    if not validate_webhook_url():
+        advice = classify_recovery_error(context="webhook", detail="WEBHOOK_URL must contain a complete HTTPS link")
+        return [make_doctor_check("Notifications", "FAIL", advice.summary, advice.detail, advice)]
+    for validation_error in (validate_webhook_customization(normalized_webhook_provider()), validate_webhook_headers(normalized_webhook_provider())):
+        if validation_error is not None:
+            advice = classify_recovery_error(context="webhook", detail=validation_error)
+            return [make_doctor_check("Notifications", "FAIL", advice.summary, advice.detail, advice)]
+    if not selected_categories:
+        advice = make_recovery_advice("webhook.invalid", "Webhook alerts are on but no alert types are selected", recovery_fix_with_guide("Turn on at least one webhook alert in the configuration file, or set WEBHOOK_ENABLED to False", WEBHOOK_GUIDE_URL), False)
+        return [make_doctor_check("Notifications", "WARN", advice.summary, "Nothing would ever be delivered", advice)]
+    report.webhook_ready = True
+    return [make_doctor_check("Notifications", "PASS", f"{WEBHOOK_READY_CHECK_LABEL} for {webhook_provider_display_name()}", f"Alerts: {', '.join(selected_categories)}. The private link was not displayed. No webhook was sent during this passive check")]
+
+
+# Renders one doctor result marker, kept as one function so colour lands in a single place later
+def render_doctor_marker(status):
+    return f"[{status}]"
+
+
+# Prints one result the way the report renders it, so a row printed after the report matches the rows above it
+def print_doctor_check(check):
+    print(f"{render_doctor_marker(check.status)} {check.label}")
+    if check.detail:
+        print(f"  {check.detail}")
+
+
+# Renders the heading and every non-empty section, with a fix line on the rows that are not a pass
+def render_doctor_sections(report):
+    # The install method is context rather than a check: it cannot fail, so it is stated once here
+    # instead of occupying a result row that no marker describes
+    lines = ["Doctor", f"Detected install method: {install_method()}"]
+    for section in DOCTOR_SECTIONS:
+        section_checks = [check for check in report.checks if check.section == section]
+        if not section_checks:
+            continue
+        lines.extend(("", section))
+        for check in section_checks:
+            lines.append(f"{render_doctor_marker(check.status)} {check.label}")
+            if check.detail:
+                lines.append(f"  {check.detail}")
+            if check.status != "PASS" and check.advice is not None:
+                lines.extend(f"  {advice_line}" for advice_line in f"To fix: {check.advice.fix}".splitlines())
+    return sanitize_error_text("\n".join(lines))
+
+
+# Renders the one sentence that says whether the setup is usable and where to read more
+def render_doctor_summary(checks):
+    failures = sum(check.status == "FAIL" for check in checks)
+    warnings = sum(check.status == "WARN" for check in checks)
+    if failures:
+        summary_line = f"  {failures} check(s) failed, {warnings} warning(s). Fix the failures above before relying on the tool."
+    elif warnings:
+        summary_line = f"  All critical checks passed with {warnings} warning(s). Review the warnings above."
+    else:
+        summary_line = "  All checks passed. You are good to go!"
+    return "\n".join(("", "Summary", summary_line, "", f"Guide: {DOCTOR_GUIDE_URL}"))
+
+
+# Returns the real terminal underneath the logger wrapper, so progress can move the cursor safely
+def _doctor_terminal_stream():
+    stream = sys.stdout
+    while isinstance(stream, Logger):
+        stream = stream.terminal
+    return stream
+
+
+# Shows one transient doctor step, only on an interactive terminal
+# The line stays uncoloured on purpose: it is erased by writing exactly len(line) spaces, and escape
+# sequences would make that width wrong and leave a styled remnant behind
+def _doctor_progress(label):
+    global DOCTOR_PROGRESS_WIDTH
+    terminal = _doctor_terminal_stream()
+    if terminal.isatty():
+        if DOCTOR_PROGRESS_WIDTH:
+            terminal.write("\r" + (" " * DOCTOR_PROGRESS_WIDTH) + "\r")
+        line = f"* Checking {label} ..."
+        DOCTOR_PROGRESS_WIDTH = len(line)
+        terminal.write("\r" + line)
+        terminal.flush()
+
+
+# Clears the transient doctor progress line on an interactive terminal
+def _doctor_progress_clear():
+    global DOCTOR_PROGRESS_WIDTH
+    terminal = _doctor_terminal_stream()
+    if terminal.isatty() and DOCTOR_PROGRESS_WIDTH:
+        terminal.write("\r" + (" " * DOCTOR_PROGRESS_WIDTH) + "\r")
+        terminal.flush()
+    DOCTOR_PROGRESS_WIDTH = 0
+
+
+# States what doctor will and will not do, before the first slow check starts rather than after
+def render_doctor_notice():
+    print("Running preflight checks. No files will be written. Interactive email and webhook tests run only after separate approval.\n")
+
+
+# Prompts for explicit delivery consent and defaults safely to no
+def _doctor_ask_yes_no(question, input_func=None):
+    prompt = input if input_func is None else input_func
+    while True:
+        try:
+            value = prompt(f"{question} [y/N]: ").strip().casefold()
+        except EOFError:
+            print("\nDelivery test skipped.")
+            return False
+        except KeyboardInterrupt:
+            # Ctrl+C ends the run here the way it does anywhere else, rather than only declining this one test
+            signal_handler(signal.SIGINT, None)
+            raise
+        if not value or value in ("n", "no"):
+            return False
+        if value in ("y", "yes"):
+            return True
+        print("  Please answer 'y' or 'n'.")
+
+
+# Offers one real delivery per ready channel, only after separate interactive approval
+def _doctor_offer_notification_tests(report, input_func=None):
+    # The terminal underneath any logger wrapper, since that wrapper answers no isatty of its own
+    if not sys.stdin.isatty() or not _doctor_terminal_stream().isatty():
+        return []
+    if not report.email_ready and not report.webhook_ready:
+        return []
+    print("\n" + DOCTOR_DELIVERY_SECTION + "\n")
+    print("Doctor will not write files. Each approved test sends one real message.\n")
+    checks = []
+    if report.email_ready:
+        if _doctor_ask_yes_no("Send one test email now? This will deliver a real message", input_func=input_func):
+            delivered = send_email("lastfm_monitor: doctor test email", "This test email was sent after approval in --doctor. Your SMTP delivery settings work.", "", SMTP_SSL, smtp_timeout=DOCTOR_SMTP_TIMEOUT) == 0
+            if delivered:
+                check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "PASS", "Doctor test email delivered", "One real test email was sent after confirmation")
+            else:
+                advice = make_recovery_advice("smtp.connection", "Doctor test email delivery failed", recovery_fix_with_guide("Review the SMTP error above and correct the email settings", SMTP_GUIDE_URL), True)
+                check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "FAIL", advice.summary, "The approved test email could not be delivered", advice)
+        else:
+            check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "SKIP", "Test email was not sent", "You declined the real delivery test. Run doctor again and approve the email test when ready")
+        checks.append(check)
+        # Recorded on the report so the summary sentence and the exit code cannot disagree about the same run
+        report.checks.append(check)
+        print_doctor_check(check)
+    if report.webhook_ready:
+        provider = webhook_provider_display_name()
+        if _doctor_ask_yes_no(f"Send one test webhook through {provider} now? This will publish a real notification", input_func=input_func):
+            delivered = send_webhook("lastfm_monitor: doctor test webhook", "This test notification was sent after approval in --doctor. Your webhook delivery settings work.", "song", force=True) == 0
+            if delivered:
+                check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "PASS", f"Doctor test webhook through {provider} delivered", "One real test webhook was sent after confirmation")
+            else:
+                advice = make_recovery_advice("webhook.connection", f"Doctor test webhook through {provider} delivery failed", recovery_fix_with_guide("Review the webhook error above and correct the destination settings", WEBHOOK_GUIDE_URL), True)
+                check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "FAIL", advice.summary, "The approved test webhook could not be delivered", advice)
+        else:
+            check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "SKIP", f"Test webhook through {provider} was not sent", "You declined the real delivery test. Run doctor again and approve the webhook test when ready")
+        checks.append(check)
+        report.checks.append(check)
+        print_doctor_check(check)
+    return checks
+
+
+# Prints the command that starts monitoring with the files this run checked, so a report read on its own
+# ends with the next action rather than leaving the reader to assemble the command
+def print_doctor_next_steps(target_value=None, doctor_exit=0):
+    print("\nNext steps\n")
+    label = "After Doctor passes, start monitoring:" if doctor_exit else "Start monitoring:"
+    print(label)
+    print(f"    {render_command([target_value] if target_value else ['<lastfm_username>'])}\n")
+    # No trailing blank line: the command printer already left one and the report must not end on two
+    print(f"Guide: {QUICK_START_GUIDE_URL}")
+
+
+# Runs every preflight check, then the approved delivery tests, returning zero only when nothing failed
+def run_doctor(target_value=None, config_path=None, env_path=None, input_func=None):
+    report = DoctorReport()
+    progress = _doctor_progress if _doctor_terminal_stream().isatty() else None
+    render_doctor_notice()
+    try:
+        for label, collect in (
+            ("environment", lambda: doctor_check_environment()),
+            ("configuration", lambda: doctor_check_configuration(config_path, env_path, target_value)),
+            ("connectivity", lambda: doctor_check_connectivity()),
+            ("authentication", lambda: doctor_check_authentication(report)),
+            ("Spotify metadata", lambda: doctor_check_spotify_metadata(report)),
+            ("the monitored profile", lambda: doctor_check_target(report, target_value)),
+            ("notifications", lambda: doctor_check_email_notifications(report) + doctor_check_webhook_notifications(report)),
+        ):
+            if progress is not None:
+                progress(label)
+            report.checks.extend(collect())
+    finally:
+        _doctor_progress_clear()
+    print(render_doctor_sections(report))
+    _doctor_offer_notification_tests(report, input_func=input_func)
+    print(render_doctor_summary(report.checks))
+    exit_code = 1 if any(check.status == "FAIL" for check in report.checks) else 0
+    print_doctor_next_steps(target_value, exit_code)
+    return exit_code
+
+
+# Applies every command-line override that only assigns a setting, so the preflight report and the
+# monitoring run are decided by the same values rather than by where in main each flag was handled
+def apply_cli_overrides(args):
+    global LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, USE_TRACK_DURATION_FROM_SPOTIFY, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, LASTFM_BREAK_CHECK_MULTIPLIER, LIVENESS_REMINDER_SECONDS, CSV_FILE, MONITOR_LIST_FILE, DISABLE_LOGGING, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, ERROR_NOTIFICATION, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, PROFILE_NOTIFICATION, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, FRIENDS_CHECK_INTERVAL, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, TRACK_SONGS, PROGRESS_INDICATOR, DO_NOT_SHOW_DURATION_MARKS
+
+    if args.lastfm_api_key:
+        LASTFM_API_KEY = args.lastfm_api_key
+        record_secret_source("LASTFM_API_KEY", "command line")
+
+    if args.lastfm_secret:
+        LASTFM_API_SECRET = args.lastfm_secret
+        record_secret_source("LASTFM_API_SECRET", "command line")
+
+    if args.spotify_creds:
+        SP_CLIENT_ID, separator, SP_CLIENT_SECRET = args.spotify_creds.partition(":")
+        if not separator or not SP_CLIENT_ID or not SP_CLIENT_SECRET:
+            print("* Error: -z / --spotify-creds has invalid format - use SP_CLIENT_ID:SP_CLIENT_SECRET")
+            sys.exit(1)
+        record_secret_source("SP_CLIENT_ID", "command line")
+        record_secret_source("SP_CLIENT_SECRET", "command line")
+
+    # Emitted once every layer has been applied, so a support transcript answers where each credential came from
+    grouped_secrets = secrets_by_source()
+    debug_print("Secret sources: " + ("; ".join(f"{source}={', '.join(names)}" for source, names in grouped_secrets) if grouped_secrets else "none configured"))
+
+    if SP_TOKENS_FILE:
+        SP_TOKENS_FILE = os.path.expanduser(SP_TOKENS_FILE)
+
+    if args.fetch_duration:
+        USE_TRACK_DURATION_FROM_SPOTIFY = args.fetch_duration
+
+    if args.check_interval:
+        LASTFM_CHECK_INTERVAL = args.check_interval
+
+    if args.active_interval:
+        LASTFM_ACTIVE_CHECK_INTERVAL = args.active_interval
+
+    if args.offline_timer:
+        LASTFM_INACTIVITY_CHECK = args.offline_timer
+
+    if args.break_multiplier:
+        LASTFM_BREAK_CHECK_MULTIPLIER = args.break_multiplier
+
+    # The interval can come from a config file, so the reminder is settled once every layer has been applied
+    LIVENESS_REMINDER_SECONDS = LIVENESS_CHECK_INTERVAL if LIVENESS_CHECK_INTERVAL > 0 else 0
+
+    if args.csv_file:
+        CSV_FILE = os.path.expanduser(args.csv_file)
+    else:
+        if CSV_FILE:
+            CSV_FILE = os.path.expanduser(CSV_FILE)
+
+    if args.monitor_list:
+        MONITOR_LIST_FILE = os.path.expanduser(args.monitor_list)
+    else:
+        if MONITOR_LIST_FILE:
+            MONITOR_LIST_FILE = os.path.expanduser(MONITOR_LIST_FILE)
+
+    if args.disable_logging is True:
+        DISABLE_LOGGING = True
+
+    if args.notify_active is True:
+        ACTIVE_NOTIFICATION = True
+
+    if args.notify_inactive is True:
+        INACTIVE_NOTIFICATION = True
+
+    if args.notify_track is True:
+        TRACK_NOTIFICATION = True
+
+    if args.notify_song_changes is True:
+        SONG_NOTIFICATION = True
+
+    if args.notify_offline_entries is True:
+        OFFLINE_ENTRIES_NOTIFICATION = True
+
+    if args.notify_loop is True:
+        SONG_ON_LOOP_NOTIFICATION = True
+
+    if args.notify_errors is False:
+        ERROR_NOTIFICATION = False
+
+    if args.notify_followers is True:
+        FOLLOWERS_NOTIFICATION = True
+
+    if args.notify_followings is True:
+        FOLLOWINGS_NOTIFICATION = True
+
+    if args.notify_profile is True:
+        PROFILE_NOTIFICATION = True
+
+    if args.track_followings is True:
+        TRACK_FOLLOWINGS = True
+
+    if args.track_followers is True:
+        TRACK_FOLLOWERS = True
+
+    if args.track_bio is True:
+        TRACK_BIO = True
+
+    if args.track_display_name is True:
+        TRACK_DISPLAY_NAME = True
+
+    if args.friends_check_interval:
+        FRIENDS_CHECK_INTERVAL = args.friends_check_interval
+
+    if args.friends_change_counter:
+        FRIENDS_CHANGE_COUNTER = args.friends_change_counter
+
+    if args.friends_retry_interval:
+        FRIENDS_RETRY_INTERVAL = args.friends_retry_interval
+
+    if args.track_in_spotify is True:
+        TRACK_SONGS = True
+
+    if args.progress is True:
+        PROGRESS_INDICATOR = True
+
+    if args.hide_duration_source is True:
+        DO_NOT_SHOW_DURATION_MARKS = True
+
+    if args.fetch_duration is True:
+        USE_TRACK_DURATION_FROM_SPOTIFY = True
+
+    if not USE_TRACK_DURATION_FROM_SPOTIFY:
+        DO_NOT_SHOW_DURATION_MARKS = True
+
+
 # Runs the command-line interface
 def main():
     global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_REMINDER_SECONDS, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_PROFILE_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, PROFILE_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
@@ -5508,6 +6203,13 @@ def main():
         dest="config_file",
         metavar="PATH",
         help="Location of the optional config file",
+    )
+    conf.add_argument(
+        "--doctor",
+        dest="doctor",
+        action="store_true",
+        default=None,
+        help="Run read-only preflight checks and report what is ready and what is not"
     )
     conf.add_argument(
         "--generate-config",
@@ -5915,6 +6617,10 @@ def main():
             record_secret_source(secret, "environment" if secret in exported_secrets else "dotenv file")
 
     apply_webhook_cli_overrides(args, parser)
+    apply_cli_overrides(args)
+
+    if args.doctor:
+        sys.exit(run_doctor(target_value=args.username, config_path=cfg_path, env_path=env_path))
 
     if WEBHOOK_ENABLED and not validate_webhook_url():
         print("* Webhook alerts are off because WEBHOOK_URL is not a complete HTTPS link\n")
@@ -5943,29 +6649,6 @@ def main():
         print_recovery_error(context="target.missing", detail="No Last.fm username was given")
         sys.exit(1)
 
-    if args.lastfm_api_key:
-        LASTFM_API_KEY = args.lastfm_api_key
-        record_secret_source("LASTFM_API_KEY", "command line")
-
-    if args.lastfm_secret:
-        LASTFM_API_SECRET = args.lastfm_secret
-        record_secret_source("LASTFM_API_SECRET", "command line")
-
-    if args.spotify_creds:
-        SP_CLIENT_ID, separator, SP_CLIENT_SECRET = args.spotify_creds.partition(":")
-        if not separator or not SP_CLIENT_ID or not SP_CLIENT_SECRET:
-            print("* Error: -z / --spotify-creds has invalid format - use SP_CLIENT_ID:SP_CLIENT_SECRET")
-            sys.exit(1)
-        record_secret_source("SP_CLIENT_ID", "command line")
-        record_secret_source("SP_CLIENT_SECRET", "command line")
-
-    # Emitted once every layer has been applied, so a support transcript answers where each credential came from
-    grouped_secrets = secrets_by_source()
-    debug_print("Secret sources: " + ("; ".join(f"{source}={', '.join(names)}" for source, names in grouped_secrets) if grouped_secrets else "none configured"))
-
-    if SP_TOKENS_FILE:
-        SP_TOKENS_FILE = os.path.expanduser(SP_TOKENS_FILE)
-
     if not doctor_value_is_set(LASTFM_API_KEY):
         print_recovery_error(context="secret.missing", detail="LASTFM_API_KEY (-u / --lastfm-api-key) is empty or still the placeholder value")
         sys.exit(1)
@@ -5979,32 +6662,8 @@ def main():
 
     LASTFM_USERNAME_GLOBAL = args.username
 
-    if args.fetch_duration:
-        USE_TRACK_DURATION_FROM_SPOTIFY = args.fetch_duration
-
-    if args.check_interval:
-        LASTFM_CHECK_INTERVAL = args.check_interval
-
-    if args.active_interval:
-        LASTFM_ACTIVE_CHECK_INTERVAL = args.active_interval
-
-    if args.offline_timer:
-        LASTFM_INACTIVITY_CHECK = args.offline_timer
-
-    if args.break_multiplier:
-        LASTFM_BREAK_CHECK_MULTIPLIER = args.break_multiplier
-
-    # The interval can come from a config file, so the reminder is settled once every layer has been applied
-    LIVENESS_REMINDER_SECONDS = LIVENESS_CHECK_INTERVAL if LIVENESS_CHECK_INTERVAL > 0 else 0
-
     network = pylast.LastFMNetwork(LASTFM_API_KEY, LASTFM_API_SECRET)
     user = network.get_user(args.username)
-
-    if args.csv_file:
-        CSV_FILE = os.path.expanduser(args.csv_file)
-    else:
-        if CSV_FILE:
-            CSV_FILE = os.path.expanduser(CSV_FILE)
 
     if CSV_FILE:
         try:
@@ -6025,12 +6684,6 @@ def main():
             print_recovery_error(e)
             sys.exit(1)
         sys.exit(0)
-
-    if args.monitor_list:
-        MONITOR_LIST_FILE = os.path.expanduser(args.monitor_list)
-    else:
-        if MONITOR_LIST_FILE:
-            MONITOR_LIST_FILE = os.path.expanduser(MONITOR_LIST_FILE)
 
     if MONITOR_LIST_FILE:
         try:
@@ -6058,9 +6711,6 @@ def main():
         print(f"* Error: {e}")
         sys.exit(1)
 
-    if args.disable_logging is True:
-        DISABLE_LOGGING = True
-
     if not DISABLE_LOGGING:
         log_path = Path(os.path.expanduser(LF_LOGFILE))
         if log_path.parent != Path('.'):
@@ -6075,48 +6725,6 @@ def main():
     else:
         FINAL_LOG_PATH = None
 
-    if args.notify_active is True:
-        ACTIVE_NOTIFICATION = True
-
-    if args.notify_inactive is True:
-        INACTIVE_NOTIFICATION = True
-
-    if args.notify_track is True:
-        TRACK_NOTIFICATION = True
-
-    if args.notify_song_changes is True:
-        SONG_NOTIFICATION = True
-
-    if args.notify_offline_entries is True:
-        OFFLINE_ENTRIES_NOTIFICATION = True
-
-    if args.notify_loop is True:
-        SONG_ON_LOOP_NOTIFICATION = True
-
-    if args.notify_errors is False:
-        ERROR_NOTIFICATION = False
-
-    if args.notify_followers is True:
-        FOLLOWERS_NOTIFICATION = True
-
-    if args.notify_followings is True:
-        FOLLOWINGS_NOTIFICATION = True
-
-    if args.notify_profile is True:
-        PROFILE_NOTIFICATION = True
-
-    if args.track_followings is True:
-        TRACK_FOLLOWINGS = True
-
-    if args.track_followers is True:
-        TRACK_FOLLOWERS = True
-
-    if args.track_bio is True:
-        TRACK_BIO = True
-
-    if args.track_display_name is True:
-        TRACK_DISPLAY_NAME = True
-
     # Check for beautifulsoup4 if friend or profile tracking is enabled
     if friends_check_enabled():
         try:
@@ -6126,30 +6734,6 @@ def main():
             print("* Error: beautifulsoup4 is required for friend and profile tracking")
             print("* Install it with: pip install beautifulsoup4")
             sys.exit(1)
-
-    if args.friends_check_interval:
-        FRIENDS_CHECK_INTERVAL = args.friends_check_interval
-
-    if args.friends_change_counter:
-        FRIENDS_CHANGE_COUNTER = args.friends_change_counter
-
-    if args.friends_retry_interval:
-        FRIENDS_RETRY_INTERVAL = args.friends_retry_interval
-
-    if args.track_in_spotify is True:
-        TRACK_SONGS = True
-
-    if args.progress is True:
-        PROGRESS_INDICATOR = True
-
-    if args.hide_duration_source is True:
-        DO_NOT_SHOW_DURATION_MARKS = True
-
-    if args.fetch_duration is True:
-        USE_TRACK_DURATION_FROM_SPOTIFY = True
-
-    if not USE_TRACK_DURATION_FROM_SPOTIFY:
-        DO_NOT_SHOW_DURATION_MARKS = True
 
     if SMTP_HOST.startswith("your_smtp_server_"):
         ACTIVE_NOTIFICATION = False
