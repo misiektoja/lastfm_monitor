@@ -131,6 +131,8 @@ Verify your SMTP settings by using `--send-test-email` flag (the tool will try t
 lastfm_monitor --send-test-email
 ```
 
+The message arrives as `lastfm_monitor: test email` and its body names the command that sent it, so a mailbox holding alerts from more than one monitor says which is which. With the mail settings incomplete, the command reports what is missing instead of attempting a send.
+
 ## Webhook Settings
 
 Webhook alerts work independently from email. Discord and ntfy are supported directly. Compatible services can use the Discord request format or the advanced payload and header settings.
