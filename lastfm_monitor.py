@@ -617,7 +617,13 @@ PROJECT_URL = "https://github.com/misiektoja/lastfm_monitor"
 DOCS_BASE_URL = "https://misiektoja.github.io/lastfm_monitor"
 GUIDE_URL = f"{DOCS_BASE_URL}/"
 INSTALL_GUIDE_URL = f"{DOCS_BASE_URL}/installation/"
+QUICK_START_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/#quick-start"
 LASTFM_API_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/#lastfm-api-key-and-shared-secret"
+PRIVACY_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/#user-privacy-settings"
+CONFIG_FILE_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#configuration-file"
+SECRETS_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#storing-secrets"
+SMTP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#smtp-settings"
+USAGE_GUIDE_URL = f"{DOCS_BASE_URL}/usage/#monitoring-mode"
 SPOTIFY_APP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#optional-spotify-oauth-app-setup"
 WEBHOOK_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#webhook-settings"
 
@@ -705,6 +711,7 @@ import ipaddress
 import getpass
 import tempfile
 from itertools import tee, islice, chain
+from collections import namedtuple
 from html import escape
 import shutil
 from pathlib import Path
@@ -811,7 +818,7 @@ def check_internet(url=CHECK_INTERNET_URL, timeout=CHECK_INTERNET_TIMEOUT):
         _ = req.get(url, timeout=timeout, headers=headers)
         return True
     except req.RequestException as e:
-        print(f"* No connectivity, please check your network:\n\n{e}")
+        print_recovery_error(e, context="connectivity")
         return False
 
 
@@ -932,7 +939,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         ipaddress.ip_address(str(SMTP_HOST))
     except ValueError:
         if not fqdn_re.search(str(SMTP_HOST)):
-            print("Error sending email - SMTP settings are incorrect (invalid IP address/FQDN in SMTP_HOST)")
+            print_recovery_error(context="email", detail="The SMTP settings are incorrect (invalid IP address/FQDN in SMTP_HOST)")
             return 1
 
     try:
@@ -940,23 +947,23 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         if not (1 <= port <= 65535):
             raise ValueError
     except ValueError:
-        print("Error sending email - SMTP settings are incorrect (invalid port number in SMTP_PORT)")
+        print_recovery_error(context="email", detail="The SMTP settings are incorrect (invalid port number in SMTP_PORT)")
         return 1
 
     if not email_re.search(str(SENDER_EMAIL)) or not email_re.search(str(RECEIVER_EMAIL)):
-        print("Error sending email - SMTP settings are incorrect (invalid email in SENDER_EMAIL or RECEIVER_EMAIL)")
+        print_recovery_error(context="email", detail="The SMTP settings are incorrect (invalid email in SENDER_EMAIL or RECEIVER_EMAIL)")
         return 1
 
     if not SMTP_USER or not isinstance(SMTP_USER, str) or SMTP_USER == "your_smtp_user" or not SMTP_PASSWORD or not isinstance(SMTP_PASSWORD, str) or SMTP_PASSWORD == "your_smtp_password":
-        print("Error sending email - SMTP settings are incorrect (check SMTP_USER & SMTP_PASSWORD variables)")
+        print_recovery_error(context="email", detail="The SMTP settings are incorrect (check SMTP_USER & SMTP_PASSWORD variables)")
         return 1
 
     if not subject or not isinstance(subject, str):
-        print("Error sending email - SMTP settings are incorrect (subject is not a string or is empty)")
+        print_recovery_error(context="email", detail="The SMTP settings are incorrect (subject is not a string or is empty)")
         return 1
 
     if not body and not body_html:
-        print("Error sending email - SMTP settings are incorrect (body and body_html cannot be empty at the same time)")
+        print_recovery_error(context="email", detail="The SMTP settings are incorrect (body and body_html cannot be empty at the same time)")
         return 1
 
     try:
@@ -986,7 +993,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         smtpObj.quit()
         debug_print("Email sent successfully")
     except Exception as e:
-        print(f"Error sending email: {e}")
+        print_recovery_error(e, context="email")
         return 1
     return 0
 
@@ -1000,6 +1007,201 @@ def sanitize_sensitive_text(value: Any) -> str:
             text = text.replace(secret, "<redacted>")
     text = re.sub(r"(?i)([?&](?:api_key|api_sig|token|secret|password)=)[^&\s]+", r"\1<redacted>", text)
     return text
+
+
+# Every recovery category the tool can report, kept closed so a message is testable, deduplicable and translatable later
+RECOVERY_CODES = frozenset({
+    "config.missing", "config.invalid",
+    "secret.missing", "secret.entry",
+    "auth.api_key_invalid",
+    "network.unavailable", "network.timeout",
+    "lastfm.rate_limited", "lastfm.unavailable",
+    "target.missing", "target.invalid", "target.not_found", "target.not_visible",
+    "smtp.invalid", "smtp.authentication", "smtp.connection",
+    "webhook.invalid", "webhook.rejected", "webhook.rate_limited", "webhook.connection",
+    "file.unreadable", "file.unwritable",
+    "unknown",
+})
+
+# Carries one classified failure: what happened, what to do about it and whether retrying can help
+RecoveryAdvice = namedtuple("RecoveryAdvice", ["code", "summary", "fix", "retryable", "detail"])
+RecoveryAdvice.__new__.__defaults__ = ("",)
+
+
+# Carries structured recovery advice across an exception boundary without exposing technical detail
+class RecoveryError(Exception):
+    # Initializes a structured recovery exception, keeping the original cause attached for debug output
+    def __init__(self, advice, cause=None):
+        self.advice = advice
+        self.cause = cause
+        if cause is not None:
+            self.__cause__ = cause
+        super().__init__(advice.summary)
+
+
+# Builds one piece of recovery advice, refusing any code outside the closed set and sanitizing every field
+def make_recovery_advice(code, summary, fix, retryable, detail=""):
+    if code not in RECOVERY_CODES:
+        raise ValueError(f"Unsupported recovery code: {code}")
+    return RecoveryAdvice(code, sanitize_sensitive_text(summary), sanitize_sensitive_text(fix), bool(retryable), sanitize_sensitive_text(detail) if detail else "")
+
+
+# Adds a directly relevant documentation link on its own line
+def recovery_fix_with_guide(fix, guide_url):
+    return f"{fix}\nGuide: {guide_url}"
+
+
+# Returns the HTTP status carried by an error, when it has one
+def recovery_http_status(error):
+    response = getattr(error, "response", None)
+    status = getattr(response, "status_code", None)
+    return status if isinstance(status, int) else None
+
+
+# Returns the numeric status pylast attaches to a web service error, which is a Last.fm error code or an HTTP code
+def recovery_lastfm_status(error):
+    status = getattr(error, "status", None)
+    if isinstance(status, int):
+        return status
+    if isinstance(status, str):
+        try:
+            return int(status)
+        except ValueError:
+            return None
+    return None
+
+
+# Maps one exception plus its status and calling context to stable recovery advice
+def classify_recovery_error(error=None, context="runtime", detail=""):
+    if isinstance(error, RecoveryError):
+        return error.advice
+    message = str(detail or error or "").lower()
+    safe_detail = sanitize_sensitive_text(detail or error) if (detail or error) else ""
+    lastfm_status = recovery_lastfm_status(error)
+    http_status = recovery_http_status(error)
+
+    def advice(code, summary, fix, retryable, guide_url=None):
+        return make_recovery_advice(code, summary, recovery_fix_with_guide(fix, guide_url) if guide_url else fix, retryable, safe_detail)
+
+    if context == "config":
+        if "does not exist" in message or "no such file" in message:
+            return advice("config.missing", safe_detail or "The configuration file was not found", "Create one with 'lastfm_monitor --generate-config' or correct the --config-file path", False, CONFIG_FILE_GUIDE_URL)
+        return advice("config.invalid", safe_detail or "The configuration file could not be read", "Correct the reported line, or start from a fresh template with 'lastfm_monitor --generate-config'", False, CONFIG_FILE_GUIDE_URL)
+
+    if context in ("set_lastfm_credentials", "set_spotify_credentials", "set_webhook_url"):
+        flag = f"--{context.replace('_', '-')}"
+        guide = {"set_lastfm_credentials": LASTFM_API_GUIDE_URL, "set_spotify_credentials": SPOTIFY_APP_GUIDE_URL}.get(context, WEBHOOK_GUIDE_URL)
+        if "interactive terminal" in message:
+            return advice("secret.entry", safe_detail or f"{flag} requires an interactive terminal", f"Run {flag} in a terminal window so the value stays hidden while you paste it", False, guide)
+        if "cancelled" in message:
+            return advice("secret.entry", safe_detail or "Setup was cancelled and the dotenv file was not changed", f"Run {flag} again when you have the value ready", False, guide)
+        if "--env-file none" in message:
+            return advice("secret.entry", safe_detail or "There is nowhere to save the value", f"Drop --env-file none, or name a writable dotenv file with --env-file PATH, then run {flag} again", False, SECRETS_GUIDE_URL)
+        if "could not save" in message or "could not read" in message:
+            return advice("file.unwritable", safe_detail or "The private settings file could not be updated", "Check file permissions or choose another path with --env-file PATH", False, SECRETS_GUIDE_URL)
+        if context == "set_webhook_url":
+            return advice("webhook.invalid", safe_detail or "The webhook URL was not changed", f"Copy a complete Discord or ntfy webhook URL then run {flag} again", False, guide)
+        return advice("secret.entry", safe_detail or "No value was saved and the dotenv file was not changed", f"Run {flag} again and paste each value when it is asked for", False, guide)
+
+    if context == "target.missing":
+        return advice("target.missing", safe_detail or "No Last.fm username was provided", "Pass the username to monitor: lastfm_monitor <lastfm_username>", False, QUICK_START_GUIDE_URL)
+
+    if context == "secret.missing":
+        return advice("secret.missing", safe_detail or "A required Last.fm credential is missing", "Save the API key and shared secret with 'lastfm_monitor --set-lastfm-credentials'", False, LASTFM_API_GUIDE_URL)
+
+    if context == "connectivity":
+        # Classified from the error, because the detail names the endpoint rather than the failure
+        cause = str(error or "").lower()
+        if "timed out" in cause or "timeout" in cause:
+            return advice("network.timeout", "The connectivity endpoint did not answer in time", "Check network, DNS, proxy and CHECK_INTERNET_URL settings", True)
+        return advice("network.unavailable", "The connectivity endpoint could not be reached", "Check network, DNS, proxy and CHECK_INTERNET_URL settings", True)
+
+    if context == "email":
+        if any(term in message for term in ("authentication", "auth", "username and password", "535")):
+            return advice("smtp.authentication", "The SMTP server rejected the sign-in", "Check SMTP_USER and SMTP_PASSWORD, and use an app password if the provider requires one", False, SMTP_GUIDE_URL)
+        if any(term in message for term in ("settings are incorrect", "invalid")):
+            return advice("smtp.invalid", safe_detail or "The SMTP settings are incomplete or invalid", "Check SMTP_HOST, SMTP_PORT, SENDER_EMAIL and RECEIVER_EMAIL in the configuration file", False, SMTP_GUIDE_URL)
+        return advice("smtp.connection", "The SMTP server could not be reached", "Check SMTP_HOST, SMTP_PORT and SMTP_SSL, then confirm the host is reachable from this machine", True, SMTP_GUIDE_URL)
+
+    if context == "webhook":
+        if http_status == 429 or "rate limit" in message:
+            return advice("webhook.rate_limited", "The webhook service is rate limiting deliveries", "Reduce how many alert types are enabled, or wait for the service to accept deliveries again", True, WEBHOOK_GUIDE_URL)
+        if any(term in message for term in ("must contain", "must be discord", "could not be formatted", "could not apply", "header", "priority", "tags")):
+            return advice("webhook.invalid", safe_detail or "The webhook configuration is not usable", "Check WEBHOOK_URL, WEBHOOK_PROVIDER and the alert settings, then verify with 'lastfm_monitor --send-test-webhook'", False, WEBHOOK_GUIDE_URL)
+        if any(term in message for term in ("could not be reached", "connection", "timed out")):
+            return advice("webhook.connection", "The webhook service could not be reached", "Check connectivity and the webhook host, then try again", True, WEBHOOK_GUIDE_URL)
+        return advice("webhook.rejected", safe_detail or "The webhook service refused the delivery", "Confirm the webhook still exists and the URL is current, then verify with 'lastfm_monitor --send-test-webhook'", http_status is not None and http_status >= 500, WEBHOOK_GUIDE_URL)
+
+    if context == "file":
+        if any(term in message for term in ("cannot load", "cannot be opened", "unreadable", "not valid utf-8", "no such file", "cannot be read")):
+            return advice("file.unreadable", safe_detail or "A file the tool keeps could not be read", "Check the path and its permissions, or delete the file so it is recreated", False)
+        return advice("file.unwritable", safe_detail or "A file the tool keeps could not be written", "Check that the directory exists and is writable, or choose another path", False)
+
+    # Runtime, which is the monitoring loop, the listing mode and every Last.fm call either of them makes.
+    # The pylast status is checked first, because Last.fm answers HTTP 200 with a numeric error code in the body.
+    if lastfm_status == 17:
+        return advice("target.not_visible", "The monitored user hides their recent listening information", "Ask the user to turn off 'Hide recent listening information' in their Last.fm privacy settings", False, PRIVACY_GUIDE_URL)
+    if lastfm_status in (10, 13, 26):
+        return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", "Save a working pair with 'lastfm_monitor --set-lastfm-credentials'", False, LASTFM_API_GUIDE_URL)
+    if lastfm_status == 29:
+        return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. Increase the check intervals if this repeats", True)
+    if lastfm_status in (6, 7):
+        return advice("target.not_found", safe_detail or "Last.fm has no user with that name", "Check the username, since a deleted or renamed account cannot be monitored", False, USAGE_GUIDE_URL)
+    if lastfm_status in (8, 11, 16) or (lastfm_status is not None and lastfm_status >= 500):
+        return advice("lastfm.unavailable", "The Last.fm API is temporarily unavailable", "This is usually a Last.fm outage. The tool will keep retrying", True)
+
+    if http_status == 429 or "rate limit" in message or "too many requests" in message:
+        return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. Increase the check intervals if this repeats", True)
+    if "invalid api key" in message or "api key suspended" in message or "invalid method signature" in message:
+        return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", "Save a working pair with 'lastfm_monitor --set-lastfm-credentials'", False, LASTFM_API_GUIDE_URL)
+    if "user required to be logged in" in message:
+        return advice("target.not_visible", "The monitored user hides their recent listening information", "Ask the user to turn off 'Hide recent listening information' in their Last.fm privacy settings", False, PRIVACY_GUIDE_URL)
+    if "user not found" in message or "no user with that name" in message or http_status == 404:
+        return advice("target.not_found", safe_detail or "Last.fm has no user with that name", "Check the username, since a deleted or renamed account cannot be monitored", False, USAGE_GUIDE_URL)
+    if (http_status is not None and http_status >= 500) or "temporarily unavailable" in message or "service unavailable" in message or "bad gateway" in message:
+        return advice("lastfm.unavailable", "The Last.fm API is temporarily unavailable", "This is usually a Last.fm outage. The tool will keep retrying", True)
+    if "timed out" in message or "timeout" in message:
+        return advice("network.timeout", "The Last.fm request timed out", "Check connectivity. The tool will keep retrying", True)
+    if any(term in message for term in ("connection", "name resolution", "failed to resolve", "network is unreachable", "no connectivity")):
+        return advice("network.unavailable", "Last.fm could not be reached", "Check connectivity, DNS and any proxy. The tool will keep retrying", True)
+    if "invalid" in message and "username" in message:
+        return advice("target.invalid", safe_detail or "That is not a usable Last.fm username", "Pass the username exactly as it appears on the user's Last.fm profile page", False, USAGE_GUIDE_URL)
+    return advice("unknown", safe_detail or "The request could not be completed", "Re-run with --debug to see the technical cause", True)
+
+
+# Renders one structured failure as the shared Error, To fix and optional Technical detail block
+def render_recovery_error(error=None, context="runtime", debug=None, detail=""):
+    advice = classify_recovery_error(error, context, detail)
+    lines = [f"* Error: {advice.summary}", f"To fix: {advice.fix}"]
+    show_debug = DEBUG_MODE if debug is None else debug
+    if show_debug and advice.detail:
+        lines.append(f"Technical detail: {sanitize_sensitive_text(advice.detail)}")
+    return "\n".join(lines)
+
+
+# Prints one structured recovery error and returns its stable advice
+def print_recovery_error(error=None, context="runtime", debug=None, detail=""):
+    advice = classify_recovery_error(error, context, detail)
+    print(render_recovery_error(RecoveryError(advice), debug=debug))
+    return advice
+
+
+# Tracks the last uninterrupted recovery category so a long outage cannot repeat the same hint every cycle
+class RecoveryHintTracker:
+    # Starts with no category, so the first failure of any kind always renders its hint
+    def __init__(self):
+        self.last_code = None
+
+    # Returns True for the first category and again only when the failure category changes
+    def should_render(self, advice):
+        if advice.code == self.last_code:
+            return False
+        self.last_code = advice.code
+        return True
+
+    # Clears suppression after a successful cycle, so a recurrence is reported again
+    def reset(self):
+        self.last_code = None
 
 
 # Returns whether a webhook URL is a complete private HTTPS link
@@ -1319,26 +1521,26 @@ def send_webhook(title: str, description: str, notification_type: str = "song", 
     if not force and not webhook_event_enabled(notification_type):
         return 1
     if not validate_webhook_url():
-        print("* Error sending webhook: WEBHOOK_URL must contain a complete HTTPS link")
+        print_recovery_error(context="webhook", detail="WEBHOOK_URL must contain a complete HTTPS link")
         return 1
     provider = normalized_webhook_provider()
     if not provider:
-        print("* Error sending webhook: WEBHOOK_PROVIDER must be discord or ntfy")
+        print_recovery_error(context="webhook", detail="WEBHOOK_PROVIDER must be discord or ntfy")
         return 1
     customization_error = validate_webhook_customization(provider)
     if customization_error is not None:
-        print(f"* Error sending webhook: {customization_error}")
+        print_recovery_error(context="webhook", detail=customization_error)
         return 1
     header_error = validate_webhook_headers(provider)
     if header_error is not None:
-        print(f"* Error sending webhook: {header_error}")
+        print_recovery_error(context="webhook", detail=header_error)
         return 1
     try:
         webhook_values = build_webhook_values(title, description, notification_type)
         request_headers = build_webhook_headers(provider, webhook_values)
         discord_payload = build_webhook_payload(title, description, notification_type, webhook_values) if provider == "discord" else None
     except ValueError as exc:
-        print(f"* Error sending webhook: {exc}")
+        print_recovery_error(exc, context="webhook")
         return 1
     sleep_func = time.sleep if sleeper is None else sleeper
     ntfy_title, ntfy_message = build_ntfy_webhook_message(str(webhook_values["title"]), str(webhook_values["description"])) if provider == "ntfy" else ("", "")
@@ -1355,14 +1557,14 @@ def send_webhook(title: str, description: str, notification_type: str = "song", 
                 return 0
             retryable = response.status_code == 429 or 500 <= response.status_code <= 599
             if not retryable or attempt == WEBHOOK_MAX_ATTEMPTS - 1:
-                print(f"* Error sending webhook: service returned HTTP {response.status_code}")
+                print_recovery_error(req.HTTPError(response=response), context="webhook", detail=f"The webhook service returned HTTP {response.status_code}")
                 return 1
             delay = webhook_retry_after_seconds(response) if response.status_code == 429 else WEBHOOK_FALLBACK_RETRY_SECONDS
             debug_print(f"Webhook delivery returned HTTP {response.status_code}. Retrying once in {delay:g} seconds")
             sleep_func(delay)
         except req.RequestException as exc:
             if attempt == WEBHOOK_MAX_ATTEMPTS - 1:
-                print(f"* Error sending webhook: {type(exc).__name__}")
+                print_recovery_error(exc, context="webhook", detail=f"The webhook service could not be reached ({type(exc).__name__})")
                 return 1
             debug_print(f"Webhook delivery failed with {type(exc).__name__}. Retrying once in {WEBHOOK_FALLBACK_RETRY_SECONDS:g} seconds")
             sleep_func(WEBHOOK_FALLBACK_RETRY_SECONDS)
@@ -2438,7 +2640,7 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
         new_track = user.get_now_playing()
         recent_tracks = lastfm_get_recent_tracks(username, network, number)
     except Exception as e:
-        print(f"* Error: Cannot display recent tracks for the user: {e}")
+        print_recovery_error(e, detail=f"Cannot read the recent tracks of '{username}'")
         sys.exit(1)
 
     try:
@@ -3537,7 +3739,7 @@ def load_config_file(config_path, namespace=None, report_errors=True):
     except Exception as exc:
         detail = f"Config file '{config_path}' failed with {type(exc).__name__}: {exc}"
     if report_errors:
-        print(f"* Error: {detail}")
+        print_recovery_error(context="config", detail=detail)
         print("* Config files are read as data. Only documented SETTING = value lines with plain literal values are accepted.")
     return False
 
@@ -3693,7 +3895,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             with open(lastfm_last_activity_file, 'r', encoding="utf-8") as f:
                 last_activity_read = json.load(f)
         except Exception as e:
-            print(f"* Cannot load last status from '{lastfm_last_activity_file}' file: {e}")
+            print_recovery_error(e, context="file", detail=f"Cannot load the last status from '{lastfm_last_activity_file}'")
         if last_activity_read:
             last_activity_ts = last_activity_read[0]
             last_activity_artist = last_activity_read[1]
@@ -3710,7 +3912,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
         new_track = user.get_now_playing()
         recent_tracks = lastfm_get_recent_tracks(username, network, RECENT_TRACKS_NUMBER)
     except Exception as e:
-        print(f"* Error: {e}")
+        print_recovery_error(e, detail=f"Cannot read the recent tracks of '{username}'")
         sys.exit(1)
 
     # Handle case where user has no tracks yet (fresh account)
@@ -5446,7 +5648,7 @@ def main():
     cfg_path = find_config_file(CLI_CONFIG_PATH)
 
     if not cfg_path and CLI_CONFIG_PATH:
-        print(f"* Error: Config file '{CLI_CONFIG_PATH}' does not exist")
+        print_recovery_error(context="config", detail=f"Config file '{CLI_CONFIG_PATH}' does not exist")
         sys.exit(1)
 
     if cfg_path:
@@ -5481,7 +5683,7 @@ def main():
         try:
             runners[selected_private_actions[0]](env_file=private_env_file)
         except PrivateSettingsError as exc:
-            print(f"* Error: {exc}")
+            print_recovery_error(exc, context=selected_private_actions[0])
             sys.exit(1)
         sys.exit(0)
 
@@ -5537,7 +5739,7 @@ def main():
         sys.exit(1)
 
     if not args.username:
-        print("* Error: LASTFM_USERNAME argument is required !")
+        print_recovery_error(context="target.missing", detail="No Last.fm username was given")
         sys.exit(1)
 
     if args.lastfm_api_key:
@@ -5556,11 +5758,11 @@ def main():
         SP_TOKENS_FILE = os.path.expanduser(SP_TOKENS_FILE)
 
     if not LASTFM_API_KEY or LASTFM_API_KEY == "your_lastfm_api_key":
-        print("* Error: LASTFM_API_KEY (-u / --lastfm_api_key) value is empty or incorrect")
+        print_recovery_error(context="secret.missing", detail="LASTFM_API_KEY (-u / --lastfm-api-key) is empty or still the placeholder value")
         sys.exit(1)
 
     if not LASTFM_API_SECRET or LASTFM_API_SECRET == "your_lastfm_api_secret":
-        print("* Error: LASTFM_API_SECRET (-w / --lastfm-secret) value is empty or incorrect")
+        print_recovery_error(context="secret.missing", detail="LASTFM_API_SECRET (-w / --lastfm-secret) is empty or still the placeholder value")
         sys.exit(1)
 
     if args.debug_mode is True:
@@ -5598,7 +5800,7 @@ def main():
             with open(CSV_FILE, 'a', newline='', buffering=1, encoding="utf-8") as _:
                 pass
         except Exception as e:
-            print(f"* Error: CSV file cannot be opened for writing: {e}")
+            print_recovery_error(e, context="file", detail=f"The CSV file '{CSV_FILE}' cannot be opened for writing")
             sys.exit(1)
 
     if args.list_recent:
@@ -5609,7 +5811,7 @@ def main():
         try:
             lastfm_list_tracks(args.username, user, network, tracks_n, CSV_FILE)
         except Exception as e:
-            print(f"* Error: {e}")
+            print_recovery_error(e)
             sys.exit(1)
         sys.exit(0)
 
@@ -5634,7 +5836,7 @@ def main():
                 if line.strip() and not line.strip().startswith("#")
             ]
         except Exception as e:
-            print(f"* Error: File with Last.fm tracks cannot be opened: {e}")
+            print_recovery_error(e, context="file", detail=f"The file with Last.fm tracks '{MONITOR_LIST_FILE}' cannot be opened")
             sys.exit(1)
     else:
         lf_tracks = []
