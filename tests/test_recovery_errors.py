@@ -13,7 +13,7 @@ import lastfm_monitor as monitor
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 # Contexts the classifier routes on, so a typo in a call site cannot fall through to the runtime branch unnoticed
-KNOWN_CONTEXTS = frozenset({"runtime", "config", "set_lastfm_credentials", "set_spotify_credentials", "set_webhook_url", "target.missing", "secret.missing", "connectivity", "email", "webhook", "file"})
+KNOWN_CONTEXTS = frozenset({"runtime", "config", "set_lastfm_credentials", "set_spotify_credentials", "set_webhook_url", "target.missing", "secret.missing", "connectivity", "email", "webhook", "file", "file.exists"})
 
 
 # Returns the recovery codes the classifier can actually return, read from the branches themselves
