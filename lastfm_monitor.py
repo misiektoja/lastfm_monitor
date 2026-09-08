@@ -6817,7 +6817,7 @@ def _wizard_verify_lastfm_credentials(api_key, api_secret):
 def _wizard_collect_auth_section(state, input_func=None, getpass_func=None, validator=None):
     print(f"Create or view your Last.fm API key and shared secret: {LASTFM_API_REGISTRATION_URL}")
     print(f"Credentials of an application you already registered: {LASTFM_API_ACCOUNTS_URL}")
-    configured = all(doctor_value_is_set(state.config_values.get(name)) for name in ("LASTFM_API_KEY", "LASTFM_API_SECRET"))
+    configured = all(doctor_value_is_set(state.config_values.get(name)) or _wizard_existing_secret(name, state.env_path) for name in ("LASTFM_API_KEY", "LASTFM_API_SECRET"))
     # The key and the secret are one credential, so the replace question covers the pair rather than each value
     if configured and not _wizard_ask_yes_no("Replace the Last.fm API credentials already configured?", default=False, input_func=input_func):
         return
@@ -6834,15 +6834,15 @@ def _wizard_collect_auth_section(state, input_func=None, getpass_func=None, vali
         print("  Checking the credentials with Last.fm ...")
         advice = verify(api_key, api_secret)
         if advice is None:
-            _wizard_queue_secret(state, "LASTFM_API_KEY", api_key, input_func=input_func)
-            _wizard_queue_secret(state, "LASTFM_API_SECRET", api_secret, input_func=input_func)
+            state.secret_updates["LASTFM_API_KEY"] = api_key
+            state.secret_updates["LASTFM_API_SECRET"] = api_secret
             print("  Last.fm accepted the credentials.")
             return
         print(f"  {advice.summary}: {advice.detail}" if advice.detail else f"  {advice.summary}")
         if advice.retryable:
             # Being offline is the usual reason a correct pair fails here, so the values are kept rather than discarded
-            _wizard_queue_secret(state, "LASTFM_API_KEY", api_key, input_func=input_func)
-            _wizard_queue_secret(state, "LASTFM_API_SECRET", api_secret, input_func=input_func)
+            state.secret_updates["LASTFM_API_KEY"] = api_key
+            state.secret_updates["LASTFM_API_SECRET"] = api_secret
             print("  The credentials were saved without being checked. Run --doctor to check them again.")
             return
         # A pair Last.fm keeps rejecting cannot be corrected from inside the loop, so the wizard must be leavable here too
@@ -6869,7 +6869,7 @@ def _wizard_collect_spotify_section(state, input_func=None, getpass_func=None):
         _wizard_disable_spotify(state)
         return
     print(f"  Without app credentials the anonymous Spotify web player supplies the metadata. Create an app at {SPOTIFY_DASHBOARD_URL}")
-    configured = all(doctor_value_is_set(state.config_values.get(name)) for name in ("SP_CLIENT_ID", "SP_CLIENT_SECRET"))
+    configured = all(doctor_value_is_set(state.config_values.get(name)) or _wizard_existing_secret(name, state.env_path) for name in ("SP_CLIENT_ID", "SP_CLIENT_SECRET"))
     question = "Replace the Spotify app credentials already configured?" if configured else "Add Spotify app credentials? They are optional and are tried before the anonymous backend"
     if not _wizard_ask_yes_no(question, default=False, input_func=input_func):
         if not configured:
@@ -6890,8 +6890,8 @@ def _wizard_collect_spotify_section(state, input_func=None, getpass_func=None):
             if not _wizard_offer_retry("Spotify app credentials", "The anonymous Spotify web player is used instead", input_func=input_func):
                 return
             continue
-        _wizard_queue_secret(state, "SP_CLIENT_ID", client_id, input_func=input_func)
-        _wizard_queue_secret(state, "SP_CLIENT_SECRET", client_secret, input_func=input_func)
+        state.secret_updates["SP_CLIENT_ID"] = client_id
+        state.secret_updates["SP_CLIENT_SECRET"] = client_secret
         print("  Spotify accepted the credentials.")
         state.config_values["SP_TOKENS_FILE"] = _wizard_normalize_json_path(_wizard_ask_text("Token cache file (blank keeps the tokens in memory only)", default=str(state.config_values.get("SP_TOKENS_FILE") or ""), input_func=input_func))
         return
