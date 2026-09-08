@@ -660,6 +660,9 @@ INSTALL_METHOD_PYPI = "pip"
 INSTALL_METHOD_SCRIPT = "manual"
 INSTALL_METHOD_ENV_VAR = "LASTFM_MONITOR_INSTALL_METHOD"
 
+# Set once when --config-file selects the 'none' sentinel, so no caller falls back to the search path
+CONFIG_DISCOVERY_DISABLED = False
+
 # Where each secret's effective value came from, recorded as precedence is applied rather than reconstructed afterwards
 SECRET_SOURCES = {}
 
@@ -3884,7 +3887,12 @@ def find_config_file(cli_path=None):
       2) ./{DEFAULT_CONFIG_FILENAME}
       3) ~/.{DEFAULT_CONFIG_FILENAME}
       4) script-directory/{DEFAULT_CONFIG_FILENAME}
+
+    The literal 'none' selects no file at all, which also switches the search off.
     """
+
+    if CONFIG_DISCOVERY_DISABLED or str(cli_path or "").casefold() == "none":
+        return None
 
     if cli_path:
         p = Path(os.path.expanduser(cli_path))
@@ -6020,6 +6028,48 @@ def _doctor_offer_notification_tests(report, input_func=None):
     return checks
 
 
+# Renders the --help examples: one heading per task, then a comment and the command it describes
+def render_help_examples(groups, guide_url):
+    blocks = []
+    for title, entries in groups:
+        block = [f"{title}:"]
+        for comment, command in entries:
+            if len(block) > 1:
+                block.append("")
+            block.extend(f"  # {line}" for line in comment.split("\n"))
+            if command:
+                block.append(f"  {command}")
+        blocks.append("\n".join(block))
+    return "Examples:\n\n" + "\n\n".join(blocks) + f"\n\nGuide: {guide_url}\n"
+
+
+# Returns the --help epilog, listing the commands worth knowing rather than every command there is
+def help_examples():
+    prefix = render_command(include_paths=False)
+    groups = (
+        ("Getting started", (
+            ("Save the Last.fm API key and shared secret through hidden prompts", f"{prefix} --set-lastfm-credentials"),
+            ("Check the setup before relying on it", f"{prefix} --doctor <lastfm_username>"),
+            ("Start monitoring", f"{prefix} <lastfm_username>"),
+        )),
+        ("Notifications", (
+            ("Email when the user starts and stops listening", f"{prefix} <lastfm_username> -a -i"),
+            ("Send one test email", f"{prefix} --send-test-email"),
+            ("Send one test webhook", f"{prefix} --send-test-webhook"),
+        )),
+        ("Listening extras", (
+            ("Play every scrobble in your own Spotify client", f"{prefix} <lastfm_username> -g"),
+            ("Alert on the tracks and albums listed in a file", f"{prefix} <lastfm_username> -s tracks.txt"),
+            ("Write every scrobble to a CSV file", f"{prefix} <lastfm_username> -b scrobbles.csv"),
+        )),
+        ("Information and diagnostics", (
+            ("List the most recent tracks and exit", f"{prefix} -l <lastfm_username>"),
+            ("Trace what the tool is doing", f"{prefix} <lastfm_username> --debug"),
+        )),
+    )
+    return render_help_examples(groups, QUICK_START_GUIDE_URL)
+
+
 # Prints one labelled command on its own indented line, the shared shape across these tools
 def _wizard_print_command(label, command, suffix=""):
     print(label)
@@ -6207,7 +6257,7 @@ def apply_cli_overrides(args):
 
 # Runs the command-line interface
 def main():
-    global CLI_CONFIG_PATH, DOTENV_FILE, CLEAR_SCREEN, LIVENESS_REMINDER_SECONDS, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_PROFILE_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, PROFILE_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
+    global CLI_CONFIG_PATH, CONFIG_DISCOVERY_DISABLED, DOTENV_FILE, CLEAR_SCREEN, LIVENESS_REMINDER_SECONDS, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_PROFILE_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, PROFILE_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
 
     if "--generate-config" in sys.argv and not any(flag in sys.argv for flag in SECRET_ACTION_FLAGS):
         config_content = CONFIG_BLOCK.strip("\n") + "\n"
@@ -6251,7 +6301,7 @@ def main():
 
     parser = argparse.ArgumentParser(
         prog="lastfm_monitor",
-        description=(f"Monitor a Last.fm user's scrobbles and send customizable email or webhook alerts [ {PROJECT_URL}/ ]"), epilog=f"Guide: {GUIDE_URL}", formatter_class=argparse.RawTextHelpFormatter
+        description=(f"Monitor a Last.fm user's scrobbles and send customizable email or webhook alerts [ {PROJECT_URL}/ ]"), epilog=help_examples(), formatter_class=argparse.RawTextHelpFormatter
     )
 
     # Positional
@@ -6275,7 +6325,7 @@ def main():
         "--config-file",
         dest="config_file",
         metavar="PATH",
-        help="Location of the optional config file",
+        help="Location of the optional config file (auto-search if not set, disable with 'none')",
     )
     conf.add_argument(
         "--doctor",
@@ -6336,8 +6386,8 @@ def main():
         metavar="SPOTIFY_CLIENT_ID:SPOTIFY_CLIENT_SECRET",
         help="Optional Spotify OAuth app credentials"
     )
-    # Notifications
-    notify = parser.add_argument_group("Notifications")
+    # Email notifications
+    notify = parser.add_argument_group("Email notifications")
     notify.add_argument(
         "-a", "--notify-active",
         dest="notify_active",
@@ -6412,7 +6462,7 @@ def main():
         "--send-test-email",
         dest="send_test_email",
         action="store_true",
-        help="Send a test email to verify SMTP settings"
+        help="Send test email to verify SMTP settings"
     )
 
     webhook_notify = parser.add_argument_group("Webhook notifications")
@@ -6488,7 +6538,7 @@ def main():
     )
 
     # Listing mode
-    listing = parser.add_argument_group("Listing")
+    listing = parser.add_argument_group("User information & listing")
 
     listing.add_argument(
         "-l", "--list-recent",
@@ -6602,11 +6652,14 @@ def main():
         sys.exit(print_welcome_screen())
 
     if args.config_file:
-        CLI_CONFIG_PATH = os.path.expanduser(args.config_file)
+        CONFIG_DISCOVERY_DISABLED = args.config_file.casefold() == "none"
+        # The sentinel is kept unexpanded, so every command this run prints reads back the setup it used
+        CLI_CONFIG_PATH = args.config_file if CONFIG_DISCOVERY_DISABLED else os.path.expanduser(args.config_file)
 
     cfg_path = find_config_file(CLI_CONFIG_PATH)
 
-    if not cfg_path and CLI_CONFIG_PATH:
+    # A missing path is still an error, since only the literal 'none' is a selection
+    if not cfg_path and CLI_CONFIG_PATH and not CONFIG_DISCOVERY_DISABLED:
         print_recovery_error(context="config", detail=f"Config file '{CLI_CONFIG_PATH}' does not exist")
         sys.exit(1)
 
