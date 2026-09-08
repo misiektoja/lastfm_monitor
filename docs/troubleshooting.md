@@ -62,6 +62,28 @@ A configuration file that cannot be parsed stops the run and names the file, the
 
 Failures that clear on their own, such as a Last.fm outage or a rate limit, say that the tool keeps retrying. Failures that need you, such as a rejected key or a hidden profile, do not.
 
+A failure is reported once, when it starts, with the delay before the next attempt on the same line:
+
+```
+* Error: The Last.fm API is temporarily unavailable (retrying in 30 seconds)
+To fix: This is usually a Last.fm outage. The tool will keep retrying
+```
+
+While it lasts the tool stays quiet and the liveness reminder carries it instead, so a two day outage is a handful of lines rather than one block per check:
+
+```
+* Monitoring degraded for <lastfm_username>. The Last.fm API is temporarily unavailable since Mon 08 Sep 2026, 09:15:05
+Liveness check, timestamp:	Mon 08 Sep 2026, 21:15:05
+```
+
+When the failure clears, the run says so whatever flags it was started with:
+
+```
+* Monitoring recovered for <lastfm_username> after 14 hours
+```
+
+A different kind of failure is reported in full again, so a rate limit that follows an outage is not hidden by it. With `LIVENESS_CHECK_INTERVAL = 0` there is no reminder to carry the outage, so the older aggregated summaries such as `* Error 50x (15x times in the last 2 minutes): ...` keep their `ERROR_500_NUMBER_LIMIT` and `ERROR_NETWORK_ISSUES_NUMBER_LIMIT` cadence instead.
+
 ## Verbose Output
 
 `--verbose` adds the decisions a run made, in the same `*` lines as the rest of the output:
@@ -70,7 +92,7 @@ Failures that clear on their own, such as a Last.fm outage or a rate limit, say 
 lastfm_monitor <lastfm_username> --verbose
 ```
 
-It reports a channel switched off because its settings cannot work, a tracked field that could not be read together with the alert that silences, and the point where automatic retries start after a Last.fm failure. Nothing is printed per check, so a quiet run stays quiet.
+It reports a channel switched off because its settings cannot work and a tracked field that could not be read together with the alert that silences. Nothing is printed per check, so a quiet run stays quiet.
 
 A feature that stays unavailable is reported once, when it stops working, rather than on every check that follows. The repeated failures are left to `--debug`. It is reported again when it starts working, but only when the failure itself was printed, so a recovery never refers to something you never saw.
 
