@@ -301,6 +301,58 @@ The screen is never cleared when output is redirected to a file or a pipe, in de
 
 Two settings add detail to what a run prints. `VERBOSE_MODE` adds the decisions the run made and `DEBUG_MODE` adds timestamped technical traces. Both are off by default, both are independent of each other and both have a flag that wins over the file, `--verbose` and `--debug`. See [Verbose Output](troubleshooting.md#verbose-output) and [Debug Output](troubleshooting.md#debug-output).
 
+## Terminal Colours
+
+`COLORED_OUTPUT` controls whether terminal output is coloured. It defaults to `True` and is read before the first line is printed, so a configured value applies from the version line onwards. `--no-color` disables colour for one run. Colour also switches itself off when output is redirected or piped, when `TERM` is unset or `dumb` and when the standard [`NO_COLOR`](https://no-color.org/) environment variable is set. Log files are always written with the escape sequences stripped.
+
+`COLOR_THEME` overrides individual colours. It is merged over the built-in theme, so name only the parts you want to change:
+
+```ini
+COLOR_THEME = { "track": "bright_magenta bold", "username": "green" }
+```
+
+Generated configuration files ship this block commented out, so the built-in defaults apply and a later change to them reaches you. Uncomment only the lines you want to change and the rest keep following the defaults.
+
+A value combines one colour with any number of style attributes, separated by spaces or `+`, for example `"bright_cyan bold"`, `"red underline"` or `"bright_magenta bold underline"`. An empty string leaves that part uncoloured.
+
+| Colours | Styles |
+| --- | --- |
+| `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white` and the matching `bright_` variants such as `bright_red` | `bold`, `dim`, `underline`, `blink` |
+
+Parts with the same name mean the same thing in the sibling monitors, so a `COLOR_THEME` block can be shared between them. Each tool lists only the parts it actually colours, so a few names appear in one and not the other.
+
+| Theme key | Colours |
+| --- | --- |
+| `header` | The version line plus the Setup Wizard and Doctor headings |
+| `section` | Commands the wizard tells you to run, the Doctor section names and the recent-tracks table header |
+| `username` | Last.fm account names, including the `Target` row and the follower and following listings |
+| `id` | Machine identifiers in debug traces, such as a Spotify track ID |
+| `status_active` | `ACTIVE`, `PRIVATE MODE`, `RESUMED` and `LOOP` |
+| `status_inactive` | `INACTIVE`, `SKIPPED` and `PAUSED` |
+| `status_offline` | `OFFLINE` |
+| `artist` | The Artist column of the recent-tracks table |
+| `track` | `Track:` rows and the Title column |
+| `album` | `Album:` rows and the Album column |
+| `duration` | Track durations and elapsed times |
+| `status_change` | The `CONT` marker on a resumed track |
+| `timestamp_label` | The `Timestamp:` label. Empty by default, so the label stays plain like in the sibling monitors |
+| `timestamp_value` | The timestamp value |
+| `info` | `To fix:` lines, setup prompts and the Doctor guide line |
+| `warning` | The `Warning:` opening word, the Doctor `WARN` marker and setup cancellations |
+| `error` | Error lines and the Doctor `FAIL` marker |
+| `signal` | The name of a signal a handler reports |
+| `email`, `webhook` | Notification delivery lines |
+| `date`, `date_range` | Single dates and times, and date or hour ranges |
+| `boolean_true`, `boolean_false` | `True` / `Enabled` and `False` / `Disabled` |
+| `count_up`, `count_down` | Reported changes only, such as `from 10 to 12` and the `(+2)` / `(-2)` differences. A static count is left plain |
+| `link` | URLs |
+
+Warning and signal lines mark their opening word rather than being painted end to end, so the values inside them keep the colour that says what they are.
+
+On Windows, install the optional `colorama` package for the best results in the classic Command Prompt. Windows Terminal needs nothing extra.
+
+To colour saved log files when you view them later, see [Coloring Log Output with GRC](usage.md#coloring-log-output-with-grc).
+
 ## Check Intervals
 
 If you want to customize music polling intervals, use `-k` and `-c` flags (or corresponding configuration options):

@@ -7,6 +7,12 @@
 Running an older Python stops the tool at startup with a message naming the version it found. Python 3.9 still works, but `pip` will resolve older releases of `pylast`, `requests` and `python-dotenv` there, because their current releases require Python 3.10 or newer. Prefer a newer Python where you can choose.
 * Libraries: [pyLast](https://github.com/pylast/pylast), `requests`, `python-dateutil`, [PyOTP](https://github.com/pyauth/pyotp), [Spotipy](https://github.com/spotipy-dev/spotipy), `python-dotenv`, `beautifulsoup4`
 
+[colorama](https://github.com/tartley/colorama) is optional and improves coloured output in the classic Windows Command Prompt. `--doctor` reports it as missing only on Windows, where it makes a difference:
+
+```sh
+pip install colorama
+```
+
 Tested on:
 
 * **macOS**: Ventura, Sonoma, Sequoia, Tahoe
