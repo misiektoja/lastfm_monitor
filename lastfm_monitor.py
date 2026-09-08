@@ -702,8 +702,15 @@ nl_ch = "\n"
 
 import sys
 
-if sys.version_info < (3, 9):
-    print("* Error: Python version 3.9 or higher required !")
+# The lowest Python this tool supports, kept as one constant so the runtime gate, the documentation
+# and the packaging metadata cannot drift apart
+MINIMUM_PYTHON_VERSION = (3, 9)
+MINIMUM_PYTHON_VERSION_TEXT = ".".join(str(part) for part in MINIMUM_PYTHON_VERSION)
+
+if sys.version_info < MINIMUM_PYTHON_VERSION:
+    print(f"* Error: Python version {MINIMUM_PYTHON_VERSION_TEXT} or higher required !")
+    print(f"To fix: Upgrade to Python {MINIMUM_PYTHON_VERSION_TEXT} or newer, since this is Python {sys.version.split()[0]}")
+    print(f"Guide: {INSTALL_GUIDE_URL}")
     sys.exit(1)
 
 import time
