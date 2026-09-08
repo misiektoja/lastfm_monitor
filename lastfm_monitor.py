@@ -882,30 +882,80 @@ def normalize_log_separators(message):
     return re.sub(r"(?m)^─+$", lambda match: match.group(0).replace("─", "-"), message)
 
 
+# Matches the escape sequences a terminal acts on: CSI, OSC and the two-character forms
+ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[@-Z\\-_])")
+
+# Drops every remaining control character except tab and newline
+TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+# Removes terminal control sequences, since track, artist and profile text arrives from Last.fm rather than the tool
+def sanitize_terminal_text(message):
+    if not isinstance(message, str) or not message:
+        return message
+    return TERMINAL_CONTROL_RE.sub("", ANSI_ESCAPE_RE.sub("", message))
+
+
+# Wraps stdout while logging is disabled, so output is sanitized on the path that keeps no log file
+class TerminalStream(object):
+    # Stores the wrapped terminal stream
+    def __init__(self, stream):
+        self.terminal = stream
+
+    # Writes one sanitized message to the terminal
+    def write(self, message):
+        self.terminal.write(sanitize_terminal_text(sanitize_error_text(message)))
+        self.terminal.flush()
+
+    # Writes one terminal-only message, which is every message this stream receives
+    def terminal_only(self, message):
+        self.write(message)
+
+    # Discards log-only output while logging is disabled
+    def log_only(self, message):
+        return
+
+    # Flushes the wrapped terminal
+    def flush(self):
+        self.terminal.flush()
+
+    # Forwards other stream attributes, so isatty and encoding still answer for the real terminal
+    def __getattr__(self, name):
+        return getattr(self.terminal, name)
+
+
 # Logger class to output messages to stdout and log file
 class Logger(object):
     def __init__(self, filename):
-        self.terminal = sys.stdout
+        self.terminal = unwrap_terminal_stream(sys.stdout)
         self.logfile = open(filename, "a", buffering=1, encoding="utf-8")
 
     def write(self, message):
-        self.terminal.write(message)
-        self.logfile.write(normalize_log_separators(message.expandtabs(8)))
+        safe_message = sanitize_terminal_text(sanitize_error_text(message))
+        self.terminal.write(safe_message)
+        self.logfile.write(normalize_log_separators(safe_message.expandtabs(8)))
         self.terminal.flush()
         self.logfile.flush()
 
     # Writes one message only to the terminal, so a line that orients a reader at a screen stays out of the log
     def terminal_only(self, message):
-        self.terminal.write(message)
+        self.terminal.write(sanitize_terminal_text(sanitize_error_text(message)))
         self.terminal.flush()
 
     # Writes one message only to the log, so the file keeps the full view whichever one the terminal was shown
     def log_only(self, message):
-        self.logfile.write(normalize_log_separators(message.expandtabs(8)))
+        self.logfile.write(normalize_log_separators(sanitize_terminal_text(sanitize_error_text(message)).expandtabs(8)))
         self.logfile.flush()
 
     def flush(self):
         pass
+
+
+# Returns the real terminal underneath any stream the tool installed over stdout
+def unwrap_terminal_stream(stream):
+    while isinstance(stream, (Logger, TerminalStream)):
+        stream = stream.terminal
+    return stream
 
 
 # Signal handler when user presses Ctrl+C
@@ -6462,12 +6512,9 @@ def render_doctor_summary(checks):
     return "\n".join(("", "Summary", summary_line, "", f"Guide: {DOCTOR_GUIDE_URL}"))
 
 
-# Returns the real terminal underneath the logger wrapper, so progress can move the cursor safely
+# Returns the real terminal underneath the installed stream, so progress can move the cursor safely
 def _doctor_terminal_stream():
-    stream = sys.stdout
-    while isinstance(stream, Logger):
-        stream = stream.terminal
-    return stream
+    return unwrap_terminal_stream(sys.stdout)
 
 
 # Shows one transient doctor step, only on an interactive terminal
@@ -8599,6 +8646,8 @@ def main():
         sys.stdout = Logger(FINAL_LOG_PATH)
     else:
         FINAL_LOG_PATH = None
+        # Upstream text still reaches the terminal without a log file, so it is sanitized by a stream either way
+        sys.stdout = TerminalStream(sys.stdout)
 
     # Check for beautifulsoup4 if friend or profile tracking is enabled
     if friends_check_enabled():
