@@ -207,7 +207,7 @@ lastfm_monitor --set-smtp-password
 
 Each command accepts `--env-file PATH`. Existing values require confirmation and the update is atomic. `--env-file none` is rejected because these commands must save their values.
 
-The dotenv file is replaced in one step and is never backed up, so a rotated secret is not left behind in a second file. Keep your own copy if you need one.
+The dotenv file is replaced in one step and is never backed up, so a rotated secret is not left behind in a second file. Keep your own copy if you need one. A secret you switch off, such as the ntfy access token in the setup wizard, has its line removed rather than left as an empty value.
 
 Answering `n` to the replacement question keeps the saved value and says so. Pressing Ctrl+C at any prompt cancels the command and exits with a failure code. Neither answer changes the dotenv file.
 
