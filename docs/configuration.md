@@ -213,6 +213,8 @@ Answering `n` to the replacement question keeps the saved value and says so. Pre
 
 Whatever you store, the tool redacts these values from its error output and from the log file. A configured value shorter than 12 characters is only redacted in the forms that identify it as a secret, such as `SMTP_PASSWORD = ...` or an `Authorization` header, because replacing a short value everywhere would corrupt ordinary text that happens to contain the same word.
 
+The same writer removes terminal control sequences from everything the tool prints. Track, artist and album names, display names and About Me text all come from Last.fm and can contain anything, including escape sequences that would clear your screen or retitle the window when a report or a log file is read. They are stripped before the text reaches the terminal and the log, and escaped before it reaches an HTML email body.
+
 Set the needed environment variables using `export` on **Linux/Unix/macOS/WSL** systems:
 
 ```sh
