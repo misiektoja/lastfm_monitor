@@ -1,4 +1,4 @@
-"""How the tool writes files: the timestamped config backup, the atomic replace and the dotenv file that is deliberately not backed up."""
+"""How the tool writes files: the timestamped config backup, the atomic replace, the secrets the generated config drops and the dotenv file that is deliberately not backed up."""
 
 import ast
 import subprocess
@@ -299,3 +299,26 @@ class TestTheStateFiles:
     ])
     def test_generated_names_come_from_the_target(self, builder, expected):
         assert Path(builder()).name == expected
+
+
+# The config file is world readable and is copied to a backup, so no secret may be rendered into it
+class TestTheGeneratedConfigDropsEverySecret:
+
+    def test_no_secret_reaches_the_file_whatever_the_caller_passes(self):
+        secrets = {key: f"live-{key.casefold()}-value" for key in monitor.SECRET_KEYS}
+
+        written = monitor.generate_config_with_current_values({**secrets, "LASTFM_CHECK_INTERVAL": 42})
+
+        for key, value in secrets.items():
+            assert value not in written, f"{key} was written into the configuration"
+        assert "LASTFM_CHECK_INTERVAL = 42" in written
+
+    def test_the_shipped_placeholder_survives_a_caller_that_holds_the_real_value(self):
+        template = monitor._config_template_defaults()
+
+        written = monitor.generate_config_with_current_values({key: "live-value" for key in monitor.SECRET_KEYS})
+
+        for key in monitor.SECRET_KEYS:
+            assert f"{key} = {template[key]!r}".replace("'", '"') in written.replace("'", '"')
+            # A kept placeholder only means unset if the tool reads it that way
+            assert monitor.doctor_value_is_set(template[key]) is False
