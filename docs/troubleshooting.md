@@ -62,6 +62,20 @@ A configuration file that cannot be parsed stops the run and names the file, the
 
 Failures that clear on their own, such as a Last.fm outage or a rate limit, say that the tool keeps retrying. Failures that need you, such as a rejected key or a hidden profile, do not.
 
+## Verbose Output
+
+`--verbose` adds the decisions a run made, in the same `*` lines as the rest of the output:
+
+```sh
+lastfm_monitor <lastfm_username> --verbose
+```
+
+It reports a channel switched off because its settings cannot work, a tracked field that could not be read together with the alert that silences, and the point where automatic retries start after a Last.fm failure. Nothing is printed per check, so a quiet run stays quiet.
+
+Verbose mode can also be turned on permanently with the `VERBOSE_MODE` configuration setting. The `--verbose` flag wins over a configuration file that sets `VERBOSE_MODE = False`.
+
+The two modes are independent. `--verbose` does not turn on debug output and `--debug` does not turn on verbose output. A run with neither ends its startup summary with a line naming both.
+
 ## Debug Output
 
 `--debug` traces what the tool is doing in timestamped `[DEBUG HH:MM:SS]` lines:
@@ -70,7 +84,16 @@ Failures that clear on their own, such as a Last.fm outage or a rate limit, say 
 lastfm_monitor <lastfm_username> --debug
 ```
 
-Traced operations include where each secret resolved from, the Last.fm polling cycle, the sleep interval before each check, offline entries being detected, CSV initialization, email delivery attempts and the full [Spotify metadata](configuration.md#spotify-metadata-backends) path: server time, anonymous web-player token requests and refreshes, persisted-query hash discovery, OAuth app token retrieval and every search and match decision that resolves a track ID and duration.
+Each line reads `Operation: key=value, key=value`, and an operation that finished reports `outcome=OK`, `failed`, `degraded` or `skipped`, so `grep outcome=failed` finds every failure in a long run.
+
+```text
+[DEBUG 12:00:00] HTTP GET: url=https://www.last.fm/user/someuser/following, timeout=30s, attempt=#1/3, status=200, outcome=OK
+[DEBUG 12:00:00] Completed check: check=#7, user=someuser, state=online, track=Artist - Track
+```
+
+Traced operations include every outbound call with its address, timeout and result, where each secret resolved from, the configuration file and how many settings it applied, every completed check and the wait before the next one, every retry with its delay, each file the tool reads or writes, both notification channels with the destination host, the attempt and the delivery outcome, and the full [Spotify metadata](configuration.md#spotify-metadata-backends) path: server time, anonymous web-player token requests and refreshes, persisted-query hash discovery, OAuth app token retrieval and every search and match decision that resolves a track ID and duration.
+
+Failures the tool recovers from on its own are traced too, so a feature that quietly does nothing can still be diagnosed.
 
 That last group is the reason to reach for `--debug` first when track durations or automatic playback are not working. The trace names which backend answered, which candidate tracks came back and why one was chosen or rejected.
 
