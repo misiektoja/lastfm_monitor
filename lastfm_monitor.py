@@ -616,6 +616,9 @@ LASTFM_USERNAME_GLOBAL = ""
 
 exec(CONFIG_BLOCK, globals())
 
+# The tool's own name, printed where a message has to say which monitor sent it
+TOOL_NAME = "lastfm_monitor"
+
 # Default name for the optional config file
 DEFAULT_CONFIG_FILENAME = "lastfm_monitor.conf"
 
@@ -639,10 +642,27 @@ DOCTOR_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#doctor-preflight"
 # A preflight check waits on the user, so it uses a shorter timeout than a delivery in the monitoring loop
 DOCTOR_SMTP_TIMEOUT = 5
 
+# One wording per test message, shared with the sibling monitors. The subject names the tool because the
+# message lands beside the real alerts, and the body names the command because it can arrive minutes later
+TEST_EMAIL_SUBJECT = f"{TOOL_NAME}: test email"
+TEST_EMAIL_BODY = "This test email was sent by --send-test-email. Your SMTP settings work."
+TEST_WEBHOOK_TITLE = f"{TOOL_NAME}: test webhook"
+TEST_WEBHOOK_BODY = "This test notification was sent by --send-test-webhook. Your webhook settings work."
+DOCTOR_TEST_EMAIL_SUBJECT = f"{TOOL_NAME}: doctor test email"
+DOCTOR_TEST_EMAIL_BODY = "This test email was sent after approval in --doctor. Your SMTP delivery settings work."
+DOCTOR_TEST_WEBHOOK_TITLE = f"{TOOL_NAME}: doctor test webhook"
+DOCTOR_TEST_WEBHOOK_BODY = "This test notification was sent after approval in --doctor. Your webhook delivery settings work."
+
 # Check labels shared with the sibling monitors, so one report reads the same as the next
 SMTP_READY_CHECK_LABEL = "SMTP connection and login succeeded"
 WEBHOOK_READY_CHECK_LABEL = "Webhook URL, headers and alert choices look valid"
 EMAIL_UNUSABLE_CHECK_LABEL = "Email alerts are enabled but unusable"
+
+# Without these there is no email channel at all, which is a different question from what one delivery needs
+MAIL_DESTINATION_SETTINGS = ("SMTP_HOST", "SENDER_EMAIL", "RECEIVER_EMAIL")
+MAIL_SIGN_IN_SETTINGS = ("SMTP_HOST", "SMTP_USER", "SENDER_EMAIL", "RECEIVER_EMAIL")
+# Every send signs in first, so a delivery needs the password as well
+MAIL_DELIVERY_SETTINGS = ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "SENDER_EMAIL", "RECEIVER_EMAIL")
 
 # Pages where the user creates or views the credentials this tool reads
 LASTFM_API_REGISTRATION_URL = "https://www.last.fm/api/account/create"
@@ -1396,6 +1416,8 @@ def classify_recovery_error(error=None, context="runtime", detail=""):
     if context == "email":
         if any(term in message for term in ("authentication", "auth", "username and password", "535")):
             return advice("smtp.authentication", "The SMTP server rejected the sign-in", "Check SMTP_USER and SMTP_PASSWORD, and use an app password if the provider requires one", False, SMTP_GUIDE_URL)
+        if "not set" in message or "incomplete" in message:
+            return advice("smtp.invalid", safe_detail or "The mail server settings are incomplete", "Set the missing settings in the configuration file, or turn the email alerts off", False, SMTP_GUIDE_URL)
         if any(term in message for term in ("settings are incorrect", "invalid")):
             return advice("smtp.invalid", safe_detail or "The SMTP settings are incomplete or invalid", "Check SMTP_HOST, SMTP_PORT, SENDER_EMAIL and RECEIVER_EMAIL in the configuration file", False, SMTP_GUIDE_URL)
         return advice("smtp.connection", "The SMTP server could not be reached", "Check SMTP_HOST, SMTP_PORT and SMTP_SSL, then confirm the host is reachable from this machine", True, SMTP_GUIDE_URL)
@@ -3876,9 +3898,9 @@ def _run_set_private_values(option_name: str, prompts: List[Tuple[str, str]], en
     return str(destination)
 
 
-# Returns the settings a mail sign-in needs that are still unset, so the command and its validator name the same ones
-def mail_sign_in_settings_missing():
-    return [name for name, value in (("SMTP_HOST", SMTP_HOST), ("SMTP_USER", SMTP_USER), ("SENDER_EMAIL", SENDER_EMAIL), ("RECEIVER_EMAIL", RECEIVER_EMAIL)) if not doctor_value_is_set(str(value or ""))]
+# Returns the named mail settings that are still unset, so every caller reports the same missing ones
+def mail_settings_missing(names=MAIL_DESTINATION_SETTINGS):
+    return [name for name in names if not doctor_value_is_set(str(globals().get(name) or ""))]
 
 
 # Signs in to the configured mail server with one entered password, so nothing is saved that cannot deliver
@@ -3888,7 +3910,7 @@ def smtp_sign_in(password, timeout=15):
     candidate = str(password or "")
     if not candidate or not doctor_value_is_set(candidate):
         raise PrivateSettingsError("No SMTP password was entered. The dotenv file was not changed")
-    missing = mail_sign_in_settings_missing()
+    missing = mail_settings_missing(MAIL_SIGN_IN_SETTINGS)
     if missing:
         raise PrivateSettingsError(f"The mail server settings are incomplete, {join_setting_names(missing, 'and')} {'is' if len(missing) == 1 else 'are'} not set")
     previous_password = SMTP_PASSWORD
@@ -3913,7 +3935,7 @@ def run_set_smtp_password(env_file=None, interactive=None, input_func=None, getp
     if not terminal_is_interactive:
         raise PrivateSettingsError("--set-smtp-password requires an interactive terminal so the password stays hidden")
     # Checked before the prompts, so nobody types a password only to be told the mail server was never configured
-    missing = mail_sign_in_settings_missing()
+    missing = mail_settings_missing(MAIL_SIGN_IN_SETTINGS)
     if missing:
         raise PrivateSettingsError(f"The mail server settings are incomplete, {join_setting_names(missing, 'and')} {'is' if len(missing) == 1 else 'are'} not set")
     prompt = input if input_func is None else input_func
@@ -5961,13 +5983,12 @@ def doctor_email_unusable_check(detail, fix):
 # Checks email alert settings then confirms the SMTP sign-in without sending anything
 def doctor_check_email_notifications(report):
     enabled_categories = _startup_email_notification_categories()
-    configured = doctor_value_is_set(SMTP_HOST) and doctor_value_is_set(SENDER_EMAIL) and doctor_value_is_set(RECEIVER_EMAIL)
+    unset = mail_settings_missing()
     # The error alert ships on by default, so it alone cannot mean the channel is switched on
     deliberate_categories = [category for category in enabled_categories if category != "errors"]
-    if not deliberate_categories and not configured:
+    if not deliberate_categories and unset:
         return [make_doctor_check("Notifications", "PASS", "Email notifications are disabled", "No SMTP connection was attempted and no email was sent")]
-    if not configured:
-        unset = [name for name, value in (("SMTP_HOST", SMTP_HOST), ("SENDER_EMAIL", SENDER_EMAIL), ("RECEIVER_EMAIL", RECEIVER_EMAIL)) if not doctor_value_is_set(value)]
+    if unset:
         return [doctor_email_unusable_check(f"{join_setting_names(unset, 'or')} is empty or still set to its placeholder", f"Set {join_setting_names(unset, 'and')} or turn the email alerts off")]
     if not enabled_categories:
         advice = make_recovery_advice("smtp.invalid", "Email is configured but no alert types are selected", recovery_fix_with_guide("Turn on at least one email alert in the configuration file", SMTP_GUIDE_URL), False)
@@ -6130,7 +6151,7 @@ def _doctor_offer_notification_tests(report, input_func=None):
     checks = []
     if report.email_ready:
         if _doctor_ask_yes_no("Send one test email now? This will deliver a real message", input_func=input_func):
-            delivered = send_email("lastfm_monitor: doctor test email", "This test email was sent after approval in --doctor. Your SMTP delivery settings work.", "", SMTP_SSL, smtp_timeout=DOCTOR_SMTP_TIMEOUT) == 0
+            delivered = send_email(DOCTOR_TEST_EMAIL_SUBJECT, DOCTOR_TEST_EMAIL_BODY, "", SMTP_SSL, smtp_timeout=DOCTOR_SMTP_TIMEOUT) == 0
             if delivered:
                 check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "PASS", "Doctor test email delivered", "One real test email was sent after confirmation")
             else:
@@ -6145,7 +6166,7 @@ def _doctor_offer_notification_tests(report, input_func=None):
     if report.webhook_ready:
         provider = webhook_provider_display_name()
         if _doctor_ask_yes_no(f"Send one test webhook through {provider} now? This will publish a real notification", input_func=input_func):
-            delivered = send_webhook("lastfm_monitor: doctor test webhook", "This test notification was sent after approval in --doctor. Your webhook delivery settings work.", "song", force=True) == 0
+            delivered = send_webhook(DOCTOR_TEST_WEBHOOK_TITLE, DOCTOR_TEST_WEBHOOK_BODY, "song", force=True) == 0
             if delivered:
                 check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "PASS", f"Doctor test webhook through {provider} delivered", "One real test webhook was sent after confirmation")
             else:
@@ -6431,7 +6452,7 @@ def main():
     print(f"Last.fm Monitoring Tool v{VERSION}\n")
 
     parser = argparse.ArgumentParser(
-        prog="lastfm_monitor",
+        prog=TOOL_NAME,
         description=(f"Monitor a Last.fm user's scrobbles and send customizable email or webhook alerts [ {PROJECT_URL}/ ]"), epilog=help_examples(), formatter_class=argparse.RawTextHelpFormatter
     )
 
@@ -6894,25 +6915,32 @@ def main():
         print_recovery_error(context="target.missing")
         sys.exit(1)
 
-    if WEBHOOK_ENABLED and not validate_webhook_url():
-        print("* Webhook alerts are off because WEBHOOK_URL is not a complete HTTPS link\n")
-        WEBHOOK_ENABLED = False
-
     if args.send_test_email:
+        missing = mail_settings_missing(MAIL_DELIVERY_SETTINGS)
+        if missing:
+            print_recovery_error(context="email", detail=f"The mail server settings are incomplete, {join_setting_names(missing, 'and')} {'is' if len(missing) == 1 else 'are'} not set")
+            sys.exit(1)
         print("* Sending test email notification ...\n")
-        if send_email("lastfm_monitor: test email", "This is test email - your SMTP settings seems to be correct !", "", SMTP_SSL, smtp_timeout=5) == 0:
+        if send_email(TEST_EMAIL_SUBJECT, TEST_EMAIL_BODY, "", SMTP_SSL, smtp_timeout=DOCTOR_SMTP_TIMEOUT) == 0:
             print("* Email sent successfully !")
         else:
             sys.exit(1)
         sys.exit(0)
 
     if args.send_test_webhook:
-        print("* Sending a test webhook ...\n")
-        if send_webhook("Last.fm Monitor test", "Your webhook alerts are set up correctly.", "song", force=True) == 0:
-            print("* Test webhook sent successfully !")
+        if not validate_webhook_url():
+            print_recovery_error(context="webhook", detail="WEBHOOK_URL must contain a complete HTTPS link")
+            sys.exit(1)
+        print("* Sending test webhook notification ...\n")
+        if send_webhook(TEST_WEBHOOK_TITLE, TEST_WEBHOOK_BODY, "song", force=True) == 0:
+            print("* Webhook sent successfully !")
         else:
             sys.exit(1)
         sys.exit(0)
+
+    if WEBHOOK_ENABLED and not validate_webhook_url():
+        print("* Webhook alerts are off because WEBHOOK_URL is not a complete HTTPS link\n")
+        WEBHOOK_ENABLED = False
 
     if not check_internet():
         sys.exit(1)
