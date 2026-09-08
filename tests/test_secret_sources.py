@@ -110,7 +110,7 @@ class TestRecordingTheSource:
         monkeypatch.setattr(monitor, "LASTFM_API_KEY", REAL_KEY)
         monitor.record_secret_source("LASTFM_API_KEY", "command line")
         output = capsys.readouterr().out
-        assert "name=LASTFM_API_KEY, source=command line, value=set, 32 chars" in output
+        assert "name=LASTFM_API_KEY, source=command line, value=set, chars=32" in output
         assert REAL_KEY not in output
 
 
@@ -158,9 +158,9 @@ class TestTheOrderTheLayersRunIn:
     def test_the_webhook_channel_is_gated_where_the_configuration_is_settled(self):
         assert SOURCE.index("apply_webhook_cli_overrides(args, parser)") < SOURCE.index("if WEBHOOK_ENABLED and not validate_webhook_url():\n        print(\"* Webhook alerts are off") < SOURCE.index("if not check_internet():")
 
-    # Applying the flag only before the config load lets the config erase it, only after hides the config's own failures
-    def test_an_explicit_debug_flag_is_applied_on_both_sides_of_the_config_load(self):
-        applications = [index for index in range(len(SOURCE)) if SOURCE.startswith("if args.debug_mode is True:", index)]
+    # Applying the flags only before the config load lets the config erase them, only after hides its own failures
+    def test_the_explicit_diagnostic_flags_are_applied_on_both_sides_of_the_config_load(self):
+        applications = [index for index in range(len(SOURCE)) if SOURCE.startswith("apply_diagnostic_cli_flags(args)", index)]
         config_load = SOURCE.index("if not load_config_file(cfg_path):")
-        assert any(index < config_load for index in applications), "no --debug application before the config load"
-        assert any(index > config_load for index in applications), "no --debug application after the config load"
+        assert any(index < config_load for index in applications), "no flag application before the config load"
+        assert any(index > config_load for index in applications), "no flag application after the config load"
