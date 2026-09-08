@@ -766,6 +766,7 @@ import tempfile
 from itertools import tee, islice, chain
 from collections import namedtuple
 from html import escape
+import contextlib
 import shutil
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Tuple, cast
@@ -862,6 +863,39 @@ def signal_handler(sig, frame):
     sys.stdout = stdout_bck
     print('\n* You pressed Ctrl+C, tool is terminated.')
     sys.exit(0)
+
+
+# Restores Python's own Ctrl+C behavior for the length of one prompt, so an interrupt there raises
+# KeyboardInterrupt for the caller to answer instead of reaching the handler that terminates the tool
+@contextlib.contextmanager
+def default_interrupt_handling():
+    try:
+        previous_handler = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+    except (ValueError, OSError):
+        # Handlers can only be replaced from the main thread, which is where every prompt runs
+        yield
+        return
+    try:
+        yield
+    finally:
+        try:
+            signal.signal(signal.SIGINT, previous_handler)
+        except (ValueError, OSError):
+            pass
+
+
+# Reads one visible answer with Python's default Ctrl+C behavior
+def read_interactively(reader, *args, **kwargs):
+    with default_interrupt_handling():
+        return reader(*args, **kwargs)
+
+
+# Reads one hidden answer with Python's default Ctrl+C behavior. Kept apart from the visible reader so a
+# secret typed here is never confused with an ordinary answer that is later printed back to the user
+def read_secret_interactively(reader, *args, **kwargs):
+    with default_interrupt_handling():
+        return reader(*args, **kwargs)
 
 
 # The last connectivity failure, so a quiet caller can classify it instead of the check printing it
@@ -1270,6 +1304,17 @@ def make_recovery_advice(code, summary, fix, retryable, detail=""):
     if code not in RECOVERY_CODES:
         raise ValueError(f"Unsupported recovery code: {code}")
     return RecoveryAdvice(code, sanitize_error_text(summary), sanitize_error_text(fix), bool(retryable), sanitize_error_text(detail) if detail else "")
+
+
+# Returns the advice a cancelled secret command reports, worded the same way by every one-shot secret command
+def secret_entry_cancelled_advice(subject, flag, guide_url):
+    return make_recovery_advice("secret.entry", f"{subject[:1].upper()}{subject[1:]} setup was cancelled and the dotenv file was not changed", recovery_fix_with_guide(f"Run {render_command([flag])} again when you have the value ready", guide_url), False)
+
+
+# Returns the advice a declined secret replacement reports, since the saved value stands and asking again changes nothing
+def secret_replacement_declined_advice(subject, flag, guide_url, plural=False):
+    kept = "were left as they are" if plural else "was left as it is"
+    return make_recovery_advice("secret.entry", f"The saved {subject} {kept} and the dotenv file was not changed", recovery_fix_with_guide(f"Run {render_command([flag])} again and answer y to replace the saved value", guide_url), False)
 
 
 # Adds a directly relevant documentation link on its own line
@@ -3791,7 +3836,7 @@ def update_dotenv_file(destination, updates):
 
 
 # Collects hidden private values and saves them together after overwrite confirmation
-def _run_set_private_values(option_name: str, prompts: List[Tuple[str, str]], env_file=None, interactive=None, input_func=None, getpass_func=None, guidance: Optional[List[str]] = None) -> str:
+def _run_set_private_values(option_name: str, prompts: List[Tuple[str, str]], env_file=None, interactive=None, input_func=None, getpass_func=None, guidance: Optional[List[str]] = None, subject: str = "private settings", guide_url: Optional[str] = None, plural: bool = False) -> str:
     destination = resolve_private_settings_path(env_file)
     terminal_is_interactive = sys.stdin.isatty() if interactive is None else interactive
     if not terminal_is_interactive:
@@ -3800,23 +3845,26 @@ def _run_set_private_values(option_name: str, prompts: List[Tuple[str, str]], en
     prompt = input if input_func is None else input_func
     if existing_keys:
         try:
-            confirmed = prompt(f"Replace {', '.join(existing_keys)} in '{destination}'? [y/N]: ").strip().casefold() in ("y", "yes")
+            confirmed = read_interactively(prompt, f"Replace {', '.join(existing_keys)} in '{destination}'? [y/N]: ").strip().casefold() in ("y", "yes")
         except (EOFError, KeyboardInterrupt):
-            confirmed = False
+            # Ctrl+C echoes nothing, so without this the error would continue the prompt line
+            print()
+            raise RecoveryError(secret_entry_cancelled_advice(subject, option_name, guide_url)) from None
         if not confirmed:
-            raise PrivateSettingsError("Private settings update was cancelled. The dotenv file was not changed")
+            raise RecoveryError(secret_replacement_declined_advice(subject, option_name, guide_url, plural=plural))
     for line in guidance or []:
         print(f"* {line}")
     hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
     updates = {}
     try:
         for key, prompt_text in prompts:
-            value = hidden_prompt(prompt_text).strip()
+            value = read_secret_interactively(hidden_prompt, prompt_text).strip()
             if not value or "\r" in value or "\n" in value:
                 raise PrivateSettingsError(f"No valid value was entered for {key}. The dotenv file was not changed")
             updates[key] = value
     except (EOFError, KeyboardInterrupt):
-        raise PrivateSettingsError("Private settings entry was cancelled. The dotenv file was not changed") from None
+        print()
+        raise RecoveryError(secret_entry_cancelled_advice(subject, option_name, guide_url)) from None
     try:
         update_dotenv_file(destination, updates)
     except PrivateSettingsError:
@@ -3871,18 +3919,20 @@ def run_set_smtp_password(env_file=None, interactive=None, input_func=None, getp
     prompt = input if input_func is None else input_func
     if _dotenv_contains_key(destination, "SMTP_PASSWORD"):
         try:
-            confirmed = prompt(f"Replace SMTP_PASSWORD in '{destination}'? [y/N]: ").strip().casefold() in ("y", "yes")
+            confirmed = read_interactively(prompt, f"Replace SMTP_PASSWORD in '{destination}'? [y/N]: ").strip().casefold() in ("y", "yes")
         except (EOFError, KeyboardInterrupt):
-            confirmed = False
+            print()
+            raise RecoveryError(secret_entry_cancelled_advice("SMTP password", "--set-smtp-password", SMTP_GUIDE_URL)) from None
         if not confirmed:
-            raise PrivateSettingsError("SMTP password setup was cancelled. The dotenv file was not changed")
+            raise RecoveryError(secret_replacement_declined_advice("SMTP password", "--set-smtp-password", SMTP_GUIDE_URL))
     print(f"* The password is checked by signing in to {SMTP_HOST} as {SMTP_USER}. Nothing is sent")
     print(f"* Guide: {SMTP_GUIDE_URL}")
     hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
     try:
-        smtp_password = str(hidden_prompt("Enter the SMTP password (input hidden): ")).strip()
+        smtp_password = str(read_secret_interactively(hidden_prompt, "Enter the SMTP password (input hidden): ")).strip()
     except (EOFError, KeyboardInterrupt):
-        raise PrivateSettingsError("SMTP password setup was cancelled. The dotenv file was not changed") from None
+        print()
+        raise RecoveryError(secret_entry_cancelled_advice("SMTP password", "--set-smtp-password", SMTP_GUIDE_URL)) from None
     check = smtp_sign_in if sign_in is None else sign_in
     try:
         signed_in_user = check(smtp_password, timeout=DOCTOR_SMTP_TIMEOUT)
@@ -3911,19 +3961,21 @@ def run_set_webhook_url(env_file=None, interactive=None, input_func=None, getpas
     prompt = input if input_func is None else input_func
     if _dotenv_contains_key(destination, "WEBHOOK_URL"):
         try:
-            confirmed = prompt(f"Replace WEBHOOK_URL in '{destination}'? [y/N]: ").strip().casefold() in ("y", "yes")
+            confirmed = read_interactively(prompt, f"Replace WEBHOOK_URL in '{destination}'? [y/N]: ").strip().casefold() in ("y", "yes")
         except (EOFError, KeyboardInterrupt):
-            confirmed = False
+            print()
+            raise RecoveryError(secret_entry_cancelled_advice("webhook URL", "--set-webhook-url", WEBHOOK_GUIDE_URL)) from None
         if not confirmed:
-            raise PrivateSettingsError("Webhook setup was cancelled. The dotenv file was not changed")
+            raise RecoveryError(secret_replacement_declined_advice("webhook URL", "--set-webhook-url", WEBHOOK_GUIDE_URL))
     print("* Discord: Edit Channel -> Integrations -> Webhooks -> New Webhook -> Copy Webhook URL")
     print("* ntfy: the complete topic URL, such as https://ntfy.sh/your-private-topic")
     print(f"* Guide: {WEBHOOK_GUIDE_URL}")
     hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
     try:
-        webhook_url = hidden_prompt("Paste the Discord or ntfy webhook URL (input hidden): ").strip()
+        webhook_url = read_secret_interactively(hidden_prompt, "Paste the Discord or ntfy webhook URL (input hidden): ").strip()
     except (EOFError, KeyboardInterrupt):
-        raise PrivateSettingsError("Webhook setup was cancelled. The dotenv file was not changed") from None
+        print()
+        raise RecoveryError(secret_entry_cancelled_advice("webhook URL", "--set-webhook-url", WEBHOOK_GUIDE_URL)) from None
     if not validate_webhook_url(webhook_url):
         raise PrivateSettingsError("That does not look like a complete HTTPS webhook URL. The dotenv file was not changed")
     try:
@@ -3944,7 +3996,7 @@ def run_set_lastfm_credentials(env_file=None, interactive=None, input_func=None,
         f"View the credentials of an application you already registered at {LASTFM_API_ACCOUNTS_URL}",
         f"Guide: {LASTFM_API_GUIDE_URL}",
     ]
-    return _run_set_private_values("--set-lastfm-credentials", prompts, env_file, interactive, input_func, getpass_func, guidance)
+    return _run_set_private_values("--set-lastfm-credentials", prompts, env_file, interactive, input_func, getpass_func, guidance, subject="Last.fm API credentials", guide_url=LASTFM_API_GUIDE_URL, plural=True)
 
 
 # Safely stores privately entered Spotify OAuth app credentials
@@ -3955,7 +4007,7 @@ def run_set_spotify_credentials(env_file=None, interactive=None, input_func=None
         "Then copy its Client ID and, through 'View client secret', its Client Secret.",
         f"Guide: {SPOTIFY_APP_GUIDE_URL}",
     ]
-    return _run_set_private_values("--set-spotify-credentials", prompts, env_file, interactive, input_func, getpass_func, guidance)
+    return _run_set_private_values("--set-spotify-credentials", prompts, env_file, interactive, input_func, getpass_func, guidance, subject="Spotify OAuth app credentials", guide_url=SPOTIFY_APP_GUIDE_URL, plural=True)
 
 
 # Finds an optional config file
@@ -6791,7 +6843,7 @@ def main():
         }
         try:
             runners[selected_private_actions[0]](env_file=private_env_file)
-        except PrivateSettingsError as exc:
+        except (PrivateSettingsError, RecoveryError) as exc:
             print_recovery_error(exc, context=selected_private_actions[0])
             sys.exit(1)
         sys.exit(0)
