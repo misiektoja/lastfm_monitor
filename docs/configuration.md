@@ -263,3 +263,16 @@ Friend and profile tracking uses one separate check interval which you can set v
 To avoid false notifications caused by transient Last.fm responses, friend and profile changes are only confirmed after a number of consecutive checks (default: 3). You can configure this via the `FRIENDS_CHANGE_COUNTER` option or `--friends-change-counter` flag. This setting also controls the threshold for suppressing repeated error messages.
 
 You can also configure the retry timeout used when confirming transient changes or errors via `FRIENDS_RETRY_INTERVAL` configuration option or `--friends-retry-interval` flag.
+
+### Liveness Reminder
+
+While nothing changes, the tool prints one reminder that it is still running:
+
+```
+* Monitoring healthy for <lastfm_username>. The user is inactive with no activity change since the last check
+Liveness check, timestamp:	Mon 08 Sep 2026, 09:15:05
+```
+
+The reminder is timed in seconds, so it arrives at the same rate whether the user is listening or not. Set `LIVENESS_CHECK_INTERVAL` to change it (default: 43200, i.e. 12 hours), or to 0 to switch it off.
+
+Anything the tool prints about the user restarts the countdown, so a busy run stays quiet.

@@ -34,6 +34,7 @@ and again before anything is published to PyPI.
 | `test_install_method_commands.py` | Install detection and the commands the tool prints, including the paths each one carries |
 | `test_friends_notifications.py` | Friend and profile change alerts plus one user per line in plain text and HTML |
 | `test_lastfm_friends_scraper.py` | Scrape headers, retry behavior, following markup and public profile parsing |
+| `test_liveness_banner.py` | What a quiet run prints, when it prints it and what restarts the countdown |
 | `test_recovery_errors.py` | Failure classification, the advice each failure produces and the error block it renders |
 | `test_profile_tracking.py` | Profile baseline creation, independent field controls and deferred persistence |
 | `test_private_settings.py` | Hidden credential entry, atomic dotenv updates and refusal to save invalid input |
