@@ -653,7 +653,7 @@ SPOTIFY_DASHBOARD_URL = "https://developer.spotify.com/dashboard"
 LASTFM_TARGET_FORMS = "username exactly as it appears on the user's Last.fm profile page"
 
 # Commands that write a secret to the dotenv file and exit
-SECRET_ACTION_FLAGS = ("--set-webhook-url", "--set-lastfm-credentials", "--set-spotify-credentials")
+SECRET_ACTION_FLAGS = ("--set-webhook-url", "--set-lastfm-credentials", "--set-spotify-credentials", "--set-smtp-password")
 
 # Install methods the tool can detect, used to tailor every command it prints
 INSTALL_METHOD_PYPI = "pip"
@@ -1315,9 +1315,9 @@ def classify_recovery_error(error=None, context="runtime", detail=""):
             return advice("config.missing", safe_detail or "The configuration file was not found", f"Create one with '{render_command(['--generate-config', DEFAULT_CONFIG_FILENAME], include_paths=False)}' or correct the --config-file path", False, CONFIG_FILE_GUIDE_URL)
         return advice("config.invalid", safe_detail or "The configuration file could not be read", f"Correct the reported line, or start from a fresh template with '{render_command(['--generate-config', DEFAULT_CONFIG_FILENAME], include_paths=False)}'", False, CONFIG_FILE_GUIDE_URL)
 
-    if context in ("set_lastfm_credentials", "set_spotify_credentials", "set_webhook_url"):
+    if context in ("set_lastfm_credentials", "set_spotify_credentials", "set_webhook_url", "set_smtp_password"):
         flag = f"--{context.replace('_', '-')}"
-        guide = {"set_lastfm_credentials": LASTFM_API_GUIDE_URL, "set_spotify_credentials": SPOTIFY_APP_GUIDE_URL}.get(context, WEBHOOK_GUIDE_URL)
+        guide = {"set_lastfm_credentials": LASTFM_API_GUIDE_URL, "set_spotify_credentials": SPOTIFY_APP_GUIDE_URL, "set_smtp_password": SMTP_GUIDE_URL}.get(context, WEBHOOK_GUIDE_URL)
         if "interactive terminal" in message:
             return advice("secret.entry", safe_detail or f"{flag} requires an interactive terminal", f"Run {render_command([flag])} in a terminal window so the value stays hidden while you paste it", False, guide)
         if "cancelled" in message:
@@ -1326,6 +1326,11 @@ def classify_recovery_error(error=None, context="runtime", detail=""):
             return advice("secret.entry", safe_detail or "There is nowhere to save the value", f"Drop --env-file none, or name a writable dotenv file with --env-file PATH, then run {render_command([flag])} again", False, SECRETS_GUIDE_URL)
         if "could not save" in message or "could not read" in message:
             return advice("file.unwritable", safe_detail or "The private settings file could not be updated", "Check file permissions or choose another path with --env-file PATH", False, SECRETS_GUIDE_URL)
+        if context == "set_smtp_password":
+            if "incomplete" in message:
+                return advice("config.invalid", safe_detail or "The mail server settings are incomplete", f"Set SMTP_HOST, SMTP_USER, SENDER_EMAIL and RECEIVER_EMAIL in the configuration file, then run {render_command([flag])} again", False, guide)
+            if "did not accept" in message:
+                return advice("smtp.authentication", safe_detail or "The mail server refused the password", f"Check SMTP_USER and use an app password where the provider requires one, then run {render_command([flag])} again", False, guide)
         if context == "set_webhook_url":
             return advice("webhook.invalid", safe_detail or "The webhook URL was not changed", f"Copy a complete Discord or ntfy webhook URL then run {render_command([flag])} again", False, guide)
         return advice("secret.entry", safe_detail or "No value was saved and the dotenv file was not changed", f"Run {render_command([flag])} again and paste each value when it is asked for", False, guide)
@@ -3820,6 +3825,80 @@ def _run_set_private_values(option_name: str, prompts: List[Tuple[str, str]], en
         raise PrivateSettingsError(f"Could not save private values in '{destination}'. Check file permissions or choose another path with --env-file") from None
     print(f"* Updated private settings file: {destination}")
     print(f"* Saved: {', '.join(updates)}")
+    return str(destination)
+
+
+# Returns the settings a mail sign-in needs that are still unset, so the command and its validator name the same ones
+def mail_sign_in_settings_missing():
+    return [name for name, value in (("SMTP_HOST", SMTP_HOST), ("SMTP_USER", SMTP_USER), ("SENDER_EMAIL", SENDER_EMAIL), ("RECEIVER_EMAIL", RECEIVER_EMAIL)) if not doctor_value_is_set(str(value or ""))]
+
+
+# Signs in to the configured mail server with one entered password, so nothing is saved that cannot deliver
+def smtp_sign_in(password, timeout=15):
+    global SMTP_PASSWORD
+
+    candidate = str(password or "")
+    if not candidate or not doctor_value_is_set(candidate):
+        raise PrivateSettingsError("No SMTP password was entered. The dotenv file was not changed")
+    missing = mail_sign_in_settings_missing()
+    if missing:
+        raise PrivateSettingsError(f"The mail server settings are incomplete, {join_setting_names(missing, 'and')} {'is' if len(missing) == 1 else 'are'} not set")
+    previous_password = SMTP_PASSWORD
+    SMTP_PASSWORD = candidate
+    smtp_object = None
+    try:
+        smtp_object = smtp_connect_and_login(SMTP_SSL, smtp_timeout=timeout)
+    finally:
+        if smtp_object is not None:
+            try:
+                smtp_object.quit()
+            except Exception:
+                pass
+        SMTP_PASSWORD = previous_password
+    return str(SMTP_USER)
+
+
+# Privately checks one SMTP password against the mail server and atomically stores it
+def run_set_smtp_password(env_file=None, interactive=None, input_func=None, getpass_func=None, sign_in=None) -> str:
+    destination = resolve_private_settings_path(env_file)
+    terminal_is_interactive = sys.stdin.isatty() if interactive is None else interactive
+    if not terminal_is_interactive:
+        raise PrivateSettingsError("--set-smtp-password requires an interactive terminal so the password stays hidden")
+    # Checked before the prompts, so nobody types a password only to be told the mail server was never configured
+    missing = mail_sign_in_settings_missing()
+    if missing:
+        raise PrivateSettingsError(f"The mail server settings are incomplete, {join_setting_names(missing, 'and')} {'is' if len(missing) == 1 else 'are'} not set")
+    prompt = input if input_func is None else input_func
+    if _dotenv_contains_key(destination, "SMTP_PASSWORD"):
+        try:
+            confirmed = prompt(f"Replace SMTP_PASSWORD in '{destination}'? [y/N]: ").strip().casefold() in ("y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            confirmed = False
+        if not confirmed:
+            raise PrivateSettingsError("SMTP password setup was cancelled. The dotenv file was not changed")
+    print(f"* The password is checked by signing in to {SMTP_HOST} as {SMTP_USER}. Nothing is sent")
+    print(f"* Guide: {SMTP_GUIDE_URL}")
+    hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
+    try:
+        smtp_password = str(hidden_prompt("Enter the SMTP password (input hidden): ")).strip()
+    except (EOFError, KeyboardInterrupt):
+        raise PrivateSettingsError("SMTP password setup was cancelled. The dotenv file was not changed") from None
+    check = smtp_sign_in if sign_in is None else sign_in
+    try:
+        signed_in_user = check(smtp_password, timeout=DOCTOR_SMTP_TIMEOUT)
+    except PrivateSettingsError:
+        raise
+    except Exception as exc:
+        raise PrivateSettingsError(f"The mail server did not accept the password: {type(exc).__name__}: {sanitize_error_text(exc)}. The dotenv file was not changed") from None
+    try:
+        update_dotenv_file(destination, {"SMTP_PASSWORD": smtp_password})
+    except PrivateSettingsError:
+        raise
+    except Exception:
+        raise PrivateSettingsError(f"Could not save the SMTP password in '{destination}'. Check file permissions or choose another path with --env-file") from None
+    print(f"* The mail server accepted the password for {signed_in_user}")
+    print(f"* Updated private settings file: {destination}")
+    print(f"* Test it with: {render_command(['--send-test-email'], env_path=destination)}")
     return str(destination)
 
 
@@ -6354,6 +6433,12 @@ def main():
         help="Save a Discord or ntfy webhook URL through a hidden prompt",
     )
     conf.add_argument(
+        "--set-smtp-password",
+        dest="set_smtp_password",
+        action="store_true",
+        help="Enter the SMTP password privately, check it against the mail server and save it to the dotenv file",
+    )
+    conf.add_argument(
         "--set-lastfm-credentials",
         dest="set_lastfm_credentials",
         action="store_true",
@@ -6686,6 +6771,8 @@ def main():
         "set_webhook_url": args.set_webhook_url,
         "set_lastfm_credentials": args.set_lastfm_credentials,
         "set_spotify_credentials": args.set_spotify_credentials,
+        # Runs after the config file is read, so the mail server it signs in to is the one monitoring would use
+        "set_smtp_password": args.set_smtp_password,
     }
     selected_private_actions = [name for name, enabled in private_actions.items() if enabled]
     if len(selected_private_actions) > 1:
@@ -6700,6 +6787,7 @@ def main():
             "set_webhook_url": run_set_webhook_url,
             "set_lastfm_credentials": run_set_lastfm_credentials,
             "set_spotify_credentials": run_set_spotify_credentials,
+            "set_smtp_password": run_set_smtp_password,
         }
         try:
             runners[selected_private_actions[0]](env_file=private_env_file)
