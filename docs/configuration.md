@@ -192,6 +192,10 @@ Last.fm Monitor does not attach artwork to ntfy alerts because it does not retri
 
 If `WEBHOOK_ENABLED` is on but `WEBHOOK_URL` is not a complete HTTPS link, the tool says so once at startup and turns webhook alerts off, rather than failing on every alert for the rest of the run.
 
+### When One Channel Fails
+
+Email and webhook alerts are delivered independently, and the tool tracks which one arrived. If an error alert reaches the webhook but the mail server rejects the message, the next check sends the email again and leaves the webhook alone, so a failed channel is retried without delivering the same alert twice.
+
 ## Storing Secrets
 
 It is recommended to store secrets like `LASTFM_API_KEY`, `LASTFM_API_SECRET`, `SP_CLIENT_ID`, `SP_CLIENT_SECRET`, `SMTP_PASSWORD`, `WEBHOOK_URL` or `NTFY_ACCESS_TOKEN` as either an environment variable or in a dotenv file.
