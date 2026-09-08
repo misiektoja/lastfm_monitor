@@ -1,4 +1,6 @@
 import os
+import subprocess
+import sys
 
 import pytest
 
@@ -71,7 +73,7 @@ def test_private_credential_replacement_requires_confirmation(tmp_path):
     destination = tmp_path / ".env"
     original = 'LASTFM_API_KEY="old-key"\nLASTFM_API_SECRET="old-secret"\n'
     destination.write_text(original, encoding="utf-8")
-    with pytest.raises(monitor.PrivateSettingsError):
+    with pytest.raises(monitor.RecoveryError):
         monitor.run_set_lastfm_credentials(env_file=destination, interactive=True, input_func=lambda prompt: "n", getpass_func=lambda prompt: pytest.fail("secret prompt should not run"))
     assert destination.read_text(encoding="utf-8") == original
 
@@ -212,10 +214,10 @@ class TestSetSmtpPassword:
         destination = tmp_path / ".env"
         original = 'SMTP_PASSWORD="old-value"\n'
         destination.write_text(original, encoding="utf-8")
-        with pytest.raises(monitor.PrivateSettingsError) as raised:
+        with pytest.raises(monitor.RecoveryError) as raised:
             monitor.run_set_smtp_password(env_file=destination, interactive=True, input_func=lambda prompt: "n", sign_in=lambda password, timeout=15: "monitor@example.test")
         assert destination.read_bytes() == original.encode("utf-8")
-        assert "cancelled" in str(raised.value)
+        assert raised.value.advice.summary == "The saved SMTP password was left as it is and the dotenv file was not changed"
 
     def test_a_first_run_asks_nothing_but_the_password(self, tmp_path, configured_mail):
         destination = tmp_path / ".env"
@@ -229,3 +231,119 @@ class TestSetSmtpPassword:
         source = (monitor.Path(__file__).resolve().parents[1] / "lastfm_monitor.py").read_text(encoding="utf-8")
         assert source.index("if not load_config_file(cfg_path):") < source.index('"set_smtp_password": args.set_smtp_password')
         assert source.index('"set_smtp_password": run_set_smtp_password') > source.index("if not load_config_file(cfg_path):")
+
+
+# Every command that asks before replacing, with the subject each one names and whether that subject is plural
+REPLACEABLE_COMMANDS = (
+    ("run_set_webhook_url", "--set-webhook-url", "WEBHOOK_URL", "webhook URL", False),
+    ("run_set_smtp_password", "--set-smtp-password", "SMTP_PASSWORD", "SMTP password", False),
+    ("run_set_lastfm_credentials", "--set-lastfm-credentials", "LASTFM_API_KEY", "Last.fm API credentials", True),
+    ("run_set_spotify_credentials", "--set-spotify-credentials", "SP_CLIENT_ID", "Spotify OAuth app credentials", True),
+)
+
+
+# Raises at the prompt, standing in for Ctrl+C at a question the command has its own answer for
+def interrupted(prompt):
+    raise KeyboardInterrupt
+
+
+class TestTwoAnswers:
+
+    @pytest.mark.parametrize("runner, flag, key, subject, plural", REPLACEABLE_COMMANDS)
+    def test_a_declined_replacement_says_the_saved_value_stands(self, tmp_path, configured_mail, runner, flag, key, subject, plural):
+        destination = tmp_path / ".env"
+        destination.write_text(f'{key}="already-saved-value"\n', encoding="utf-8")
+        with pytest.raises(monitor.RecoveryError) as raised:
+            getattr(monitor, runner)(env_file=destination, interactive=True, input_func=lambda prompt: "n", getpass_func=lambda prompt: pytest.fail("asked for the value"))
+        advice = raised.value.advice
+        kept = "were left as they are" if plural else "was left as it is"
+        assert advice.summary == f"The saved {subject} {kept} and the dotenv file was not changed"
+        assert "answer y to replace the saved value" in advice.fix
+        assert advice.code == "secret.entry"
+
+    # All seven tools read the interrupt here as an n, which answers a keypress with advice to answer it again
+    @pytest.mark.parametrize("runner, flag, key, subject, plural", REPLACEABLE_COMMANDS)
+    def test_an_interrupt_at_the_replace_prompt_is_a_cancel(self, tmp_path, configured_mail, runner, flag, key, subject, plural):
+        destination = tmp_path / ".env"
+        destination.write_text(f'{key}="already-saved-value"\n', encoding="utf-8")
+        with pytest.raises(monitor.RecoveryError) as raised:
+            getattr(monitor, runner)(env_file=destination, interactive=True, input_func=interrupted, getpass_func=lambda prompt: pytest.fail("asked for the value"))
+        advice = raised.value.advice
+        assert advice.summary == f"{subject[:1].upper()}{subject[1:]} setup was cancelled and the dotenv file was not changed"
+        assert "when you have the value ready" in advice.fix
+
+    @pytest.mark.parametrize("runner, flag, key, subject, plural", REPLACEABLE_COMMANDS)
+    def test_an_interrupt_at_the_hidden_prompt_is_a_cancel(self, tmp_path, configured_mail, runner, flag, key, subject, plural):
+        with pytest.raises(monitor.RecoveryError) as raised:
+            getattr(monitor, runner)(env_file=tmp_path / ".env", interactive=True, getpass_func=interrupted)
+        assert raised.value.advice.summary.endswith("setup was cancelled and the dotenv file was not changed")
+
+    # Ctrl+C echoes nothing, so without the newline the error block continues the prompt line
+    @pytest.mark.parametrize("runner, flag, key, subject, plural", REPLACEABLE_COMMANDS)
+    def test_the_error_starts_on_its_own_line(self, tmp_path, configured_mail, capsys, runner, flag, key, subject, plural):
+        destination = tmp_path / ".env"
+        destination.write_text(f'{key}="already-saved-value"\n', encoding="utf-8")
+        with pytest.raises(monitor.RecoveryError):
+            getattr(monitor, runner)(env_file=destination, interactive=True, input_func=interrupted)
+        assert capsys.readouterr().out == "\n"
+
+    @pytest.mark.parametrize("runner, flag, key, subject, plural", REPLACEABLE_COMMANDS)
+    def test_the_error_after_a_hidden_prompt_starts_on_its_own_line(self, tmp_path, configured_mail, capsys, runner, flag, key, subject, plural):
+        with pytest.raises(monitor.RecoveryError):
+            getattr(monitor, runner)(env_file=tmp_path / ".env", interactive=True, getpass_func=interrupted)
+        assert capsys.readouterr().out.endswith("\n\n")
+
+    @pytest.mark.parametrize("runner, flag, key, subject, plural", REPLACEABLE_COMMANDS)
+    def test_neither_answer_touches_the_file(self, tmp_path, configured_mail, runner, flag, key, subject, plural):
+        destination = tmp_path / ".env"
+        original = f'{key}="already-saved-value"\n'
+        for answer in (lambda prompt: "n", interrupted):
+            destination.write_text(original, encoding="utf-8")
+            with pytest.raises(monitor.RecoveryError):
+                getattr(monitor, runner)(env_file=destination, interactive=True, input_func=answer)
+            assert destination.read_bytes() == original.encode("utf-8")
+
+    # A RecoveryError reaching a clause that only names PrivateSettingsError is a traceback
+    def test_the_dispatch_clause_carries_the_raised_type(self):
+        source = (monitor.Path(__file__).resolve().parents[1] / "lastfm_monitor.py").read_text(encoding="utf-8")
+        assert "except (PrivateSettingsError, RecoveryError) as exc:" in source
+
+
+class TestInterruptHandling:
+
+    def test_a_prompt_reads_with_the_default_interrupt_behavior(self):
+        seen = []
+        monitor.read_interactively(lambda prompt: seen.append(monitor.signal.getsignal(monitor.signal.SIGINT)), "answer? ")
+        monitor.read_secret_interactively(lambda prompt: seen.append(monitor.signal.getsignal(monitor.signal.SIGINT)), "secret? ")
+        assert seen == [monitor.signal.default_int_handler, monitor.signal.default_int_handler]
+
+    def test_the_tool_handler_is_back_afterwards(self):
+        def sentinel(sig, frame):
+            pass
+
+        previous = monitor.signal.getsignal(monitor.signal.SIGINT)
+        monitor.signal.signal(monitor.signal.SIGINT, sentinel)
+        try:
+            monitor.read_interactively(lambda prompt: "y", "answer? ")
+            assert monitor.signal.getsignal(monitor.signal.SIGINT) is sentinel
+            with pytest.raises(KeyboardInterrupt):
+                monitor.read_secret_interactively(interrupted, "secret? ")
+            assert monitor.signal.getsignal(monitor.signal.SIGINT) is sentinel
+        finally:
+            monitor.signal.signal(monitor.signal.SIGINT, previous)
+
+    # A prompt that keeps the shared handler answers Ctrl+C by terminating the tool with a success code
+    def test_every_secret_prompt_goes_through_a_reader(self):
+        source = (monitor.Path(__file__).resolve().parents[1] / "lastfm_monitor.py").read_text(encoding="utf-8")
+        assert 'prompt(f"Replace' not in source
+        assert source.count("read_interactively(prompt") == 3
+        assert source.count("read_secret_interactively(hidden_prompt") == 3
+
+
+class TestNoTargetIsNeeded:
+
+    @pytest.mark.parametrize("flag", sorted(monitor.SECRET_ACTION_FLAGS))
+    def test_a_secret_command_runs_without_a_username(self, flag, tmp_path):
+        result = subprocess.run([sys.executable, str(monitor.Path(__file__).resolve().parents[1] / "lastfm_monitor.py"), flag], capture_output=True, text=True, cwd=tmp_path, stdin=subprocess.DEVNULL)
+        assert "No Last.fm username was provided" not in result.stdout
+        assert "requires an interactive terminal" in result.stdout
