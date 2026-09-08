@@ -25,6 +25,13 @@ python -m ruff check lastfm_monitor.py tools tests
 CI runs both on every push and pull request, across Python 3.9 through 3.14,
 and again before anything is published to PyPI.
 
+`test_offline_e2e.py` starts a loopback HTTP server and a subprocess, so it is marked
+`e2e` if you want to run or skip it on its own:
+
+```bash
+python -m pytest -m e2e
+```
+
 ## Layout
 
 | File | Area under test |
@@ -51,6 +58,7 @@ and again before anything is published to PyPI.
 | `test_startup_summary.py` | The startup summary rows: the shared order, the label column, which view each row belongs to and the values it reports |
 | `test_secret_sources.py` | The placeholder predicate, where each secret resolved from and how the sources are reported |
 | `test_notification_delivery.py` | What the two-channel sender reports and which channel a later attempt sends again |
+| `test_offline_e2e.py` | A whole run end to end: the real CLI against a Last.fm fixture on loopback, one monitoring cycle, the files it writes and the same cycle on a real terminal |
 | `test_untrusted_text.py` | Text arriving from Last.fm: terminal control sequences stripped at every writer and markup escaped in email bodies |
 | `test_terminal_color.py` | Coloured output: the theme and its template block, which colour lands on which token, the single colour pass through the writers and the plain log file |
 | `test_spotify_web_backend.py` | TOTP generation and config override, anonymous token handling and caching |
