@@ -26,6 +26,8 @@ If a run does not start, `--doctor` reports every check the tool makes before mo
 
 Before monitoring starts the tool prints the settings in effect: the monitored user, the polling intervals, both alert channels, the files the run reads and writes, and each optional feature that is switched on. `--verbose` and `--debug` print the complete list instead, including the settings left at their defaults and where each secret came from. See [Verbose Output](troubleshooting.md#verbose-output).
 
+The log file always receives the complete list, whichever view the terminal was shown, so a log attached to a bug report carries every effective setting.
+
 To enable tracking of followers and/or followings changes:
 - set `TRACK_FOLLOWERS` and/or `TRACK_FOLLOWINGS` to `True`
 - or use the `--track-followers` and/or `--track-followings` flags
