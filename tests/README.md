@@ -30,7 +30,7 @@ and again before anything is published to PyPI.
 | File | Area under test |
 | --- | --- |
 | `test_config_loading.py` | Config files read as data and never executed |
-| `test_config_writers.py` | The timestamped config backup, the atomic replace and the dotenv file that is deliberately not backed up |
+| `test_config_writers.py` | The timestamped config backup, the atomic replace, the secrets the generated config drops and the dotenv file that is deliberately not backed up |
 | `test_doctor.py` | The preflight row contract, every check's failure branches, the section order and the verdict |
 | `test_entry_points.py` | The welcome screen an empty command prints, the missing-target block, the argument combinations a secret command refuses and when the screen is cleared |
 | `test_delivery_tests.py` | The messages both test commands send, the doctor's delivery tests and what each does with nothing to send |
