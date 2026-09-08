@@ -2171,6 +2171,18 @@ def webhook_provider_display_name(provider: Any = None) -> str:
     return {"discord": "Discord", "ntfy": "ntfy"}.get(normalized, normalized or "an unset provider")
 
 
+# Accepts a complete webhook URL or expands a bare ntfy.sh topic name into one
+def normalize_ntfy_topic_url(value: Any = None) -> str:
+    if not isinstance(value, str):
+        return ""
+    normalized = value.strip()
+    if validate_webhook_url(normalized):
+        return normalized
+    if re.fullmatch(r"[-_A-Za-z0-9]{1,64}", normalized):
+        return f"https://ntfy.sh/{normalized}"
+    return ""
+
+
 # Detects Discord and public ntfy webhook providers from distinctive URL shapes
 def detect_webhook_provider(url: Any) -> str:
     if not validate_webhook_url(url):
@@ -6607,7 +6619,7 @@ def apply_webhook_cli_overrides(args: argparse.Namespace, parser: argparse.Argum
         configured_provider = normalized_webhook_provider()
         if detected_provider and detected_provider != configured_provider:
             WEBHOOK_PROVIDER = detected_provider
-            print(f"* Warning: Configured webhook provider did not match the URL. Using {detected_provider}")
+            print(f"* Warning: Configured webhook provider did not match the URL. Using {webhook_provider_display_name(detected_provider)}.")
 
 
 # The four shared status markers. A fifth neutral marker is the single biggest source of drift between these
@@ -6689,17 +6701,17 @@ def doctor_check_environment(version_info=None, spec_finder=None):
             checks.append(make_doctor_check("Environment", "FAIL", advice.summary, advice=advice))
 
     optional = [
-        ("dotenv", "python-dotenv", "Secrets can only come from environment variables or the configuration file"),
-        ("spotipy", "spotipy", "The Spotify OAuth app metadata backend is unavailable, leaving the anonymous web player"),
-        ("bs4", "beautifulsoup4", "Follower, following and profile tracking cannot run"),
+        ("dotenv", "python-dotenv", "Secrets can only come from environment variables or the configuration file", "Used only for reading secrets from a dotenv file"),
+        ("spotipy", "spotipy", "The Spotify OAuth app metadata backend is unavailable, leaving the anonymous web player", "Used only for the Spotify OAuth app metadata backend"),
+        ("bs4", "beautifulsoup4", "Follower, following and profile tracking cannot run", "Used only for follower, following and profile tracking"),
     ]
     # The classic Command Prompt is the only place this library changes anything, so a machine it cannot
     # affect is not warned about a package it does not need
     if platform.system() == "Windows":
-        optional.append(("colorama", "colorama", "Coloured output may not render in the classic Windows Command Prompt"))
-    for module_name, package_name, purpose in optional:
+        optional.append(("colorama", "colorama", "Coloured output may not render in the classic Windows Command Prompt", "Used only for coloured output in the older Windows Command Prompt"))
+    for module_name, package_name, purpose, use in optional:
         if module_present(module_name):
-            checks.append(make_doctor_check("Environment", "PASS", f"Optional dependency {package_name} is installed"))
+            checks.append(make_doctor_check("Environment", "PASS", f"Optional dependency {package_name} is installed", use))
         else:
             advice = make_recovery_advice("dependency.missing", f"Optional dependency {package_name} is not installed", recovery_fix_with_guide(f'Install it with: {install_dependency_command(package_name)}', INSTALL_GUIDE_URL), False)
             checks.append(make_doctor_check("Environment", "WARN", advice.summary, f"{purpose}. Every other feature is unaffected", advice))
@@ -7799,7 +7811,7 @@ def _wizard_normalize_json_path(answer):
 
 # Collects the files monitoring writes and the optional list of tracks to alert on
 def _wizard_collect_output_section(state, input_func=None):
-    state.config_values["DISABLE_LOGGING"] = not _wizard_ask_yes_no("Write the normal per-user log file?", default=not bool(state.config_values.get("DISABLE_LOGGING")), input_func=input_func)
+    state.config_values["DISABLE_LOGGING"] = not _wizard_ask_yes_no("Write the normal per-target log file?", default=not bool(state.config_values.get("DISABLE_LOGGING")), input_func=input_func)
     state.config_values["CSV_FILE"] = _wizard_normalize_csv_path(_wizard_ask_text("Optional CSV output path (blank disables it)", default=str(state.config_values.get("CSV_FILE") or ""), input_func=input_func))
     while True:
         answer = _wizard_ask_text("Optional file listing tracks and albums to alert on (blank disables it)", default=str(state.config_values.get("MONITOR_LIST_FILE") or ""), input_func=input_func).strip()
@@ -7968,7 +7980,7 @@ def _wizard_collect_webhook_section(state, input_func=None, getpass_func=None):
     if provider == "discord":
         print("  In Discord: Edit Channel > Integrations > Webhooks > New Webhook > Copy Webhook URL.")
     else:
-        print("  In ntfy: choose a hard-to-guess topic and paste its complete topic URL, such as https://ntfy.sh/your-private-topic.")
+        print("  In ntfy: choose a hard-to-guess topic. Paste its complete topic URL, or just the topic name when it is hosted on ntfy.sh.")
     replace_webhook = True
     if _wizard_existing_secret("WEBHOOK_URL", state.env_path):
         choice = _wizard_ask_choice("Which webhook URL should be used?", [
@@ -7978,17 +7990,23 @@ def _wizard_collect_webhook_section(state, input_func=None, getpass_func=None):
         replace_webhook = choice == 1
     if replace_webhook:
         while True:
-            webhook_url = _wizard_ask_secret("Paste the Discord webhook URL" if provider == "discord" else "Paste the ntfy topic URL", getpass_func=getpass_func)
+            answer = _wizard_ask_secret("Paste the Discord webhook URL" if provider == "discord" else "Paste the ntfy topic URL or ntfy.sh topic name", getpass_func=getpass_func)
+            webhook_url = normalize_ntfy_topic_url(answer) if provider == "ntfy" else answer.strip()
             if validate_webhook_url(webhook_url):
                 state.secret_updates["WEBHOOK_URL"] = webhook_url
                 break
-            # Nothing can be delivered without a destination, so giving up has to stay reachable from the prompt
-            if not webhook_url:
+            # Nothing can be delivered without a destination, so giving up has to stay reachable from the prompt.
+            # The branch is chosen by what was typed rather than by the normalized value, since a rejected ntfy
+            # topic normalizes to an empty string and would otherwise be reported as nothing entered
+            if not answer.strip():
                 if not _wizard_offer_retry("webhook URL", "Webhook alerts stay off until one is set", input_func=input_func):
                     _wizard_disable_webhook(state)
                     return
                 continue
-            print("  That does not look like a complete HTTPS webhook URL. Copy it from the webhook service and try again.")
+            if provider == "ntfy":
+                print("  Enter a complete HTTPS ntfy topic URL or a topic name containing up to 64 letters, numbers, dashes or underscores.")
+            else:
+                print("  That does not look like a complete HTTPS webhook URL. Copy it from the webhook service and try again.")
             if not _wizard_offer_retry("webhook URL", input_func=input_func):
                 _wizard_disable_webhook(state)
                 return
