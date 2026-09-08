@@ -33,6 +33,7 @@ and again before anything is published to PyPI.
 | `test_documentation.py` | Documentation site structure, its internal links, the links pointing into it from the repository and the guide constants the module prints |
 | `test_friends_notifications.py` | Friend and profile change alerts plus one user per line in plain text and HTML |
 | `test_lastfm_friends_scraper.py` | Scrape headers, retry behavior, following markup and public profile parsing |
+| `test_recovery_errors.py` | Failure classification, the advice each failure produces and the error block it renders |
 | `test_profile_tracking.py` | Profile baseline creation, independent field controls and deferred persistence |
 | `test_private_settings.py` | Hidden credential entry, atomic dotenv updates and refusal to save invalid input |
 | `test_repository_contracts.py` | Governance documents, issue templates, action pinning, release gating and the CI contract |
