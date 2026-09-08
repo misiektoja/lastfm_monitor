@@ -30,6 +30,7 @@ and again before anything is published to PyPI.
 | File | Area under test |
 | --- | --- |
 | `test_config_loading.py` | Config files read as data and never executed |
+| `test_documentation.py` | Documentation site structure, its internal links, the links pointing into it from the repository and the guide constants the module prints |
 | `test_friends_notifications.py` | Friend and profile change alerts plus one user per line in plain text and HTML |
 | `test_lastfm_friends_scraper.py` | Scrape headers, retry behavior, following markup and public profile parsing |
 | `test_profile_tracking.py` | Profile baseline creation, independent field controls and deferred persistence |
