@@ -632,6 +632,9 @@ exec(CONFIG_BLOCK, globals())
 # True once monitoring has printed its header, so a verbose notice after that closes its own block
 MONITORING_ACTIVE = False
 
+# True while a check has printed verbose lines that still need the timestamp trailer under them
+PENDING_NOTICE_BLOCK = False
+
 # The tool's own name, printed where a message has to say which monitor sent it
 TOOL_NAME = "lastfm_monitor"
 
@@ -1986,6 +1989,8 @@ def get_cur_ts(ts_str=""):
 
 # Prints the current date/time in human readable format with separator; eg. Sun 21 Apr 2024, 15:08:45
 def print_cur_ts(ts_str=""):
+    global PENDING_NOTICE_BLOCK
+    PENDING_NOTICE_BLOCK = False
     print(get_cur_ts(str(ts_str)))
     print("─" * HORIZONTAL_LINE)
 
@@ -2027,6 +2032,12 @@ def mark_monitoring_started():
     MONITORING_ACTIVE = True
 
 
+# Closes the block of verbose lines a check printed on its own, so they are never left without a timestamp
+def close_pending_notice_block():
+    if PENDING_NOTICE_BLOCK:
+        print_cur_ts("Timestamp:\t\t\t")
+
+
 # Records a swallowed exception in debug output so a silently degraded feature can still be diagnosed
 def debug_swallowed_exception(context, exc):
     debug_print(context, outcome="failed", error=f"{type(exc).__name__}: {exc}")
@@ -2034,8 +2045,12 @@ def debug_swallowed_exception(context, exc):
 
 # Names the alert a feature feeds when that feature could not be read, so silence is not read as nothing to report
 def verbose_degraded_feature(feature, alert, error=None):
+    global PENDING_NOTICE_BLOCK
     debug_print(feature, outcome="degraded", alert=alert, error=None if error is None else f"{type(error).__name__}: {error}")
     verbose_print(f"{feature} is unavailable, so {alert} cannot fire")
+    # A degraded feature can be reported from inside a report, so the check closes the block instead of this line
+    if VERBOSE_MODE and MONITORING_ACTIVE:
+        PENDING_NOTICE_BLOCK = True
 
 
 # Returns the timestamp/datetime object in human readable format (long version); eg. Sun 21 Apr 2024, 15:08:45
@@ -5085,9 +5100,13 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         if friends_streak == 0:
                             # Start measuring error streak (negative values)
                             friends_streak = -1
+                            # Nothing else is printed until the streak reaches its alert threshold, which reads as a check that stopped running
+                            verbose_degraded_feature("Friends/profile check", "friend and profile change alerts", e)
                         elif friends_streak < 0:
                             # Continue error streak
                             friends_streak -= 1
+                            # The notice above reports the outage once, so the repeats are left to debug
+                            debug_print("Friends/profile check", outcome="failed", attempt=f"#{abs(friends_streak)}", error=f"{type(e).__name__}: {e}")
 
                         if friends_streak > 0:
                             # We were tracking a change but hit an error
@@ -5114,6 +5133,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             if not recent_tracks or len(recent_tracks) == 0:
                 # Wait for first track to appear
                 debug_print("Waiting for the first scrobble", user=username, interval=f"{LASTFM_ACTIVE_CHECK_INTERVAL}s")
+                close_pending_notice_block()
                 time.sleep(LASTFM_ACTIVE_CHECK_INTERVAL)
                 continue
             last_track_start_ts = int(recent_tracks[0].timestamp)
@@ -5908,6 +5928,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             check_interval = LASTFM_ACTIVE_CHECK_INTERVAL
         else:
             check_interval = LASTFM_CHECK_INTERVAL
+
+        # Any verbose line this check printed on its own is closed here, so one check never leaves a floating line
+        close_pending_notice_block()
 
         check_count += 1
         debug_print("Completed check", check=f"#{check_count}", user=username, state="online" if lf_user_online else "offline", track=str(playing_track) if playing_track else None)
