@@ -1216,6 +1216,12 @@ def install_method() -> str:
     return INSTALL_METHOD_PYPI
 
 
+# Returns the install method in the words the startup summary uses, rather than the code the detector returns
+def install_method_display_name(method=None) -> str:
+    selected = install_method() if method is None else method
+    return {INSTALL_METHOD_PYPI: "PyPI install", INSTALL_METHOD_SCRIPT: "downloaded script"}.get(selected, selected)
+
+
 # Returns the argv prefix that invokes this tool for the detected install method
 def install_command_prefix() -> List[str]:
     if install_method() == INSTALL_METHOD_SCRIPT:
@@ -1635,27 +1641,9 @@ def _startup_webhook_notification_categories() -> List[str]:
     return _selected_webhook_notification_categories() if WEBHOOK_ENABLED else []
 
 
-# Formats one notification row with unstarred continuation lines when needed
-def _format_startup_notification_line(label: str, categories: List[str]) -> str:
-    prefix = f"* {label:<30}"
-    state = "On (" + ", ".join(categories) + ")" if categories else "Off"
-    return textwrap.fill(state, width=100, initial_indent=prefix, subsequent_indent=" " * len(prefix), break_long_words=False, break_on_hyphens=False)
-
-
-# Builds compact startup notification lines for both delivery channels
-def _startup_notification_summary_lines() -> List[str]:
-    enabled_email = _startup_email_notification_categories()
-    enabled_webhook = _startup_webhook_notification_categories()
-    return [_format_startup_notification_line("Notifications (email):", enabled_email), _format_startup_notification_line("Notifications (webhook):", enabled_webhook)]
-
-
-# Builds two aligned rows for the shared friend and profile check settings
-def _startup_friends_tracking_summary_lines() -> List[str]:
-    interval = f" [interval: {display_time(FRIENDS_CHECK_INTERVAL)}]" if FRIENDS_CHECK_INTERVAL > 0 else ""
-    return [
-        f"* Friends/profile tracking:\t[followings = {TRACK_FOLLOWINGS}] [followers = {TRACK_FOLLOWERS}] [bio = {TRACK_BIO}]",
-        f"\t\t\t\t[display name = {TRACK_DISPLAY_NAME}]{interval}",
-    ]
+# Rolls one channel's enabled alerts into the state its summary row reports
+def _startup_notification_state(categories: List[str]) -> str:
+    return "On (" + ", ".join(categories) + ")" if categories else "Off"
 
 
 # Returns whether one configured webhook alert is enabled independently of email settings
@@ -2475,6 +2463,11 @@ def format_music_urls_email_html(spotify_url, lastfm_url, lastfm_album_url, appl
     if ENABLE_TIDAL_URL:
         lines.append(f'Tidal URL: <a href="{tidal_url}">{escaped_artist} - {escaped_track}</a>')
     return "<br>".join(lines) if lines else ""
+
+
+# Returns the file one run keeps its last activity in, named after the user it monitors
+def resolve_status_file(target):
+    return f"lastfm_{target}_last_activity.json"
 
 
 # Writes the last activity snapshot the next run starts from
@@ -4582,7 +4575,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
     except Exception as e:
         print(f"* Error: {e}")
 
-    lastfm_last_activity_file = f"lastfm_{username}_last_activity.json"
+    lastfm_last_activity_file = resolve_status_file(username)
     last_activity_read = []
     last_activity_ts = 0
     last_activity_artist = ""
@@ -6452,6 +6445,98 @@ def _doctor_offer_notification_tests(report, input_func=None):
         report.checks.append(check)
         print_doctor_check(check)
     return checks
+
+
+# One startup summary setting, routed independently to the concise view, the verbose view and the log file
+StartupSummaryRow = namedtuple("StartupSummaryRow", ["label", "value", "concise", "full", "log"])
+StartupSummaryRow.__new__.__defaults__ = (False, True, True)
+
+
+# Returns whether the full startup summary should be shown, which either diagnostic mode implies
+def full_startup_summary_enabled():
+    return bool(VERBOSE_MODE or DEBUG_MODE)
+
+
+# Formats one summary row with an aligned value column, wrapping only the rollups that grow long
+def format_startup_summary_row(row):
+    prefix = f"* {(row.label + ':'):<30}"
+    if row.label in ("Notifications (email)", "Notifications (webhook)"):
+        return textwrap.fill(str(row.value), width=100, initial_indent=prefix, subsequent_indent=" " * len(prefix), break_long_words=False, break_on_hyphens=False) + "\n"
+    return f"{prefix}{row.value}\n"
+
+
+# Prints the summary, showing the concise rows unless the full view was asked for. The log file always keeps
+# the complete set, so a bug report made from a log carries every effective setting whatever the terminal showed
+def emit_startup_summary(rows, show_full=False, stream=None):
+    destination = sys.stdout if stream is None else stream
+    # A stream that does not split its output has no log file to hold the full view, so those writes go nowhere
+    write_log = getattr(destination, "log_only", lambda line: None)
+    write_terminal = getattr(destination, "terminal_only", None)
+    if write_terminal is None:
+        write_terminal = destination.write
+    for row in rows:
+        line = format_startup_summary_row(row)
+        if row.full and row.log:
+            write_log(line)
+        if row.full if show_full else row.concise:
+            write_terminal(line)
+    write_log("\n")
+    write_terminal("\n")
+    destination.flush()
+
+
+# Names the Spotify metadata backends this run would try, in the order it tries them
+def spotify_metadata_backend_description():
+    if not (TRACK_SONGS or USE_TRACK_DURATION_FROM_SPOTIFY):
+        return "Disabled"
+    return "OAuth app, then anonymous web player" if spotify_oauth_app_configured() else "Anonymous web player"
+
+
+# Builds every startup summary row, deciding per row whether it belongs in the concise view, the full view and the log
+def build_startup_summary(target=None, config_path=None, env_path=None, log_path=None):
+    grouped_secrets = dict(secrets_by_source())
+    logging_enabled = bool(log_path) and not DISABLE_LOGGING
+    tracked_fields = (TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME)
+    return [
+        StartupSummaryRow("Target", str(target) if target else "None", concise=True),
+        StartupSummaryRow("Polling intervals", f"[offline: {display_time(LASTFM_CHECK_INTERVAL)}] [active: {display_time(LASTFM_ACTIVE_CHECK_INTERVAL)}]", concise=True),
+        StartupSummaryRow("Inactivity timer", display_time(LASTFM_INACTIVITY_CHECK), concise=True),
+        StartupSummaryRow("Notifications (email)", _startup_notification_state(_startup_email_notification_categories()), concise=True),
+        StartupSummaryRow("Notifications (webhook)", _startup_notification_state(_startup_webhook_notification_categories()), concise=True),
+        StartupSummaryRow("Output", str(log_path) if logging_enabled else "Terminal only (logging disabled)", concise=True, full=False, log=False),
+        StartupSummaryRow("Output logging", str(log_path) if logging_enabled else "Disabled"),
+        StartupSummaryRow("Config", str(config_path) if config_path else "None", concise=True),
+        StartupSummaryRow("Dotenv", str(env_path) if env_path else "None", concise=True),
+        # Each tracked feature earns a concise row only while it is actually switched on
+        StartupSummaryRow("Followings tracking", str(TRACK_FOLLOWINGS), concise=bool(TRACK_FOLLOWINGS)),
+        StartupSummaryRow("Followers tracking", str(TRACK_FOLLOWERS), concise=bool(TRACK_FOLLOWERS)),
+        StartupSummaryRow("Bio tracking", str(TRACK_BIO), concise=bool(TRACK_BIO)),
+        StartupSummaryRow("Display name tracking", str(TRACK_DISPLAY_NAME), concise=bool(TRACK_DISPLAY_NAME)),
+        StartupSummaryRow("Friends check interval", display_time(FRIENDS_CHECK_INTERVAL) if FRIENDS_CHECK_INTERVAL > 0 else "Disabled", concise=bool(any(tracked_fields) and FRIENDS_CHECK_INTERVAL > 0)),
+        StartupSummaryRow("Metadata backend", spotify_metadata_backend_description(), concise=bool(TRACK_SONGS or USE_TRACK_DURATION_FROM_SPOTIFY)),
+        # A cache row for a backend this run never reaches would read as a feature that is on
+        StartupSummaryRow("Spotify token cache", SP_TOKENS_FILE or "Memory only", concise=bool(SP_TOKENS_FILE and (TRACK_SONGS or USE_TRACK_DURATION_FROM_SPOTIFY) and spotify_oauth_app_configured())),
+        StartupSummaryRow("Spotify playback control", str(TRACK_SONGS), concise=bool(TRACK_SONGS)),
+        StartupSummaryRow("Track duration from Spotify", str(USE_TRACK_DURATION_FROM_SPOTIFY), concise=bool(USE_TRACK_DURATION_FROM_SPOTIFY)),
+        StartupSummaryRow("Duration marks", str(not DO_NOT_SHOW_DURATION_MARKS)),
+        StartupSummaryRow("Play break multiplier", f"{LASTFM_BREAK_CHECK_MULTIPLIER} ({display_time(LASTFM_BREAK_CHECK_MULTIPLIER * LASTFM_ACTIVE_CHECK_INTERVAL)})"),
+        StartupSummaryRow("Progress indicator", str(PROGRESS_INDICATOR), concise=bool(PROGRESS_INDICATOR)),
+        StartupSummaryRow("Liveness output", display_time(LIVENESS_CHECK_INTERVAL) if LIVENESS_CHECK_INTERVAL else "Disabled", concise=bool(LIVENESS_CHECK_INTERVAL)),
+        StartupSummaryRow("CSV output", CSV_FILE or "Disabled", concise=bool(CSV_FILE)),
+        StartupSummaryRow("Monitored-track alerts", MONITOR_LIST_FILE or "Disabled", concise=bool(MONITOR_LIST_FILE)),
+        StartupSummaryRow("Status file", resolve_status_file(target) if target else "None"),
+        StartupSummaryRow("Install method", install_method_display_name()),
+        StartupSummaryRow("Secrets from dotenv", ", ".join(grouped_secrets.get("dotenv file", [])) or "None"),
+        StartupSummaryRow("Secrets from environment", ", ".join(grouped_secrets.get("environment", [])) or "None"),
+        StartupSummaryRow("Secrets from config file", ", ".join(grouped_secrets.get("config file", [])) or "None"),
+        StartupSummaryRow("Secrets from command line", ", ".join(grouped_secrets.get("command line", [])) or "None"),
+        StartupSummaryRow("TLS verification", "On" if VERIFY_SSL else "Off, server certificates are not checked", concise=not VERIFY_SSL),
+        StartupSummaryRow("ASCII log separators", f"{ascii_log_separators_enabled()} (mode: {ASCII_LOG_SEPARATORS})"),
+        StartupSummaryRow("Verbose mode", str(VERBOSE_MODE), concise=bool(VERBOSE_MODE)),
+        StartupSummaryRow("Debug mode", str(DEBUG_MODE), concise=bool(DEBUG_MODE)),
+        # Points at the two modes for a reader who does not know they exist, so the full view drops it
+        StartupSummaryRow("More details", "use --verbose or --debug", concise=True, full=False, log=False),
+    ]
 
 
 # Renders the --help examples: one heading per task, then a comment and the command it describes
@@ -8422,37 +8507,7 @@ def main():
         ERROR_NOTIFICATION = False
         verbose_print("Email notifications are off because SMTP_HOST is still the shipped placeholder")
 
-    print(f"* Last.fm polling intervals:\t[offline check: {display_time(LASTFM_CHECK_INTERVAL)}] [active check: {display_time(LASTFM_ACTIVE_CHECK_INTERVAL)}]\n*\t\t\t\t[inactivity: {display_time(LASTFM_INACTIVITY_CHECK)}]")
-    if friends_check_enabled():
-        for tracking_summary_line in _startup_friends_tracking_summary_lines():
-            print(tracking_summary_line)
-    for notification_summary_line in _startup_notification_summary_lines():
-        print(notification_summary_line)
-    if WEBHOOK_ENABLED and not validate_webhook_url():
-        print("* Warning: Webhook alerts are enabled but WEBHOOK_URL is not a complete HTTPS link")
-    print(f"* Progress indicator:\t\t{PROGRESS_INDICATOR}")
-    print(f"* Track listened songs:\t\t{TRACK_SONGS}")
-    print(f"* Track duration (Spotify):\t{USE_TRACK_DURATION_FROM_SPOTIFY}")
-    print(f"* Show duration marks:\t\t{not DO_NOT_SHOW_DURATION_MARKS}")
-    print(f"* Play break multiplier:\t{LASTFM_BREAK_CHECK_MULTIPLIER} ({display_time(LASTFM_BREAK_CHECK_MULTIPLIER * LASTFM_ACTIVE_CHECK_INTERVAL)})")
-    print(f"* Liveness check:\t\t{bool(LIVENESS_CHECK_INTERVAL)}" + (f" ({display_time(LIVENESS_CHECK_INTERVAL)})" if LIVENESS_CHECK_INTERVAL else ""))
-    print(f"* CSV logging enabled:\t\t{bool(CSV_FILE)}" + (f" ({CSV_FILE})" if CSV_FILE else ""))
-    print(f"* Alert on monitored tracks:\t{bool(MONITOR_LIST_FILE)}" + (f" ({MONITOR_LIST_FILE})" if MONITOR_LIST_FILE else ""))
-    print(f"* Output logging enabled:\t{not DISABLE_LOGGING}" + (f" ({FINAL_LOG_PATH})" if not DISABLE_LOGGING else ""))
-    print(f"* ASCII log separators:\t\t{ascii_log_separators_enabled()} (mode: {ASCII_LOG_SEPARATORS})")
-    if TRACK_SONGS or USE_TRACK_DURATION_FROM_SPOTIFY:
-        if spotify_oauth_app_configured():
-            print("* Spotify metadata backends:\tOAuth app -> anonymous web player")
-            print(f"* Spotify token cache file:\t{SP_TOKENS_FILE or 'None (memory only)'}")
-        else:
-            print("* Spotify metadata backends:\tanonymous web player")
-    print(f"* Configuration file:\t\t{cfg_path}")
-    print(f"* Dotenv file:\t\t\t{env_path or 'None'}")
-    if VERBOSE_MODE or DEBUG_MODE:
-        print(f"* Verbose mode:\t\t\t{VERBOSE_MODE}")
-        print(f"* Debug mode:\t\t\t{DEBUG_MODE}\n")
-    else:
-        print("* More details:\t\t\tuse --verbose or --debug\n")
+    emit_startup_summary(build_startup_summary(args.username, cfg_path, env_path, FINAL_LOG_PATH), show_full=full_startup_summary_enabled())
 
     # We define signal handlers only for Linux, Unix & MacOS since Windows has limited number of signals supported
     if platform.system() != 'Windows':
