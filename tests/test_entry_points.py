@@ -1,6 +1,8 @@
 """What a bare, mistaken or one-shot invocation prints: the welcome screen, the missing-target block and the screen clear."""
 
 import io
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -232,3 +234,61 @@ class TestEarlyOutputConfig:
 
     def test_the_config_file_is_read_before_the_screen_is_cleared(self):
         assert SOURCE.index("apply_early_output_config()\n\n    # Read straight from sys.argv") < SOURCE.index("clear_screen(CLEAR_SCREEN and not")
+
+
+class TestConfigDiscoveryDisabled:
+
+    @pytest.fixture(autouse=True)
+    def restore_flag(self):
+        saved = (monitor.CONFIG_DISCOVERY_DISABLED, monitor.CLEAR_SCREEN)
+        yield
+        monitor.CONFIG_DISCOVERY_DISABLED, monitor.CLEAR_SCREEN = saved
+
+    @pytest.fixture
+    def discoverable(self, tmp_path, monkeypatch):
+        config = tmp_path / monitor.DEFAULT_CONFIG_FILENAME
+        config.write_text("CLEAR_SCREEN = False\n", encoding="utf-8")
+        # A file actually named 'none', so the sentinel cannot be satisfied by the path simply not existing
+        (tmp_path / "none").write_text("CLEAR_SCREEN = False\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        return config
+
+    def test_a_config_file_in_the_working_directory_is_found(self, discoverable):
+        assert monitor.find_config_file() == str(discoverable)
+
+    @pytest.mark.parametrize("sentinel", ["none", "NONE", "None"])
+    def test_the_sentinel_selects_no_file(self, sentinel, discoverable):
+        assert monitor.find_config_file(sentinel) is None
+
+    # Clearing the path is not enough, since a caller that runs discovery again would read the working directory
+    def test_the_flag_switches_the_search_off_for_a_caller_that_passes_no_path(self, discoverable):
+        monitor.CONFIG_DISCOVERY_DISABLED = True
+        assert monitor.find_config_file() is None
+
+    def test_a_missing_path_is_still_an_error(self, tmp_path):
+        assert monitor.find_config_file(str(tmp_path / "absent.conf")) is None
+        assert 'if not cfg_path and CLI_CONFIG_PATH and not CONFIG_DISCOVERY_DISABLED:' in SOURCE
+
+    # A printed command has to read back the setup the run used, so the sentinel is carried unexpanded
+    def test_a_printed_command_carries_the_sentinel(self, monkeypatch):
+        monkeypatch.setattr(monitor, "CLI_CONFIG_PATH", "none")
+        monkeypatch.setattr(monitor, "DOTENV_FILE", "none")
+        monkeypatch.setenv(monitor.INSTALL_METHOD_ENV_VAR, monitor.INSTALL_METHOD_PYPI)
+        assert monitor.render_command(["<lastfm_username>"]) == "lastfm_monitor <lastfm_username> --config-file none --env-file none"
+
+    def test_a_real_run_prints_the_command_it_was_given(self, tmp_path):
+        result = subprocess.run([sys.executable, str(PROJECT_ROOT / "lastfm_monitor.py"), "--config-file", "none", "--env-file", "none"], capture_output=True, text=True, cwd=tmp_path)
+        assert result.returncode == 1
+        assert "<lastfm_username> --config-file none --env-file none" in result.stdout
+
+    def test_the_early_output_pass_reads_no_file_either(self, discoverable, monkeypatch):
+        monkeypatch.setattr(monitor.sys, "argv", ["lastfm_monitor.py", "--config-file", "none", "some_user"])
+        monitor.CLEAR_SCREEN = True
+        monitor.apply_early_output_config()
+        assert monitor.CLEAR_SCREEN is True
+
+    # One state, one row: the sentinel and an empty search report the same pair
+    def test_the_doctor_reports_one_row_for_no_configuration_file(self):
+        labels = [check.label for check in monitor.doctor_check_configuration()]
+        assert "No configuration file selected" in labels
+        assert "No dotenv file selected" in labels
