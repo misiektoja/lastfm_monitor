@@ -117,6 +117,14 @@ With `-r`, a successful duration from either Spotify backend is marked `S*`. Las
 
 If you want to use email notifications functionality, configure SMTP settings in the `lastfm_monitor.conf` file.
 
+Save the password itself through a hidden prompt instead of editing the dotenv file by hand:
+
+```sh
+lastfm_monitor --set-smtp-password
+```
+
+The command signs in to the configured mail server and writes the password only if the server accepts it. Nothing is sent. Configure `SMTP_HOST`, `SMTP_USER`, `SENDER_EMAIL` and `RECEIVER_EMAIL` first, since the sign-in needs them.
+
 Verify your SMTP settings by using `--send-test-email` flag (the tool will try to send a test email notification):
 
 ```sh
@@ -169,6 +177,7 @@ The safest interactive entry methods write only the selected values to `.env` th
 lastfm_monitor --set-lastfm-credentials
 lastfm_monitor --set-spotify-credentials
 lastfm_monitor --set-webhook-url
+lastfm_monitor --set-smtp-password
 ```
 
 Each command accepts `--env-file PATH`. Existing values require confirmation and the update is atomic. `--env-file none` is rejected because these commands must save their values.
