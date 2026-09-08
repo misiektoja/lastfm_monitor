@@ -406,6 +406,7 @@ ASCII_LOG_SEPARATORS = "Auto"
 HORIZONTAL_LINE = 113
 
 # Whether to clear the terminal screen after starting the tool
+# Ignored when output is redirected, in debug mode and for commands that print a result and exit
 CLEAR_SCREEN = True
 
 # Value added/subtracted via signal handlers to adjust inactivity timeout (LASTFM_INACTIVITY_CHECK); in seconds
@@ -623,7 +624,7 @@ PROJECT_URL = "https://github.com/misiektoja/lastfm_monitor"
 DOCS_BASE_URL = "https://misiektoja.github.io/lastfm_monitor"
 GUIDE_URL = f"{DOCS_BASE_URL}/"
 INSTALL_GUIDE_URL = f"{DOCS_BASE_URL}/installation/"
-QUICK_START_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/#quick-start"
+QUICK_START_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/"
 LASTFM_API_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/#lastfm-api-key-and-shared-secret"
 PRIVACY_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/#user-privacy-settings"
 CONFIG_FILE_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#configuration-file"
@@ -647,6 +648,12 @@ EMAIL_UNUSABLE_CHECK_LABEL = "Email alerts are enabled but unusable"
 LASTFM_API_REGISTRATION_URL = "https://www.last.fm/api/account/create"
 LASTFM_API_ACCOUNTS_URL = "https://www.last.fm/api/accounts"
 SPOTIFY_DASHBOARD_URL = "https://developer.spotify.com/dashboard"
+
+# The accepted form of the positional target, shared by the welcome screen and the invalid-target error
+LASTFM_TARGET_FORMS = "username exactly as it appears on the user's Last.fm profile page"
+
+# Commands that write a secret to the dotenv file and exit
+SECRET_ACTION_FLAGS = ("--set-webhook-url", "--set-lastfm-credentials", "--set-spotify-credentials")
 
 # Install methods the tool can detect, used to tailor every command it prints
 INSTALL_METHOD_PYPI = "pip"
@@ -881,6 +888,9 @@ def check_internet(url=None, timeout=None, quiet=False):
 def clear_screen(enabled=True):
     if not enabled:
         return
+    # Don't clear screen if stdout is redirected (not a TTY)
+    if not hasattr(sys.stdout, "isatty") or not sys.stdout.isatty():
+        return
     try:
         if platform.system() == 'Windows':
             os.system('cls')
@@ -888,6 +898,15 @@ def clear_screen(enabled=True):
             os.system('clear')
     except Exception:
         print("* Cannot clear the screen contents")
+
+
+# Commands that print a one-shot result and exit, so the screen keeps whatever is already on it
+KEEP_HISTORY_FLAGS = (*SECRET_ACTION_FLAGS, "--doctor", "--send-test-email", "--send-test-webhook", "--help", "-h")
+
+
+# Returns True when the running command is a one-shot whose output has to stay scrollable
+def keep_terminal_history():
+    return any(flag in sys.argv for flag in KEEP_HISTORY_FLAGS)
 
 
 # Converts absolute value of seconds to human readable format
@@ -1370,7 +1389,7 @@ def classify_recovery_error(error=None, context="runtime", detail=""):
     if any(term in message for term in ("connection", "name resolution", "failed to resolve", "network is unreachable", "no connectivity")):
         return advice("network.unavailable", "Last.fm could not be reached", "Check connectivity, DNS and any proxy. The tool will keep retrying", True)
     if "invalid" in message and "username" in message:
-        return advice("target.invalid", safe_detail or "That is not a usable Last.fm username", "Pass the username exactly as it appears on the user's Last.fm profile page", False, USAGE_GUIDE_URL)
+        return advice("target.invalid", safe_detail or "That is not a usable Last.fm username", f"Pass the {LASTFM_TARGET_FORMS}", False, USAGE_GUIDE_URL)
     return advice("unknown", safe_detail or "The request could not be completed", "Re-run with --debug to see the technical cause", True)
 
 
@@ -3883,6 +3902,32 @@ def find_config_file(cli_path=None):
     return None
 
 
+# Reads the --config-file path straight from the raw arguments, for the settings needed before argparse runs
+def early_config_file_argument(arguments=None):
+    values = list(sys.argv[1:] if arguments is None else arguments)
+    for index, argument in enumerate(values):
+        if argument == "--config-file" and index + 1 < len(values):
+            return values[index + 1]
+        if argument.startswith("--config-file="):
+            return argument.split("=", 1)[1]
+    return None
+
+
+# Applies the terminal settings needed before argument parsing, leaving any failure to normal config loading
+def apply_early_output_config():
+    global CLEAR_SCREEN
+    try:
+        cli_path = early_config_file_argument()
+        config_path = find_config_file(os.path.expanduser(cli_path) if cli_path else None)
+        if not config_path:
+            return
+        values = parse_config_content(Path(config_path).read_text(encoding="utf-8"), str(config_path))
+    except (MemoryError, OSError, RecursionError, SyntaxError, UnicodeError, ValueError):
+        return
+    if isinstance(values.get("CLEAR_SCREEN"), bool):
+        CLEAR_SCREEN = values["CLEAR_SCREEN"]
+
+
 # Settings an older version wrote that this version no longer defines, ignored instead of rejected
 RETIRED_CONFIG_SETTINGS = frozenset(())
 
@@ -5975,15 +6020,33 @@ def _doctor_offer_notification_tests(report, input_func=None):
     return checks
 
 
+# Prints one labelled command on its own indented line, the shared shape across these tools
+def _wizard_print_command(label, command, suffix=""):
+    print(label)
+    print(f"    {command}{suffix}\n")
+
+
 # Prints the command that starts monitoring with the files this run checked, so a report read on its own
 # ends with the next action rather than leaving the reader to assemble the command
 def print_doctor_next_steps(target_value=None, doctor_exit=0):
     print("\nNext steps\n")
     label = "After Doctor passes, start monitoring:" if doctor_exit else "Start monitoring:"
-    print(label)
-    print(f"    {render_command([target_value] if target_value else ['<lastfm_username>'])}\n")
+    _wizard_print_command(label, render_command([target_value] if target_value else ['<lastfm_username>']))
     # No trailing blank line: the command printer already left one and the report must not end on two
     print(f"Guide: {QUICK_START_GUIDE_URL}")
+
+
+# Prints the commands a newcomer needs next, instead of an argparse usage error
+def print_welcome_screen():
+    print(f"For <lastfm_username>, use the {LASTFM_TARGET_FORMS}.\n")
+    _wizard_print_command("Quickest start (already configured):", render_command(["<lastfm_username>"], include_paths=False))
+    _wizard_print_command("Save your Last.fm API credentials:", render_command(["--set-lastfm-credentials"], include_paths=False))
+    _wizard_print_command("Check setup before monitoring:", render_command(["--doctor", "<lastfm_username>"], include_paths=False))
+    _wizard_print_command("Show recent tracks and exit:", render_command(["-l", "<lastfm_username>"], include_paths=False))
+    print(f"Full options: {render_command(['--help'], include_paths=False)}")
+    print(f"\nGuide:        {QUICK_START_GUIDE_URL}\n")
+    # Nothing was asked, so a bare invocation stays the usage error argparse would otherwise have reported
+    return 1
 
 
 # Runs every preflight check, then the approved delivery tests, returning zero only when nothing failed
@@ -6144,10 +6207,9 @@ def apply_cli_overrides(args):
 
 # Runs the command-line interface
 def main():
-    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_REMINDER_SECONDS, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_PROFILE_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, PROFILE_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
+    global CLI_CONFIG_PATH, DOTENV_FILE, CLEAR_SCREEN, LIVENESS_REMINDER_SECONDS, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_PROFILE_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, PROFILE_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
 
-    private_setup_flags = ("--set-webhook-url", "--set-lastfm-credentials", "--set-spotify-credentials")
-    if "--generate-config" in sys.argv and not any(flag in sys.argv for flag in private_setup_flags):
+    if "--generate-config" in sys.argv and not any(flag in sys.argv for flag in SECRET_ACTION_FLAGS):
         config_content = CONFIG_BLOCK.strip("\n") + "\n"
         try:
             idx = sys.argv.index("--generate-config")
@@ -6163,7 +6225,7 @@ def main():
         sys.stdout.buffer.flush()
         sys.exit(0)
 
-    if "--version" in sys.argv and not any(flag in sys.argv for flag in private_setup_flags):
+    if "--version" in sys.argv and not any(flag in sys.argv for flag in SECRET_ACTION_FLAGS):
         print(f"{os.path.basename(sys.argv[0])} v{VERSION}")
         sys.exit(0)
 
@@ -6172,7 +6234,18 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    clear_screen(CLEAR_SCREEN)
+    # The screen clearing runs before argparse, so its setting is resolved from the config file
+    # first rather than from the built-in default alone
+    apply_early_output_config()
+
+    # Read straight from sys.argv because argparse has not run yet, and the screen is cleared before it does
+    if "--debug" in sys.argv:
+        DEBUG_MODE = True
+
+    if CLEAR_SCREEN and DEBUG_MODE:
+        debug_print("Terminal screen clear skipped because debug mode is active")
+
+    clear_screen(CLEAR_SCREEN and not keep_terminal_history() and not DEBUG_MODE)
 
     print(f"Last.fm Monitoring Tool v{VERSION}\n")
 
@@ -6526,8 +6599,7 @@ def main():
         DEBUG_MODE = True
 
     if len(sys.argv) == 1:
-        parser.print_help(sys.stderr)
-        sys.exit(1)
+        sys.exit(print_welcome_screen())
 
     if args.config_file:
         CLI_CONFIG_PATH = os.path.expanduser(args.config_file)
@@ -6622,6 +6694,13 @@ def main():
     if args.doctor:
         sys.exit(run_doctor(target_value=args.username, config_path=cfg_path, env_path=env_path))
 
+    # A target is optional only for the utility actions below. Checked after the dotenv file is resolved so the
+    # command this prints carries the files this run was given, and before the credentials because the username
+    # is on the command line the user just typed while a key may live in a file they have never created
+    if not args.username and not (args.send_test_email or args.send_test_webhook):
+        print_recovery_error(context="target.missing")
+        sys.exit(1)
+
     if WEBHOOK_ENABLED and not validate_webhook_url():
         print("* Webhook alerts are off because WEBHOOK_URL is not a complete HTTPS link\n")
         WEBHOOK_ENABLED = False
@@ -6645,8 +6724,9 @@ def main():
     if not check_internet():
         sys.exit(1)
 
+    # Kept as a backstop, so every path below reads a target that is known to be set
     if not args.username:
-        print_recovery_error(context="target.missing", detail="No Last.fm username was given")
+        print_recovery_error(context="target.missing")
         sys.exit(1)
 
     if not doctor_value_is_set(LASTFM_API_KEY):
