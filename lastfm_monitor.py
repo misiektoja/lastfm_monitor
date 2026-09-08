@@ -6505,6 +6505,11 @@ def _wizard_offer_retry(label, consequence="", input_func=None):
     return _wizard_ask_yes_no(f"Try entering the {label} again?", default=True, input_func=input_func)
 
 
+# Trims the parenthetical hint from a question, so the retry offer that repeats it stays one readable line
+def _wizard_retry_label(question):
+    return question.split(" (")[0].strip()
+
+
 # Asks one numbered multiple-choice question and returns the chosen index
 def _wizard_ask_choice(question, options, default_index=0, input_func=None):
     print()
@@ -6538,6 +6543,10 @@ def _wizard_ask_positive_int(question, default, maximum=None, input_func=None):
         if parsed > 0 and (maximum is None or parsed <= maximum):
             return parsed
         print(f"  Enter a whole number from 1 through {maximum}." if maximum is not None else "  Enter a positive whole number.")
+        # A value the helper cannot use is a rejected entry, so it gets the same way out an empty one gets
+        if not _wizard_offer_retry(_wizard_retry_label(question), input_func=input_func):
+            print(f"  Keeping {default}.")
+            return int(default)
 
 
 # Renders a wizard duration as raw seconds plus a readable form, so the stored config value stays visible
@@ -6564,6 +6573,9 @@ def _wizard_ask_duration(question, default, input_func=None):
         if seconds is not None:
             return seconds
         print("  Enter a positive duration such as 120, 2m, 1.5h, 1h 30m or 1d.")
+        if not _wizard_offer_retry(_wizard_retry_label(question), input_func=input_func):
+            print(f"  Keeping {_wizard_format_duration(default)}.")
+            return default
 
 
 # Asks one secret through a hidden prompt, so it never reaches the screen or the shell history
@@ -7115,6 +7127,8 @@ def _wizard_collect_ntfy_access_token(state, input_func=None, getpass_func=None)
 
 # Changes where setup writes, re-asking the sections that hold secrets when the dotenv destination moves
 def _wizard_collect_destination_section(state, input_func=None, getpass_func=None):
+    current_config = Path(state.config_path).expanduser().resolve()
+    current_env = Path(state.env_path).expanduser().resolve()
     while True:
         config_text = _wizard_ask_text("Configuration file destination", default=str(state.config_path), required=True, input_func=input_func)
         try:
@@ -7122,29 +7136,41 @@ def _wizard_collect_destination_section(state, input_func=None, getpass_func=Non
             break
         except ValueError as exc:
             print(f"  {exc}.")
+            # Declining keeps the destination this run started with rather than asking for a path forever
+            if not _wizard_offer_retry("configuration destination", input_func=input_func):
+                print(f"  Keeping {state.config_path}.")
+                selected_config = current_config
+                break
     # Both sides are compared resolved, so an unchanged answer written a different way is not read as a move
-    if selected_config != Path(state.config_path).expanduser().resolve():
+    if selected_config != current_config:
         chosen_config = _wizard_choose_config_destination(selected_config, input_func=input_func)
         # Giving up on every offered path keeps the current destination rather than cancelling the whole setup
         if chosen_config is not None:
             state.config_path = chosen_config
     while True:
         env_text = _wizard_ask_text("Dotenv file destination", default=str(state.env_path), required=True, input_func=input_func)
+        selected_env = current_env
+        problem = ""
         if env_text.casefold() == "none":
-            print("  Setup needs a writable dotenv file and cannot use 'none'.")
-            continue
-        try:
-            selected_env = _wizard_validate_destination(env_text, "Dotenv destination")
-        except ValueError as exc:
-            print(f"  {exc}.")
-            continue
-        # One file cannot hold both, since saving the configuration would overwrite the secrets beside it
-        if selected_env == Path(state.config_path).expanduser().resolve():
-            print("  The dotenv file has to be a different file from the configuration.")
-            continue
-        break
+            problem = "Setup needs a writable dotenv file and cannot use 'none'."
+        else:
+            try:
+                selected_env = _wizard_validate_destination(env_text, "Dotenv destination")
+            except ValueError as exc:
+                problem = f"{exc}."
+            else:
+                # One file cannot hold both, since saving the configuration would overwrite the secrets beside it
+                if selected_env == Path(state.config_path).expanduser().resolve():
+                    problem = "The dotenv file has to be a different file from the configuration."
+        if not problem:
+            break
+        print(f"  {problem}")
+        if not _wizard_offer_retry("dotenv destination", input_func=input_func):
+            print(f"  Keeping {state.env_path}.")
+            selected_env = current_env
+            break
     state.config_values["DOTENV_FILE"] = str(selected_env)
-    if selected_env == Path(state.env_path).expanduser().resolve():
+    if selected_env == current_env:
         return
     state.env_path = selected_env
     # A secret kept rather than retyped was never queued, so it would be missing from a dotenv file that just moved
