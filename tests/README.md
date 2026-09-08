@@ -30,6 +30,7 @@ and again before anything is published to PyPI.
 | File | Area under test |
 | --- | --- |
 | `test_config_loading.py` | Config files read as data and never executed |
+| `test_config_writers.py` | The timestamped config backup, the atomic replace and the dotenv file that is deliberately not backed up |
 | `test_doctor.py` | The preflight row contract, every check's failure branches, the section order and the verdict |
 | `test_entry_points.py` | The welcome screen an empty command prints, the missing-target block and when the screen is cleared |
 | `test_delivery_tests.py` | The messages both test commands send, the doctor's delivery tests and what each does with nothing to send |
@@ -48,6 +49,10 @@ and again before anything is published to PyPI.
 | `test_spotify_web_backend.py` | TOTP generation and config override, anonymous token handling and caching |
 | `test_tls_verification.py` | The TLS verification switch, the call sites that read it and the library sessions it reaches |
 | `test_webhook_notifications.py` | Webhook settings coverage, startup rollups, URL validation and independent event switches |
+
+The configuration template every released version shipped is checked in under `data/config_templates/`, so
+`test_config_loading.py` can replay each of them through the current parser. See the README there before adding
+or changing one.
 
 ## Conventions
 
