@@ -83,8 +83,22 @@ def write_offline_config(directory, port):
 # Builds the driver that runs the real CLI, points pylast at the fixture and stops after one cycle
 def offline_run_source(config_path, port, extra_config=""):
     return textwrap.dedent(f"""
+        import functools
         import runpy
+        import socket
         import pylast
+
+        # Nothing in this run may leave the machine. A version of pylast that ignores the injected
+        # transport would otherwise reach the real Last.fm API and read as a fixture failure
+        real_connect = socket.socket.connect
+
+        def loopback_only(self, address):
+            host = address[0] if isinstance(address, tuple) else ""
+            if host not in ("127.0.0.1", "::1", "localhost"):
+                raise AssertionError(f"the offline run tried to reach {{host}}")
+            return real_connect(self, address)
+
+        socket.socket.connect = loopback_only
 
         # Rewrites the scheme so pylast's own client reaches the plain loopback fixture, leaving every
         # other layer of the request untouched: the signing, the POST body and the XML parsing are real
@@ -93,12 +107,15 @@ def offline_run_source(config_path, port, extra_config=""):
                 request.url = request.url.copy_with(scheme="http")
                 return super().handle_request(request)
 
+        # The transport is injected into the client itself rather than mounted on the network, because
+        # pylast only forwards a configured proxy on some versions and ignores it on the rest
+        pylast.httpx.Client = functools.partial(pylast.httpx.Client, transport=PlainLoopbackTransport())
+
         real_network = pylast.LastFMNetwork
 
         def offline_network(*args, **kwargs):
             network = real_network(*args, **kwargs)
             network.ws_server = ("127.0.0.1:{port}", "/2.0/")
-            network.proxy = {{"all://": PlainLoopbackTransport()}}
             return network
 
         module = runpy.run_path({str(CLI_PATH)!r}, run_name="lastfm_monitor_offline_e2e")
