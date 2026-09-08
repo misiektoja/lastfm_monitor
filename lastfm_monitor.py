@@ -3922,10 +3922,13 @@ def update_dotenv_file(destination, updates):
             continue
         if key in seen_keys:
             continue
-        output_lines.append(f"{key}={_format_dotenv_value(values_by_key[key])}")
         seen_keys.add(key)
+        # A secret cleared by its owner is removed rather than emptied, so a disabled value cannot linger here
+        if not values_by_key[key]:
+            continue
+        output_lines.append(f"{key}={_format_dotenv_value(values_by_key[key])}")
     for key, value in update_items:
-        if key not in seen_keys:
+        if key not in seen_keys and value:
             output_lines.append(f"{key}={_format_dotenv_value(value)}")
             seen_keys.add(key)
     content = "\n".join(output_lines) + ("\n" if output_lines else "")
@@ -7395,7 +7398,8 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
         print_recovery_error(exc, context="file", detail=f"Could not write the configuration to '{state.config_path}'")
         return 1
     dotenv_path = None
-    if state.secret_updates:
+    # A cleared secret only has to leave a file that exists, so setup never creates one holding nothing
+    if any(state.secret_updates.values()) or (state.secret_updates and Path(state.env_path).expanduser().is_file()):
         try:
             dotenv_path = update_dotenv_file(state.env_path, state.secret_updates)
         except Exception as exc:
