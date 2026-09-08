@@ -159,7 +159,7 @@ class TestTheDefaultOutputNamesBothModes:
     def test_a_plain_run_says_where_more_detail_lives(self, restored_globals, tmp_path, capsys):
         run_main_to_the_loop(tmp_path)
         printed = capsys.readouterr().out
-        assert "* More details:\t\t\tuse --verbose or --debug" in printed
+        assert "* More details:                 use --verbose or --debug" in printed
         assert "* Debug mode:" not in printed
 
     @pytest.mark.parametrize("flag", ["--verbose", "--debug"])

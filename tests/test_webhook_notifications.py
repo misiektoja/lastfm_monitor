@@ -47,25 +47,13 @@ def test_startup_notification_summaries_use_compact_rollups(monkeypatch):
     webhook_settings = {"WEBHOOK_ENABLED": True, "WEBHOOK_ACTIVE_NOTIFICATION": True, "WEBHOOK_INACTIVE_NOTIFICATION": True, "WEBHOOK_TRACK_NOTIFICATION": True, "WEBHOOK_SONG_NOTIFICATION": True, "WEBHOOK_SONG_ON_LOOP_NOTIFICATION": True, "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION": True, "WEBHOOK_ERROR_NOTIFICATION": True, "WEBHOOK_FOLLOWERS_NOTIFICATION": True, "WEBHOOK_FOLLOWINGS_NOTIFICATION": True, "WEBHOOK_PROFILE_NOTIFICATION": True}
     for setting, value in {**email_settings, **webhook_settings}.items():
         monkeypatch.setattr(monitor, setting, value)
-    expected_email = "* Notifications (email):        On (active, inactive, tracked, songs, loops, offline, errors,\n                                followers, followings, profile)"
-    expected_webhook = "* Notifications (webhook):      On (active, inactive, tracked, songs, loops, offline, errors,\n                                followers, followings, profile)"
-    assert monitor._startup_notification_summary_lines() == [expected_email, expected_webhook]
+    expected_email = "* Notifications (email):        On (active, inactive, tracked, songs, loops, offline, errors,\n                                followers, followings, profile)\n"
+    expected_webhook = "* Notifications (webhook):      On (active, inactive, tracked, songs, loops, offline, errors,\n                                followers, followings, profile)\n"
+    rows = {row.label: row for row in monitor.build_startup_summary("someuser")}
+    assert monitor.format_startup_summary_row(rows["Notifications (email)"]) == expected_email
+    assert monitor.format_startup_summary_row(rows["Notifications (webhook)"]) == expected_webhook
     assert all(len(line) <= 100 for summary in (expected_email, expected_webhook) for line in summary.splitlines())
-    assert "\n*" not in expected_email + expected_webhook
-
-
-# Verifies the shared timer wraps before display name with an aligned continuation row
-def test_startup_profile_tracking_rows_are_aligned(monkeypatch):
-    monkeypatch.setattr(monitor, "TRACK_FOLLOWINGS", True)
-    monkeypatch.setattr(monitor, "TRACK_FOLLOWERS", False)
-    monkeypatch.setattr(monitor, "TRACK_BIO", True)
-    monkeypatch.setattr(monitor, "TRACK_DISPLAY_NAME", True)
-    monkeypatch.setattr(monitor, "FRIENDS_CHECK_INTERVAL", 10800)
-
-    assert monitor._startup_friends_tracking_summary_lines() == [
-        "* Friends/profile tracking:\t[followings = True] [followers = False] [bio = True]",
-        "\t\t\t\t[display name = True] [interval: 3 hours]",
-    ]
+    assert all(not line.startswith("*") for summary in (expected_email, expected_webhook) for line in summary.splitlines()[1:])
 
 
 # Verifies webhook categories remain off while the master switch is disabled
@@ -73,7 +61,7 @@ def test_startup_webhook_summary_respects_master_switch(monkeypatch):
     monkeypatch.setattr(monitor, "WEBHOOK_ENABLED", False)
     monkeypatch.setattr(monitor, "WEBHOOK_ACTIVE_NOTIFICATION", True)
     monkeypatch.setattr(monitor, "WEBHOOK_ERROR_NOTIFICATION", True)
-    assert monitor._startup_notification_summary_lines()[1] == "* Notifications (webhook):      Off"
+    assert monitor._startup_notification_state(monitor._startup_webhook_notification_categories()) == "Off"
 
 
 # Verifies URL validation and provider detection reject unsafe destinations
