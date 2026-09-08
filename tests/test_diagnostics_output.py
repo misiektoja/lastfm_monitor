@@ -3,6 +3,7 @@
 import ast
 import re
 import sys
+from itertools import count
 from pathlib import Path
 
 import pytest
@@ -618,7 +619,7 @@ class FakeNetwork:
 
 
 # Runs the real monitoring loop on a fake clock advanced by each patched sleep and returns what it printed
-def drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles, check_interval=30, liveness=0, fail_after=None):
+def drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles, check_interval=30, liveness=0, fail_after=None, friends_fail_after=None):
     clock = FakeClock()
     user = FakeUser(clock, (clock.now - 600, FakeTrack()), fail_after=fail_after)
     monkeypatch.chdir(tmp_path)
@@ -628,7 +629,10 @@ def drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles, check_interval=30,
     monkeypatch.setattr(monitor, "LASTFM_INACTIVITY_CHECK", 180)
     monkeypatch.setattr(monitor, "LIVENESS_CHECK_INTERVAL", liveness)
     monkeypatch.setattr(monitor, "LIVENESS_REMINDER_SECONDS", liveness)
-    monkeypatch.setattr(monitor, "TRACK_FOLLOWINGS", False)
+    monkeypatch.setattr(monitor, "TRACK_FOLLOWINGS", friends_fail_after is not None)
+    monkeypatch.setattr(monitor, "FRIENDS_CHECK_INTERVAL", check_interval if friends_fail_after is not None else 0)
+    monkeypatch.setattr(monitor, "FRIENDS_RETRY_INTERVAL", check_interval)
+    monkeypatch.setattr(monitor, "FRIENDS_CHANGE_COUNTER", 3)
     monkeypatch.setattr(monitor, "TRACK_FOLLOWERS", False)
     monkeypatch.setattr(monitor, "TRACK_BIO", False)
     monkeypatch.setattr(monitor, "TRACK_DISPLAY_NAME", False)
@@ -638,6 +642,16 @@ def drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles, check_interval=30,
     monkeypatch.setattr(monitor, "get_track_info", lambda *a, **k: (0, None, ""))
     monkeypatch.setattr(monitor, "get_spotify_apple_genius_search_urls", lambda *a, **k: tuple([""] * 13))
     monkeypatch.setattr(monitor, "send_notification_channels", lambda *a, **k: (False, False))
+
+    if friends_fail_after is not None:
+        friends_calls = count(1)
+
+        def failing_friends(_username):
+            if next(friends_calls) > friends_fail_after:
+                raise RuntimeError("Cannot read the friends list")
+            return {"someone"}
+
+        monkeypatch.setattr(monitor, "lastfm_get_friends", failing_friends)
 
     deadline = clock.now + (cycles - 1) * check_interval
     plain_sleep = clock.sleep
@@ -707,3 +721,80 @@ class TestARunThatIsRetryingSaysSo:
         assert failures
         assert "outcome=failed" in failures[0]
         assert "RuntimeError" in failures[0]
+
+
+class TestAVerboseNoticeNeverFloats:
+    # A line with no timestamp under it cannot be placed in time, and a degraded feature is exactly when that matters
+    def test_a_degraded_feature_notice_is_closed_before_the_next_check(self, verbose_on, monkeypatch, tmp_path, capsys):
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=4, friends_fail_after=1).splitlines()
+        notices = [number for number, line in enumerate(transcript) if "cannot fire" in line]
+        assert len(notices) == 1
+        assert transcript[notices[0] + 1].startswith("Timestamp:")
+
+    # Closing on the notice line would print a trailer of its own right before the block that follows it
+    def test_a_real_block_in_the_same_check_absorbs_the_notice(self, verbose_on, monkeypatch, tmp_path, capsys):
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=3, liveness=30, friends_fail_after=1).splitlines()
+        index = next(number for number, line in enumerate(transcript) if "cannot fire" in line)
+        assert transcript[index + 1].startswith("* Monitoring healthy")
+        assert transcript[index + 2].startswith("Liveness check, timestamp:")
+        assert not any(line.startswith("Timestamp:") for line in transcript[index + 1:index + 3])
+
+    def test_the_helper_leaves_the_close_to_the_check(self, verbose_on, monkeypatch, capsys):
+        monkeypatch.setattr(monitor, "MONITORING_ACTIVE", True)
+        monkeypatch.setattr(monitor, "PENDING_NOTICE_BLOCK", False)
+        monitor.verbose_degraded_feature("Followings check", "following change alerts")
+        assert "Timestamp:" not in capsys.readouterr().out
+        assert monitor.PENDING_NOTICE_BLOCK is True
+        monitor.close_pending_notice_block()
+        assert capsys.readouterr().out.startswith("Timestamp:")
+
+    # One trailer belongs to the check, not to each feature that failed during it
+    def test_two_degraded_features_share_one_trailer(self, verbose_on, monkeypatch, capsys):
+        monkeypatch.setattr(monitor, "MONITORING_ACTIVE", True)
+        monkeypatch.setattr(monitor, "PENDING_NOTICE_BLOCK", False)
+        monitor.verbose_degraded_feature("Followings check", "following change alerts")
+        monitor.verbose_degraded_feature("Followers check", "follower change alerts")
+        monitor.close_pending_notice_block()
+        assert capsys.readouterr().out.count("Timestamp:") == 1
+
+    def test_a_block_that_closes_itself_leaves_nothing_pending(self, verbose_on, monkeypatch, capsys):
+        monkeypatch.setattr(monitor, "MONITORING_ACTIVE", True)
+        monkeypatch.setattr(monitor, "PENDING_NOTICE_BLOCK", False)
+        monitor.verbose_degraded_feature("Followings check", "following change alerts")
+        monitor.print_cur_ts("Timestamp:\t\t\t")
+        monitor.close_pending_notice_block()
+        assert capsys.readouterr().out.count("Timestamp:") == 1
+
+    # The startup screen is one block that the monitoring header closes, so a trailer there would split it in half
+    def test_a_notice_before_monitoring_starts_stays_bare(self, verbose_on, monkeypatch, capsys):
+        monkeypatch.setattr(monitor, "MONITORING_ACTIVE", False)
+        monkeypatch.setattr(monitor, "PENDING_NOTICE_BLOCK", False)
+        monitor.verbose_degraded_feature("Followings check", "following change alerts")
+        monitor.close_pending_notice_block()
+        printed = capsys.readouterr().out
+        assert "cannot fire" in printed
+        assert "Timestamp:" not in printed
+
+    def test_a_check_with_no_notice_prints_no_trailer_of_its_own(self, verbose_on, monkeypatch, capsys):
+        monkeypatch.setattr(monitor, "PENDING_NOTICE_BLOCK", False)
+        monitor.close_pending_notice_block()
+        assert capsys.readouterr().out == ""
+
+    # A silent retry window reads as a run that stopped checking, so the first failure has to name what cannot fire
+    def test_the_silent_retry_window_names_the_alerts_it_cannot_fire(self, verbose_on, monkeypatch, tmp_path, capsys):
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=4, friends_fail_after=1)
+        notices = [line for line in transcript.splitlines() if "cannot fire" in line]
+        assert len(notices) == 1
+        assert notices[0].startswith("* Friends/profile check is unavailable")
+        assert "friend and profile change alerts" in notices[0]
+
+    def test_the_same_outage_repeats_only_in_debug(self, debug_on, monkeypatch, tmp_path, capsys):
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=6, friends_fail_after=1)
+        lines = transcript.splitlines()
+        degraded = [line for line in lines if "outcome=degraded" in line]
+        assert len(degraded) == 1
+        assert "alert=friend and profile change alerts" in degraded[0]
+        repeats = [line for line in lines if "Friends/profile check" in line and "outcome=failed" in line]
+        assert len(repeats) > 1
+        assert "attempt=#2" in repeats[0]
+        assert "RuntimeError" in repeats[0]
