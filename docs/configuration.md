@@ -269,8 +269,8 @@ An exported variable therefore beats the dotenv file, which is what `python-dote
 A forgotten `export` can shadow the file invisibly, so `--debug` names each secret and the source it resolved from, never the value:
 
 ```text
-[DEBUG 12:00:00] Secret resolution: name=LASTFM_API_KEY, source=environment, value=set, 32 chars
-[DEBUG 12:00:00] Secret sources: dotenv file=SMTP_PASSWORD; environment=LASTFM_API_KEY
+[DEBUG 12:00:00] Secret resolution: name=LASTFM_API_KEY, source=environment, value=set, chars=32
+[DEBUG 12:00:00] Secret sources: SMTP_PASSWORD=dotenv file, LASTFM_API_KEY=environment
 ```
 
 A secret still holding its `your_...` placeholder counts as unset and is left out. Lengths appear only for the secrets whose length the provider issues, never for a password you chose.
@@ -292,6 +292,8 @@ The tool then says so at startup, because an intercepted connection can no longe
 The tool clears the terminal when monitoring starts. Set `CLEAR_SCREEN` to `False` to keep whatever is already on the screen.
 
 The screen is never cleared when output is redirected to a file or a pipe, in debug mode, or for a command that prints a result and exits, such as `--doctor`, `--help` and the test senders.
+
+Two settings add detail to what a run prints. `VERBOSE_MODE` adds the decisions the run made and `DEBUG_MODE` adds timestamped technical traces. Both are off by default, both are independent of each other and both have a flag that wins over the file, `--verbose` and `--debug`. See [Verbose Output](troubleshooting.md#verbose-output) and [Debug Output](troubleshooting.md#debug-output).
 
 ## Check Intervals
 
