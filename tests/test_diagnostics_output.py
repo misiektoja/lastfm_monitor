@@ -208,6 +208,13 @@ class TestTheLineFormat:
         monitor.verbose_notice("Email alerts are off")
         assert capsys.readouterr().out == "* Email alerts are off\n"
 
+    # The startup screen is one block, so the real notice a run prints there must not split it in half
+    def test_the_startup_notice_a_real_run_prints_stays_bare(self, restored_globals, tmp_path, capsys):
+        run_main_to_the_loop(tmp_path, arguments=["--verbose"])
+        transcript = capsys.readouterr().out.splitlines()
+        index = next(number for number, line in enumerate(transcript) if line.startswith("* Email notifications are off because"))
+        assert not transcript[index + 1].startswith("Timestamp:")
+
 
 class TestSecretsAreRedactedInsideThePrinter:
     # One caller interpolating a secret is enough to leak it, so the sanitizer sits in the printer
@@ -400,8 +407,14 @@ class TestADegradedFeatureSaysSoInVerbose:
         assert "RuntimeError" in printed
 
     # A channel switched off at startup is a decision the user can act on, so it is said once in verbose
-    def test_an_unusable_email_channel_names_the_setting_that_fixes_it(self):
-        assert 'verbose_print("Email notifications are off because SMTP_HOST is still the shipped placeholder")' in SOURCE
+    def test_an_unusable_email_channel_names_the_setting_that_fixes_it(self, restored_globals, tmp_path, capsys):
+        run_main_to_the_loop(tmp_path, arguments=["--verbose"])
+        printed = capsys.readouterr().out
+        assert "* Email notifications are off because SMTP_HOST is still the shipped placeholder" in printed
+
+    def test_an_unusable_email_channel_stays_quiet_without_the_flag(self, restored_globals, tmp_path, capsys):
+        run_main_to_the_loop(tmp_path)
+        assert "Email notifications are off because" not in capsys.readouterr().out
 
 
 class TestEveryDeliveryIsTraced:
@@ -594,10 +607,12 @@ class FakePlayed:
 
 
 class FakeUser:
-    def __init__(self, clock, scrobble, fail_after=None):
+    def __init__(self, clock, scrobble, fail_after=None, recover_after=None, error_factory=None):
         self.clock = clock
         self.scrobble = scrobble
         self.fail_after = fail_after
+        self.recover_after = recover_after
+        self.error_factory = error_factory or (lambda call: RuntimeError("HTTP code 500 from Last.fm"))
         self.calls = 0
 
     def get_now_playing(self):
@@ -605,8 +620,9 @@ class FakeUser:
 
     def get_recent_tracks(self, limit=1):
         self.calls += 1
-        if self.fail_after is not None and self.calls > self.fail_after:
-            raise RuntimeError("HTTP code 500 from Last.fm")
+        failing = self.fail_after is not None and self.calls > self.fail_after and (self.recover_after is None or self.calls <= self.recover_after)
+        if failing:
+            raise self.error_factory(self.calls)
         return [FakePlayed(*self.scrobble)]
 
 
@@ -619,12 +635,12 @@ class FakeNetwork:
 
 
 # Runs the real monitoring loop on a fake clock advanced by each patched sleep and returns what it printed
-def drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles, check_interval=30, liveness=0, fail_after=None, friends_fail_after=None, friends_recover_after=None, friends_failing_calls=None):
+def drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles, check_interval=30, liveness=0, fail_after=None, fail_recover_after=None, error_factory=None, friends_fail_after=None, friends_recover_after=None, friends_failing_calls=None):
     if friends_failing_calls is not None:
         friends_fail_after = 0
 
     clock = FakeClock()
-    user = FakeUser(clock, (clock.now - 600, FakeTrack()), fail_after=fail_after)
+    user = FakeUser(clock, (clock.now - 600, FakeTrack()), fail_after=fail_after, recover_after=fail_recover_after, error_factory=error_factory)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(monitor, "time", clock)
     monkeypatch.setattr(monitor, "LASTFM_CHECK_INTERVAL", check_interval)
@@ -710,18 +726,23 @@ class TestEveryCompletedCheckIsTraced:
 
 
 class TestARunThatIsRetryingSaysSo:
-    # A streak below its alert threshold printed nothing at all, which reads as a run that stopped working
-    def test_the_first_transient_failure_says_retries_are_active(self, verbose_on, monkeypatch, tmp_path, capsys):
-        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=4, fail_after=2)
-        notices = [line for line in transcript.splitlines() if "automatic retries are active" in line.casefold()]
-        assert len(notices) == 1
-        assert notices[0].startswith("* ")
+    # A first failure that waits for a threshold makes the first half hour of an outage look like an idle run
+    def test_the_first_failure_is_reported_at_once_with_its_schedule(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=4, liveness=3600, fail_after=2)
+        reports = [line for line in transcript.splitlines() if line.startswith("* Error:")]
+        assert len(reports) == 1
+        assert reports[0] == "* Error: The Last.fm API is temporarily unavailable (retrying in 30 seconds)"
 
-    # A bare notice between two timestamped blocks cannot be correlated with the events beside it
-    def test_the_notice_carries_the_timestamp_trailer(self, verbose_on, monkeypatch, tmp_path, capsys):
-        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=4, fail_after=2).splitlines()
-        index = next(number for number, line in enumerate(transcript) if "automatic retries are active" in line.casefold())
-        assert transcript[index + 1].startswith("Timestamp:")
+    # A report with no timestamp under it cannot be placed in the run it came from
+    def test_the_report_carries_the_fix_and_the_timestamp_trailer(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=4, liveness=3600, fail_after=2).splitlines()
+        index = next(number for number, line in enumerate(transcript) if line.startswith("* Error:"))
+        assert transcript[index + 1].startswith("To fix: ")
+        assert transcript[index + 2].startswith("Timestamp:")
 
     def test_the_same_failure_names_the_cycle_and_the_cause_in_debug(self, debug_on, monkeypatch, tmp_path, capsys):
         transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=4, fail_after=2)
@@ -851,3 +872,89 @@ class TestARecoveryIsNewsOnlyIfTheFailureWas:
     def test_a_run_that_never_failed_says_nothing_about_recovering(self, verbose_on, monkeypatch, tmp_path, capsys):
         transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=5, friends_fail_after=99)
         assert "available again" not in transcript
+
+
+# Raises one failure category for the first run of failing checks and another one after it
+def two_category_failure(call):
+    return RuntimeError("HTTP code 500 from Last.fm") if call <= 5 else RuntimeError("The read operation timed out")
+
+
+class TestALastingFailureIsReportedOnce:
+    # At a 30 second interval a two day outage used to be 5760 identical blocks
+    def test_the_same_failure_does_not_repeat_while_it_lasts(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=12, liveness=3600, fail_after=2)
+        assert len([line for line in transcript.splitlines() if line.startswith("* Error:")]) == 1
+
+    # The banner is what says a broken run is still alive, and it carries more than the line it replaced
+    def test_a_lasting_failure_is_carried_by_the_liveness_banner(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=20, liveness=120, fail_after=2).splitlines()
+        degraded = [number for number, line in enumerate(transcript) if line.startswith("* Monitoring degraded for someuser.")]
+        assert len(degraded) == 4
+        assert "The Last.fm API is temporarily unavailable since " in transcript[degraded[0]]
+        assert transcript[degraded[0] + 1].startswith("Liveness check, timestamp:")
+
+    # A healthy banner during an outage would say the opposite of what the run is doing
+    def test_the_healthy_banner_stays_away_while_the_run_is_degraded(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=20, liveness=120, fail_after=2)
+        assert "Monitoring healthy for someuser" not in transcript
+
+    # A throttled failure stops printing, so nothing marks the moment it cleared unless the recovery says so
+    def test_the_recovery_is_reported_without_any_flag(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=10, liveness=3600, fail_after=2, fail_recover_after=6).splitlines()
+        recovered = [number for number, line in enumerate(transcript) if line.startswith("* Monitoring recovered for someuser after ")]
+        assert len(recovered) == 1
+        assert transcript[recovered[0] + 1].startswith("Timestamp:")
+
+    # Without a reset the recovery line is followed at once by a banner, since the timer ran through the whole outage
+    def test_the_recovery_starts_the_quiet_period_again(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=10, liveness=120, fail_after=2, fail_recover_after=6).splitlines()
+        recovered = next(number for number, line in enumerate(transcript) if line.startswith("* Monitoring recovered"))
+        healthy = next(number for number, line in enumerate(transcript) if line.startswith("* Monitoring healthy"))
+        # Without the reset the banner arrives in the same check as the recovery, sharing its timestamp
+        assert transcript[healthy + 1].split("\t")[-1] != transcript[recovered + 1].split("\t")[-1]
+
+    def test_a_second_failure_category_is_reported_in_full(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=10, liveness=3600, fail_after=2, error_factory=two_category_failure)
+        reports = [line for line in transcript.splitlines() if line.startswith("* Error:")]
+        assert len(reports) == 2
+        assert "temporarily unavailable" in reports[0]
+        assert "timed out" in reports[1]
+        assert transcript.count("To fix: ") == 2
+
+    # With the banner switched off nothing is left to carry the reminder, so the old summaries keep their cadence
+    def test_the_aggregated_summary_survives_where_the_banner_is_off(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        monkeypatch.setattr(monitor, "ERROR_500_NUMBER_LIMIT", 3)
+        monkeypatch.setattr(monitor, "ERROR_500_TIME_LIMIT", 60)
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=12, liveness=0, fail_after=2)
+        aggregated = [line for line in transcript.splitlines() if line.startswith("* Error 50x (")]
+        assert aggregated
+        assert "The Last.fm API is temporarily unavailable (retrying in 30 seconds)" in aggregated[0]
+        assert "Monitoring degraded for someuser" not in transcript
+
+    # The probe that found the cadence bugs: a long outage read end to end rather than a two-check test
+    def test_a_long_outage_prints_one_report_and_one_reminder(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=130, liveness=3600, fail_after=2)
+        lines = transcript.splitlines()
+        assert len([line for line in lines if line.startswith("* Error:")]) == 1
+        assert len([line for line in lines if line.startswith("* Monitoring degraded")]) == 1
+
+    def test_the_failure_and_its_category_stay_in_debug(self, debug_on, monkeypatch, tmp_path, capsys):
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=8, liveness=3600, fail_after=2)
+        failures = [line for line in transcript.splitlines() if "Monitoring cycle" in line and "outcome=failed" in line]
+        assert len(failures) > 1
