@@ -205,6 +205,18 @@ lastfm_monitor <lastfm_username> --env-file none
 
 As a fallback, you can also store secrets in the configuration file or source code.
 
+## TLS Verification
+
+Every connection the tool makes verifies the server's certificate: Last.fm, the Spotify metadata backends, webhook delivery, the mail server handshake and the startup connectivity check.
+
+On a network that intercepts TLS with its own certificate authority, that verification fails and the error reads like a bug in the tool. Set `VERIFY_SSL` to `False` to accept the intercepting certificate:
+
+```python
+VERIFY_SSL = False
+```
+
+The tool then says so at startup, because an intercepted connection can no longer be told apart from the real service. Leave it at the default `True` everywhere else.
+
 ## Check Intervals
 
 If you want to customize music polling intervals, use `-k` and `-c` flags (or corresponding configuration options):
