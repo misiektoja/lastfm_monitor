@@ -15,6 +15,7 @@ pyotp
 spotipy (optional, only for Spotify-related features)
 python-dotenv (optional)
 beautifulsoup4 (optional, only for friends and profile tracking)
+colorama (optional, only for coloured output in the classic Windows Command Prompt)
 """
 
 VERSION = "2.7"
@@ -420,6 +421,58 @@ HORIZONTAL_LINE = 113
 # Ignored when output is redirected, in debug mode and for commands that print a result and exit
 CLEAR_SCREEN = True
 
+# Whether to use coloured output in the terminal (auto-disabled if the terminal
+# does not appear to support colours or when output is redirected to a file)
+# Can also be disabled via the --no-color flag
+COLORED_OUTPUT = True
+
+# Colour theme used for different parts of the output
+# Keys are logical names used by the tool, values are colour/style strings
+# You can combine multiple attributes with spaces or '+', for example:
+#   "bright_cyan bold", "yellow", "red underline", "bright_magenta bold underline", "red bold blink"
+# Valid colour names: black, red, green, yellow, blue, magenta, cyan, white,
+# and their bright_ variants (bright_red, bright_green, ...).
+# The defaults below are what the tool uses while this block stays commented out. Uncomment it to override
+# them and keep only the lines you want to change, so the rest keep following the tool's own defaults.
+# COLOR_THEME = {
+#     # Headings and commands the wizard tells you to run
+#     "header": "bright_cyan",
+#     "section": "bright_white",
+#     # Identity
+#     "username": "bright_cyan underline",
+#     "id": "bright_magenta",
+#     # Listening status values
+#     "status_active": "green",
+#     "status_inactive": "red",
+#     "status_offline": "red",
+#     # Music info
+#     "artist": "bright_yellow",
+#     "track": "bright_yellow",
+#     "album": "yellow",
+#     "duration": "green",
+#     # Activity info
+#     "status_change": "yellow",
+#     # Misc
+#     "timestamp_label": "",
+#     "timestamp_value": "cyan",
+#     "info": "cyan",
+#     "warning": "yellow",
+#     "error": "red",
+#     "signal": "yellow",
+#     "email": "bright_cyan",
+#     "webhook": "bright_blue",
+#     # Dates
+#     "date": "magenta",
+#     "date_range": "magenta",
+#     # Boolean values
+#     "boolean_true": "green",
+#     "boolean_false": "red",
+#     # Counters and differences
+#     "count_up": "green",
+#     "count_down": "red",
+#     "link": "blue underline",
+# }
+
 # Value added/subtracted via signal handlers to adjust inactivity timeout (LASTFM_INACTIVITY_CHECK); in seconds
 LASTFM_INACTIVITY_CHECK_SIGNAL_VALUE = 30  # 30 seconds
 
@@ -598,6 +651,8 @@ DISABLE_LOGGING = False
 ASCII_LOG_SEPARATORS = "Auto"
 HORIZONTAL_LINE = 0
 CLEAR_SCREEN = False
+COLORED_OUTPUT = False
+COLOR_THEME: dict = {}
 LASTFM_INACTIVITY_CHECK_SIGNAL_VALUE = 0
 ENABLE_GENIUS_LYRICS_URL = False
 ENABLE_AZLYRICS_URL = False
@@ -795,6 +850,10 @@ try:
 except ModuleNotFoundError:
     raise SystemExit(f"Error: Couldn't find the pyLast library !\n\nTo install it, run:\n    pip install pylast\n\nOnce installed, re-run this tool.\n\nGuide: {INSTALL_GUIDE_URL}")
 from urllib.parse import quote_plus, quote, unquote, urljoin, urlsplit
+try:
+    from colorama import init as colorama_init  # type: ignore[import]
+except ImportError:
+    colorama_init = None
 import subprocess
 import platform
 import re
@@ -885,15 +944,412 @@ def normalize_log_separators(message):
 # Matches the escape sequences a terminal acts on: CSI, OSC and the two-character forms
 ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[@-Z\\-_])")
 
-# Drops every remaining control character except tab and newline
+# The only escape sequence this tool emits is an SGR colour/style change, so it is the only one worth keeping
+SGR_SEQUENCE_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+# Drops every remaining control character except tab and newline. A carriage return would let Last.fm-supplied
+# text overwrite an already printed line, and the doctor progress line that uses one writes to the terminal directly
 TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 
 
 # Removes terminal control sequences, since track, artist and profile text arrives from Last.fm rather than the tool
+# An SGR colour change is kept, because this tool's own colours re-enter the same writer and cannot be told apart
+# here from an upstream one. A bare SGR sequence only changes how the rest of the line looks, so it stays inert
 def sanitize_terminal_text(message):
     if not isinstance(message, str) or not message:
         return message
-    return TERMINAL_CONTROL_RE.sub("", ANSI_ESCAPE_RE.sub("", message))
+    parts = []
+    position = 0
+    for match in SGR_SEQUENCE_RE.finditer(message):
+        parts.append(TERMINAL_CONTROL_RE.sub("", ANSI_ESCAPE_RE.sub("", message[position:match.start()])))
+        parts.append(match.group(0))
+        position = match.end()
+    parts.append(TERMINAL_CONTROL_RE.sub("", ANSI_ESCAPE_RE.sub("", message[position:])))
+    return "".join(parts)
+
+
+# Internal flag and style map for colour handling
+COLOR_ENABLED = False
+_COLOR_STYLES: dict = {}
+
+# Default built-in colour theme. Values can be overridden via COLOR_THEME in config
+DEFAULT_COLOR_THEME = {
+    # Headings and commands the wizard tells you to run
+    "header": "bright_cyan",
+    "section": "bright_white",
+    # Identity
+    "username": "bright_cyan underline",
+    "id": "bright_magenta",
+    # Listening status values
+    "status_active": "green",
+    "status_inactive": "red",
+    "status_offline": "red",
+    # Music info
+    "artist": "bright_yellow",
+    "track": "bright_yellow",
+    "album": "yellow",
+    "duration": "green",
+    # Activity info
+    "status_change": "yellow",
+    # Misc
+    "timestamp_label": "",
+    "timestamp_value": "cyan",
+    "info": "cyan",
+    "warning": "yellow",
+    "error": "red",
+    "signal": "yellow",
+    "email": "bright_cyan",
+    "webhook": "bright_blue",
+    # Dates
+    "date": "magenta",
+    "date_range": "magenta",
+    # Boolean values
+    "boolean_true": "green",
+    "boolean_false": "red",
+    # Counters and differences
+    "count_up": "green",
+    "count_down": "red",
+    "link": "blue underline",
+}
+
+# Styles that can paint a whole line, and the value styles a painted line can enclose. A value drawn in its
+# block's own colour would disappear inside it, so the two sets are kept disjoint. Warnings and signals are
+# not on the block list: both were yellow, which is the album colour, so they mark their own opening words
+# instead of painting the line and the values inside keep carrying the meaning
+BLOCK_STYLE_PARTS = ("error", "email", "webhook", "info")
+NAME_STYLE_PARTS = ("username", "id", "artist", "track", "album", "link")
+
+ANSI_RESET = "\033[0m"
+
+# Mapping of style names to ANSI SGR codes
+_STYLE_CODES = {
+    "bold": "1",
+    "dim": "2",
+    "underline": "4",
+    "blink": "5",
+    "black": "30",
+    "red": "31",
+    "green": "32",
+    "yellow": "33",
+    "blue": "34",
+    "magenta": "35",
+    "cyan": "36",
+    "white": "37",
+    "bright_black": "90",
+    "bright_red": "91",
+    "bright_green": "92",
+    "bright_yellow": "93",
+    "bright_blue": "94",
+    "bright_magenta": "95",
+    "bright_cyan": "96",
+    "bright_white": "97",
+}
+
+# Output labels whose value is coloured with one theme style, the longer label first so a prefix cannot win
+_LABEL_STYLES = (
+    (("Last.fm user:", "Target:"), "username"),
+    (("Last track duration:", "Duration:"), "duration"),
+    (("Last track:", "Track:"), "track"),
+    (("Last album:", "Album:"), "album"),
+)
+
+# Pre-compiled regexes used for line-level colourisation
+_FROM_TO_COUNT_RE = re.compile(r"(from\s+)(\d+)(\s+to\s+)(\d+)")
+_DIFF_COUNT_UP_RE = re.compile(r"(\(\+\d+\))")
+_DIFF_COUNT_DOWN_RE = re.compile(r"(\(-\d+\))")
+# The monitored account named inside a sentence. A Last.fm handle carries no spaces, so the name ends at the
+# first one, and the prose forms 'the user is active' or 'user to monitor' keep their next word plain
+_USER_TAG_RE = re.compile(r"((?:Last\.fm user|for user|by user|of user|Monitoring user|listened by))([\t ]+)([\w.-]{2,})")
+
+# A labelled 'user' field names its value directly, so the key=value diagnostic field 'user=john' tags any value
+_USER_FIELD_RE = re.compile(r"(\buser)(=)([\w.-]+)")
+
+# A key=value diagnostic field whose key ends in '_id' carries a machine identifier, such as a Spotify track ID
+_ID_FIELD_RE = re.compile(r"(\b[a-z][a-z_]*_id)(=)([\w.:-]+)")
+
+# The token right before a quoted value decides what it is. Only these say the value is an account name, and
+# every other quoted value this tool prints is a path, a package or a menu answer, so it stays plain
+_QUOTED_USERNAME_CONTEXT_RE = re.compile(r"\buser\s+$|\blistened by\s+$|\btracks of\s+$", re.IGNORECASE)
+_DURATION_RE = re.compile(r"~?\b[0-9]{1,20}[ \t]{1,20}(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)\b", re.IGNORECASE)
+_LONG_DATE_RE = re.compile(r"\b(?:\w{3}\s+)?\d{1,2}\s+\w{3}(?:\s+\d{2,4})?[\s,]*\d{2}:\d{2}(:\d{2})?(\s*[AP]M)?\b", re.IGNORECASE)
+_TIME_ONLY_RE = re.compile(r"(?<![\w:])(~?(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?:\s*[AP]M)?)(?![\w:])", re.IGNORECASE)
+_SHORT_RANGE_DATE_RE = re.compile(r"\(\w{3}\s+\d{1,2}\s+\w{3}\s+\d{2}:\d{2}(\s*[AP]M)?\s*-\s*\d{2}:\d{2}(\s*[AP]M)?\)", re.IGNORECASE)
+_DATE_RANGE_RE = re.compile(r"\b\w{3}\s+\d{1,2}\s+\w{3}\s+\d{2}:\d{2}(\s*[AP]M)?\s*-\s*\d{2}:\d{2}(\s*[AP]M)?\b", re.IGNORECASE)
+_HOUR_RANGE_RE = re.compile(r"\b\d{2}:\d{2}(\s*[AP]M)?\s*-\s*\d{2}:\d{2}(\s*[AP]M)?\b", re.IGNORECASE)
+# Sentence punctuation, a closing bracket or a closing quote right after a link is not part of it
+_URL_RE = re.compile(r"(https?://[^\s\]]+?)(?=[.,;:!?'\")>]*(?:[\s\]]|$))")
+_PERCENTAGE_RE = re.compile(r"\(\d{1,3}%")
+_BOOLEAN_TRUE_RE = re.compile(r"\bTrue\b|\bEnabled\b")
+_BOOLEAN_FALSE_RE = re.compile(r"\bFalse\b|\bDisabled\b")
+_NOTIFICATION_SUMMARY_STATE_RE = re.compile(r"^(\* Notifications \((?:email|webhook)\):\s+)(On|Off)(.*)$")
+# The opening word of a warning line, marked on its own so the rest of the line keeps its own value colours
+_WARNING_LABEL_RE = re.compile(r"^\*+\s*(Warning:|Caution:)")
+# The signal a handler reports, which is the one value on the line worth marking
+_SIGNAL_NAME_RE = re.compile(r"(?<=^\* Signal )(\w+)(?= received$)")
+# Words that report a problem. The same word used as a key in a 'key=value' diagnostic detail names a setting
+# such as 'timeout=15' or a counter such as 'failures=3', so it leaves its line unpainted
+_ERROR_KEYWORD_RE = re.compile(r"\b(?:failures?|failed|forbidden|timeout)\b(?!\s*=)")
+# A debug trace line records what the tool tried, including attempts that fail and are then handled, so it keeps
+# its own colours instead of being painted as the failure it reports
+_DEBUG_LINE_RE = re.compile(r"^\[debug \d{2}:\d{2}:\d{2}\]")
+# Doctor status markers, coloured with the same theme parts the sibling tools use for them
+_DOCTOR_MARK_RE = re.compile(r"^\[(PASS|WARN|FAIL|SKIP)\]")
+# Quoted names such as track and album titles. At least one word character is required so a run of punctuation
+# between two apostrophes is not read as a name. The closing quote has to be followed by whitespace, punctuation
+# or the end of the line, so a title's own apostrophe does not end it early: "Tom Clancy's Rainbow Six Siege"
+_QUOTED_CONTENT_RE = re.compile(r"(')([^\n]*?\w[^\n]*?)(')(?=[\s.,;:!?)\]]|$)")
+
+# Quoted values shaped like a file name or a filesystem path stay plain, since a log or state destination is
+# not content. Track and album titles routinely contain slashes and dots, so only these two shapes are excluded
+_QUOTED_FILE_LIKE_RE = re.compile(r"^[~.]?[\\/]|^[A-Za-z]:[\\/]|\.[A-Za-z0-9]{1,8}$")
+
+# A quoted '<name>' inside a printed command is the placeholder the reader has to replace, not a track title
+_QUOTED_PLACEHOLDER_RE = re.compile(r"^<[^<>]*>$")
+
+# A quoted command-line option is an instruction to retype, not a name
+_QUOTED_OPTION_RE = re.compile(r"^-")
+
+# A quoted piece of a URL, such as the '?code=' a prompt points at. Only a leading '?' or '&' counts, so a title
+# may end in a question mark and a title such as 'Peaches & Cream' is still a name
+_QUOTED_URL_PART_RE = re.compile(r"^[?&]|://")
+
+# Follower and following listing rows, for example "- someuser [ https://www.last.fm/user/someuser ]"
+_LIST_ITEM_NAME_RE = re.compile(r"^\s*-\s+([\w.-]+)(\s+\[)")
+_PLAYBACK_STOPPED_RE = re.compile(r"\b(SKIPPED|PAUSED)\b")
+_PLAYBACK_STARTED_RE = re.compile(r"\b(RESUMED|LOOP)\b")
+_PLAYBACK_CHANGED_RE = re.compile(r"\b(CONT)\b")
+_ACTIVE_WORD_RE = re.compile(r"\b(ACTIVE|PRIVATE MODE)\b")
+_INACTIVE_WORD_RE = re.compile(r"\b(INACTIVE)\b")
+_OFFLINE_WORD_RE = re.compile(r"\b(OFFLINE)\b")
+
+
+# Builds an ANSI escape sequence from a style description string
+def _build_ansi_sequence(style_str):
+    if not style_str:
+        return ""
+    codes = [_STYLE_CODES[part] for part in re.split(r"[+ ]+", style_str.strip().lower()) if part in _STYLE_CODES]
+    if not codes:
+        return ""
+    return f"\033[{';'.join(codes)}m"
+
+
+# Detects whether the given output stream likely supports ANSI colours
+def _stream_supports_color(stream):
+    if not hasattr(stream, "isatty") or not stream.isatty():
+        return False
+    if os.getenv("NO_COLOR"):
+        return False
+    # On Windows with colorama, skip the TERM check since colorama handles the ANSI translation itself
+    if not (colorama_init and platform.system() == "Windows"):
+        if os.getenv("TERM", "").lower() in ("", "dumb", "unknown"):
+            return False
+    # A piped stdin means the output is likely being captured, so colour codes would land in a file
+    if hasattr(sys.stdin, "isatty") and not sys.stdin.isatty():
+        return False
+    return True
+
+
+# Initializes colour handling from the configured setting and the terminal's capabilities
+def init_color_output(stream):
+    global COLOR_ENABLED, _COLOR_STYLES
+
+    # colorama is started first on Windows, since it can turn on the ANSI support the isatty check then sees
+    if colorama_init and platform.system() == "Windows":
+        try:
+            colorama_init(autoreset=False)
+        except Exception as e:
+            debug_print("Colorama initialisation", outcome="failed", error=f"{type(e).__name__}: {e}")
+
+    COLOR_ENABLED = bool(globals().get("COLORED_OUTPUT", False)) and _stream_supports_color(stream)
+
+    if not COLOR_ENABLED:
+        _COLOR_STYLES = {}
+        return
+
+    user_theme = globals().get("COLOR_THEME") if isinstance(globals().get("COLOR_THEME"), dict) else {}
+    theme = {**DEFAULT_COLOR_THEME, **(user_theme or {})}
+    _COLOR_STYLES = {name: sequence for name, sequence in ((name, _build_ansi_sequence(style)) for name, style in theme.items()) if sequence}
+
+
+# Applies a configured colour style, named by logical part, to the given text
+def colorize(part, text):
+    if not COLOR_ENABLED:
+        return text
+    start = _COLOR_STYLES.get(part)
+    if not start:
+        return text
+    return f"{start}{text}{ANSI_RESET}"
+
+
+# Splits a recognized output label from its value without applying a backtracking expression
+def _split_output_label(value, labels):
+    body = value.rstrip("\n")
+    cursor = len(body) - len(body.lstrip())
+    if body[cursor:cursor + 1] == "*":
+        cursor += 1
+        cursor += len(body[cursor:]) - len(body[cursor:].lstrip())
+    for label in labels:
+        if not body.startswith(label, cursor):
+            continue
+        value_start = cursor + len(label)
+        value_start += len(body[value_start:]) - len(body[value_start:].lstrip())
+        if value_start == cursor + len(label):
+            return None
+        return body[:value_start], body[value_start:]
+    return None
+
+
+# Applies a whole-line style while preserving the highlights already inside the line
+def _apply_style_nested(line, style_name):
+    start_style = _COLOR_STYLES.get(style_name)
+    if not start_style:
+        return line
+    # An internal reset returns to the block style instead of to plain text, so the rest of the line keeps it
+    line = f"{start_style}{line}{ANSI_RESET}"
+    line = line.replace(ANSI_RESET, f"{ANSI_RESET}{start_style}")
+    if line.endswith(f"{ANSI_RESET}{start_style}"):
+        line = line[:-len(start_style)]
+    return line
+
+
+# Applies one substitution only to the parts of a line that are not already inside a colour span, so a later
+# rule cannot reclaim text an earlier rule has already coloured
+def _sub_outside_color(pattern, replacement, line):
+    if ANSI_RESET not in line:
+        return pattern.sub(replacement, line)
+    parts = []
+    position = 0
+    inside = False
+    for match in SGR_SEQUENCE_RE.finditer(line):
+        segment = line[position:match.start()]
+        parts.append(segment if inside else pattern.sub(replacement, segment))
+        parts.append(match.group(0))
+        inside = match.group(0) != ANSI_RESET
+        position = match.end()
+    trailing = line[position:]
+    parts.append(trailing if inside else pattern.sub(replacement, trailing))
+    return "".join(parts)
+
+
+# Colours one quoted account name, leaving the value alone when its shape or the token before it says otherwise
+def _colorize_quoted_name(match):
+    name = match.group(2)
+    if not _QUOTED_USERNAME_CONTEXT_RE.search(match.string[:match.start()]):
+        return match.group(0)
+    if _QUOTED_FILE_LIKE_RE.search(name) or _QUOTED_PLACEHOLDER_RE.match(name) or _QUOTED_OPTION_RE.match(name) or _QUOTED_URL_PART_RE.search(name):
+        return match.group(0)
+    return f"{match.group(1)}{colorize('username', name)}{match.group(3)}"
+
+
+# Applies the colour rules to a single output line
+def _colorize_line(line):
+    lowered = line.lower()
+
+    # Notification summary rows carry their own On/Off state word
+    notification_match = _NOTIFICATION_SUMMARY_STATE_RE.match(line)
+    if notification_match:
+        prefix, state, suffix = notification_match.groups()
+        return f"{prefix}{colorize('boolean_true' if state == 'On' else 'boolean_false', state)}{suffix}"
+
+    # Doctor status markers keep the rest of their line plain so long labels stay readable
+    doctor_match = _DOCTOR_MARK_RE.match(line)
+    if doctor_match:
+        return colorize(DOCTOR_MARK_STYLES[doctor_match.group(1)], doctor_match.group(0)) + line[doctor_match.end():]
+
+    # Timestamp lines get a plain label and a coloured value
+    labeled_value = _split_output_label(line, ("Timestamp:", "Liveness check, timestamp:"))
+    if labeled_value:
+        label, rest = labeled_value
+        return f"{colorize('timestamp_label', label)}{colorize('timestamp_value', rest)}" + ("\n" if line.endswith("\n") else "")
+
+    # Any '<something> URL:' row is a link, checked before the label table so 'Last.fm album URL:' is not an album
+    if _split_output_label(line, ("URL:",)) or " URL:" in line:
+        return _sub_outside_color(_URL_RE, lambda mo: colorize("link", mo.group(0)), line)
+
+    # Labelled music rows keep their label plain and colour only the value
+    for labels, style_name in _LABEL_STYLES:
+        labeled_value = _split_output_label(line, labels)
+        if not labeled_value:
+            continue
+        label, rest = labeled_value
+        return f"{label}{colorize(style_name, rest)}" + ("\n" if line.endswith("\n") else "")
+
+    # A follower or following listing row names one account followed by its profile link
+    line = _sub_outside_color(_LIST_ITEM_NAME_RE, lambda mo: f"{mo.group(0)[:mo.start(1) - mo.start(0)]}{colorize('username', mo.group(1))}{mo.group(2)}", line)
+
+    # Highlight the monitored account named inside a sentence, and the identifiers in a diagnostic field
+    line = _sub_outside_color(_USER_TAG_RE, lambda mo: f"{mo.group(1)}{mo.group(2)}{colorize('username', mo.group(3))}", line)
+    line = _sub_outside_color(_USER_FIELD_RE, lambda mo: f"{mo.group(1)}{mo.group(2)}{colorize('username', mo.group(3))}", line)
+    line = _sub_outside_color(_ID_FIELD_RE, lambda mo: f"{mo.group(1)}{mo.group(2)}{colorize('id', mo.group(3))}", line)
+
+    # Highlight counters and their differences
+    line = _sub_outside_color(_FROM_TO_COUNT_RE, lambda mo: f"{mo.group(1)}{colorize('count_up' if int(mo.group(4)) >= int(mo.group(2)) else 'count_down', mo.group(2))}{mo.group(3)}{colorize('count_up' if int(mo.group(4)) >= int(mo.group(2)) else 'count_down', mo.group(4))}", line)
+    line = _sub_outside_color(_DIFF_COUNT_UP_RE, lambda mo: colorize("count_up", mo.group(0)), line)
+    line = _sub_outside_color(_DIFF_COUNT_DOWN_RE, lambda mo: colorize("count_down", mo.group(0)), line)
+
+    # Highlight durations and listening percentages
+    line = _sub_outside_color(_DURATION_RE, lambda mo: colorize("duration", mo.group(0)), line)
+    line = _sub_outside_color(_PERCENTAGE_RE, lambda mo: f"({colorize('count_up', mo.group(0)[1:])}", line)
+
+    # Highlight date ranges before single dates so a range is not split into two dates
+    line = _sub_outside_color(_SHORT_RANGE_DATE_RE, lambda mo: colorize("date_range", mo.group(0)), line)
+    line = _sub_outside_color(_DATE_RANGE_RE, lambda mo: colorize("date_range", mo.group(0)), line)
+    line = _sub_outside_color(_HOUR_RANGE_RE, lambda mo: colorize("date_range", mo.group(0)), line)
+    line = _sub_outside_color(_LONG_DATE_RE, lambda mo: colorize("date", mo.group(0)), line)
+    line = _sub_outside_color(_TIME_ONLY_RE, lambda mo: colorize("date", mo.group(0)), line)
+
+    # Highlight links
+    line = _sub_outside_color(_URL_RE, lambda mo: colorize("link", mo.group(0)), line)
+
+    # Highlight a quoted account name. A line that is only a quoted string is a free-form description, so it
+    # stays plain instead of being read as a name
+    if not line.lstrip().startswith("'"):
+        line = _sub_outside_color(_QUOTED_CONTENT_RE, _colorize_quoted_name, line)
+
+    # Highlight boolean values
+    line = _sub_outside_color(_BOOLEAN_TRUE_RE, lambda mo: colorize("boolean_true", mo.group(0)), line)
+    line = _sub_outside_color(_BOOLEAN_FALSE_RE, lambda mo: colorize("boolean_false", mo.group(0)), line)
+
+    # Mark the opening word of a warning and the name of a reported signal, rather than painting the whole line
+    line = _sub_outside_color(_WARNING_LABEL_RE, lambda mo: mo.group(0)[:mo.start(1) - mo.start(0)] + colorize("warning", mo.group(1)), line)
+    line = _sub_outside_color(_SIGNAL_NAME_RE, lambda mo: colorize("signal", mo.group(0)), line)
+
+    # Highlight playback and presence keywords
+    line = _sub_outside_color(_PLAYBACK_STOPPED_RE, lambda mo: colorize("status_inactive", mo.group(0)), line)
+    line = _sub_outside_color(_PLAYBACK_STARTED_RE, lambda mo: colorize("status_active", mo.group(0)), line)
+    line = _sub_outside_color(_PLAYBACK_CHANGED_RE, lambda mo: colorize("status_change", mo.group(0)), line)
+    line = _sub_outside_color(_ACTIVE_WORD_RE, lambda mo: colorize("status_active", mo.group(0)), line)
+    line = _sub_outside_color(_INACTIVE_WORD_RE, lambda mo: colorize("status_inactive", mo.group(0)), line)
+    line = _sub_outside_color(_OFFLINE_WORD_RE, lambda mo: colorize("status_offline", mo.group(0)), line)
+
+    # Whole-line highlighting, applied last so the colours added above survive the nesting logic
+    is_debug_line = bool(_DEBUG_LINE_RE.match(lowered))
+    is_error = not is_debug_line and (bool(_ERROR_KEYWORD_RE.search(lowered)) or "critical:" in lowered or ("* error" in lowered and "[errors =" not in lowered))
+
+    if lowered.startswith("to fix:"):
+        line = _apply_style_nested(line, "info")
+    elif is_error:
+        line = _apply_style_nested(line, "error")
+    elif "sending email" in lowered:
+        line = _apply_style_nested(line, "email")
+    elif "sending webhook" in lowered:
+        line = _apply_style_nested(line, "webhook")
+
+    return line
+
+
+# Applies colourisation to multi-line text, preserving line breaks
+def apply_color_to_text(text):
+    if not COLOR_ENABLED or not isinstance(text, str):
+        return text
+    parts = []
+    for chunk in text.splitlines(keepends=True):
+        if chunk.endswith(("\n", "\r")):
+            stripped = chunk.rstrip("\r\n")
+            parts.append(_colorize_line(stripped) + chunk[len(stripped):])
+        else:
+            parts.append(_colorize_line(chunk))
+    return "".join(parts)
 
 
 # Wraps stdout while logging is disabled, so output is sanitized on the path that keeps no log file
@@ -902,9 +1358,9 @@ class TerminalStream(object):
     def __init__(self, stream):
         self.terminal = stream
 
-    # Writes one sanitized message to the terminal
+    # Writes one sanitized and coloured message to the terminal
     def write(self, message):
-        self.terminal.write(sanitize_terminal_text(sanitize_error_text(message)))
+        self.terminal.write(apply_color_to_text(sanitize_terminal_text(sanitize_error_text(message))))
         self.terminal.flush()
 
     # Writes one terminal-only message, which is every message this stream receives
@@ -932,19 +1388,20 @@ class Logger(object):
 
     def write(self, message):
         safe_message = sanitize_terminal_text(sanitize_error_text(message))
-        self.terminal.write(safe_message)
-        self.logfile.write(normalize_log_separators(safe_message.expandtabs(8)))
+        self.terminal.write(apply_color_to_text(safe_message))
+        # Colour codes are stripped so the log file stays plain text whatever the terminal was shown
+        self.logfile.write(normalize_log_separators(ANSI_ESCAPE_RE.sub("", safe_message).expandtabs(8)))
         self.terminal.flush()
         self.logfile.flush()
 
     # Writes one message only to the terminal, so a line that orients a reader at a screen stays out of the log
     def terminal_only(self, message):
-        self.terminal.write(sanitize_terminal_text(sanitize_error_text(message)))
+        self.terminal.write(apply_color_to_text(sanitize_terminal_text(sanitize_error_text(message))))
         self.terminal.flush()
 
     # Writes one message only to the log, so the file keeps the full view whichever one the terminal was shown
     def log_only(self, message):
-        self.logfile.write(normalize_log_separators(sanitize_terminal_text(sanitize_error_text(message)).expandtabs(8)))
+        self.logfile.write(normalize_log_separators(ANSI_ESCAPE_RE.sub("", sanitize_terminal_text(sanitize_error_text(message))).expandtabs(8)))
         self.logfile.flush()
 
     def flush(self):
@@ -3525,14 +3982,14 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
     # Print table header
     if track_entries:
         print()
-        hdr = (
+        hdr = colorize("section", (
             f"{'#'.ljust(w_num)}  "
             f"{'Day'.ljust(w_day)}  "
             f"{'Date/Time'.ljust(w_date)}  "
             f"{'Artist'.ljust(w_artist)}  "
             f"{'Title'.ljust(w_title)}  "
             f"{'Album'.ljust(w_album)}"
-        )
+        ))
         sep = (
             f"{'-' * w_num}  "
             f"{'-' * w_day}  "
@@ -3558,13 +4015,14 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
                 title_fmt = _shorten_middle(entry['title'], w_title)
             album_fmt = _shorten_middle(entry['album'], w_album)
 
+            # Each cell is padded first and coloured second, so a colour code never counts toward a column width
             row = (
                 f"{str(entry['num']).ljust(w_num)}  "
-                f"{entry['day'].ljust(w_day)}  "
-                f"{entry['date'].ljust(w_date)}  "
-                f"{artist_fmt.ljust(w_artist)}  "
-                f"{title_fmt.ljust(w_title)}  "
-                f"{album_fmt.ljust(w_album)}"
+                f"{colorize('date', entry['day'].ljust(w_day))}  "
+                f"{colorize('date', entry['date'].ljust(w_date))}  "
+                f"{colorize('artist', artist_fmt.ljust(w_artist))}  "
+                f"{colorize('track', title_fmt.ljust(w_title))}  "
+                f"{colorize('album', album_fmt.ljust(w_album))}"
             )
             print(row)
 
@@ -4420,6 +4878,12 @@ def find_config_file(cli_path=None):
     return None
 
 
+# Keeps argparse from colouring its own help, so the help screen is coloured by this tool alone and --no-color is
+# not left with a second palette to silence. From Python 3.14 argparse colours the help by default on a terminal
+def argparse_color_kwargs() -> dict[str, Any]:
+    return {"color": False} if sys.version_info >= (3, 14) else {}
+
+
 # Reads the --config-file path straight from the raw arguments, for the settings needed before argparse runs
 def early_config_file_argument(arguments=None):
     values = list(sys.argv[1:] if arguments is None else arguments)
@@ -4433,7 +4897,7 @@ def early_config_file_argument(arguments=None):
 
 # Applies the terminal settings needed before argument parsing, leaving any failure to normal config loading
 def apply_early_output_config():
-    global CLEAR_SCREEN
+    global CLEAR_SCREEN, COLORED_OUTPUT
     try:
         cli_path = early_config_file_argument()
         config_path = find_config_file(os.path.expanduser(cli_path) if cli_path else None)
@@ -4444,16 +4908,22 @@ def apply_early_output_config():
         return
     if isinstance(values.get("CLEAR_SCREEN"), bool):
         CLEAR_SCREEN = values["CLEAR_SCREEN"]
+    if isinstance(values.get("COLORED_OUTPUT"), bool):
+        COLORED_OUTPUT = values["COLORED_OUTPUT"]
 
 
 # Settings an older version wrote that this version no longer defines, ignored instead of rejected
 RETIRED_CONFIG_SETTINGS = frozenset(())
 
+# Settings the template ships commented out, so the tool's own defaults apply until a user uncomments them.
+# They are still accepted from a configuration file, since the template is also the settings allowlist
+COMMENTED_CONFIG_SETTINGS = frozenset({"COLOR_THEME"})
+
 
 # Collects the setting names the built-in configuration template defines
 def _config_allowed_names():
     template_tree = ast.parse(CONFIG_BLOCK, "<built-in-config>", "exec")
-    return frozenset(statement.targets[0].id for statement in template_tree.body if isinstance(statement, ast.Assign) and len(statement.targets) == 1 and isinstance(statement.targets[0], ast.Name))
+    return frozenset(statement.targets[0].id for statement in template_tree.body if isinstance(statement, ast.Assign) and len(statement.targets) == 1 and isinstance(statement.targets[0], ast.Name)) | COMMENTED_CONFIG_SETTINGS
 
 
 # Returns the values the built-in template ships, so a section the user declines is written as shipped
@@ -6153,6 +6623,9 @@ DOCTOR_DELIVERY_SECTION = "Optional delivery tests"
 # Width of the transient progress line currently on screen, so the next write can erase exactly what it drew
 DOCTOR_PROGRESS_WIDTH = 0
 
+# The theme entry each doctor result marker is drawn in, so a failure reads as one at a glance
+DOCTOR_MARK_STYLES = {"PASS": "boolean_true", "WARN": "warning", "FAIL": "error", "SKIP": "info"}
+
 
 # One doctor result, held until the whole report is rendered
 DoctorCheck = namedtuple("DoctorCheck", ["section", "status", "label", "detail", "advice"])
@@ -6215,11 +6688,16 @@ def doctor_check_environment(version_info=None, spec_finder=None):
             advice = make_recovery_advice("dependency.missing", f"Required dependency {package_name} is missing", recovery_fix_with_guide(f'Install it with: {install_dependency_command(package_name)}', INSTALL_GUIDE_URL), False)
             checks.append(make_doctor_check("Environment", "FAIL", advice.summary, advice=advice))
 
-    for module_name, package_name, purpose in (
+    optional = [
         ("dotenv", "python-dotenv", "Secrets can only come from environment variables or the configuration file"),
         ("spotipy", "spotipy", "The Spotify OAuth app metadata backend is unavailable, leaving the anonymous web player"),
         ("bs4", "beautifulsoup4", "Follower, following and profile tracking cannot run"),
-    ):
+    ]
+    # The classic Command Prompt is the only place this library changes anything, so a machine it cannot
+    # affect is not warned about a package it does not need
+    if platform.system() == "Windows":
+        optional.append(("colorama", "colorama", "Coloured output may not render in the classic Windows Command Prompt"))
+    for module_name, package_name, purpose in optional:
         if module_present(module_name):
             checks.append(make_doctor_check("Environment", "PASS", f"Optional dependency {package_name} is installed"))
         else:
@@ -6478,9 +6956,14 @@ def doctor_check_webhook_notifications(report):
     return [make_doctor_check("Notifications", "PASS", f"{WEBHOOK_READY_CHECK_LABEL} for {webhook_provider_display_name()}", f"Alerts: {', '.join(selected_categories)}. The private link was not displayed. No webhook was sent during this passive check")]
 
 
-# Renders one doctor result marker, kept as one function so colour lands in a single place later
+# Colours every link in a doctor detail line, since the report is printed before the line colouriser is installed
+def _colorize_doctor_links(text):
+    return _sub_outside_color(_URL_RE, lambda mo: colorize("link", mo.group(0)), text)
+
+
+# Renders one doctor result marker in the colour its status calls for
 def render_doctor_marker(status):
-    return f"[{status}]"
+    return colorize(DOCTOR_MARK_STYLES.get(status, "info"), f"[{status}]")
 
 
 # Prints one result the way the report renders it, so a row printed after the report matches the rows above it
@@ -6494,18 +6977,20 @@ def print_doctor_check(check):
 def render_doctor_sections(report):
     # The install method is context rather than a check: it cannot fail, so it is stated once here
     # instead of occupying a result row that no marker describes
-    lines = ["Doctor", f"Detected install method: {install_method()}"]
+    lines = [colorize("header", "Doctor"), f"Detected install method: {colorize('username', install_method())}"]
     for section in DOCTOR_SECTIONS:
         section_checks = [check for check in report.checks if check.section == section]
         if not section_checks:
             continue
-        lines.extend(("", section))
+        lines.extend(("", colorize("section", section)))
         for check in section_checks:
             lines.append(f"{render_doctor_marker(check.status)} {check.label}")
             if check.detail:
-                lines.append(f"  {check.detail}")
+                lines.append(f"  {_colorize_doctor_links(check.detail)}")
             if check.status != "PASS" and check.advice is not None:
-                lines.extend(f"  {advice_line}" for advice_line in f"To fix: {check.advice.fix}".splitlines())
+                # The fix carries its own guide line, so each line is indented and styled on its own rather
+                # than leaving one colour sequence open across the newline
+                lines.extend(f"  {colorize('info', advice_line)}" for advice_line in f"To fix: {check.advice.fix}".splitlines())
     return sanitize_error_text("\n".join(lines))
 
 
@@ -6514,12 +6999,12 @@ def render_doctor_summary(checks):
     failures = sum(check.status == "FAIL" for check in checks)
     warnings = sum(check.status == "WARN" for check in checks)
     if failures:
-        summary_line = f"  {failures} check(s) failed, {warnings} warning(s). Fix the failures above before relying on the tool."
+        summary_line = colorize("error", f"  {failures} check(s) failed, {warnings} warning(s). Fix the failures above before relying on the tool.")
     elif warnings:
-        summary_line = f"  All critical checks passed with {warnings} warning(s). Review the warnings above."
+        summary_line = colorize("warning", f"  All critical checks passed with {warnings} warning(s). Review the warnings above.")
     else:
-        summary_line = "  All checks passed. You are good to go!"
-    return "\n".join(("", "Summary", summary_line, "", f"Guide: {DOCTOR_GUIDE_URL}"))
+        summary_line = colorize("boolean_true", "  All checks passed. You are good to go!")
+    return "\n".join(("", colorize("header", "Summary"), summary_line, "", colorize("info", f"Guide: {DOCTOR_GUIDE_URL}")))
 
 
 # Returns the real terminal underneath the installed stream, so progress can move the cursor safely
@@ -6536,7 +7021,7 @@ def _doctor_progress(label):
     if terminal.isatty():
         if DOCTOR_PROGRESS_WIDTH:
             terminal.write("\r" + (" " * DOCTOR_PROGRESS_WIDTH) + "\r")
-        line = f"* Checking {label} ..."
+        line = f"* Checking {ANSI_ESCAPE_RE.sub('', sanitize_terminal_text(label))} ..."
         DOCTOR_PROGRESS_WIDTH = len(line)
         terminal.write("\r" + line)
         terminal.flush()
@@ -6562,7 +7047,7 @@ def _doctor_ask_yes_no(question, input_func=None):
     prompt = input if input_func is None else input_func
     while True:
         try:
-            value = prompt(f"{question} [y/N]: ").strip().casefold()
+            value = prompt(colorize("info", f"{question} [y/N]: ")).strip().casefold()
         except EOFError:
             print("\nDelivery test skipped.")
             return False
@@ -6584,7 +7069,7 @@ def _doctor_offer_notification_tests(report, input_func=None):
         return []
     if not report.email_ready and not report.webhook_ready:
         return []
-    print("\n" + DOCTOR_DELIVERY_SECTION + "\n")
+    print("\n" + colorize("section", DOCTOR_DELIVERY_SECTION) + "\n")
     print("Doctor will not write files. Each approved test sends one real message.\n")
     checks = []
     if report.email_ready:
@@ -6703,6 +7188,7 @@ def build_startup_summary(target=None, config_path=None, env_path=None, log_path
         StartupSummaryRow("Secrets from command line", ", ".join(grouped_secrets.get("command line", [])) or "None"),
         StartupSummaryRow("TLS verification", "On" if VERIFY_SSL else "Off, server certificates are not checked", concise=not VERIFY_SSL),
         StartupSummaryRow("ASCII log separators", f"{ascii_log_separators_enabled()} (mode: {ASCII_LOG_SEPARATORS})"),
+        StartupSummaryRow("Coloured output", f"{COLOR_ENABLED} (setting: {COLORED_OUTPUT})"),
         StartupSummaryRow("Verbose mode", str(VERBOSE_MODE), concise=bool(VERBOSE_MODE)),
         StartupSummaryRow("Debug mode", str(DEBUG_MODE), concise=bool(DEBUG_MODE)),
         # Points at the two modes for a reader who does not know they exist, so the full view drops it
@@ -6755,17 +7241,17 @@ def help_examples():
 # Prints one labelled command on its own indented line, the shared shape across these tools
 def _wizard_print_command(label, command, suffix=""):
     print(label)
-    print(f"    {command}{suffix}\n")
+    print(f"    {colorize('section', command)}{colorize('info', suffix) if suffix else ''}\n")
 
 
 # Prints the command that starts monitoring with the files this run checked, so a report read on its own
 # ends with the next action rather than leaving the reader to assemble the command
 def print_doctor_next_steps(target_value=None, doctor_exit=0):
-    print("\nNext steps\n")
+    print(colorize("header", "\nNext steps\n"))
     label = "After Doctor passes, start monitoring:" if doctor_exit else "Start monitoring:"
     _wizard_print_command(label, render_command([target_value] if target_value else ['<lastfm_username>']))
     # No trailing blank line: the command printer already left one and the report must not end on two
-    print(f"Guide: {QUICK_START_GUIDE_URL}")
+    print(f"Guide: {colorize('link', QUICK_START_GUIDE_URL)}")
 
 
 # Prints the commands a newcomer needs next, instead of an argparse usage error
@@ -6777,14 +7263,14 @@ def print_welcome_screen(input_func=None, interactive=None):
     _wizard_print_command("Easiest start (guided setup wizard):", render_command(["--setup"], include_paths=False), setup_suffix)
     _wizard_print_command("Check setup before monitoring:", render_command(["--doctor", "<lastfm_username>"], include_paths=False))
     _wizard_print_command("Show recent tracks and exit:", render_command(["-l", "<lastfm_username>"], include_paths=False))
-    print(f"Full options: {render_command(['--help'], include_paths=False)}")
-    print(f"\nGuide:        {QUICK_START_GUIDE_URL}\n")
+    print(f"Full options: {colorize('section', render_command(['--help'], include_paths=False))}")
+    print(f"\nGuide:        {colorize('link', QUICK_START_GUIDE_URL)}\n")
     if terminal_is_interactive:
         try:
             start_setup = _wizard_ask_yes_no("Run the guided setup wizard now?", default=True, input_func=input_func)
         except (EOFError, KeyboardInterrupt):
             # This prompt sits outside the wizard, which handles its own interrupts
-            print("Setup cancelled.")
+            print(colorize("warning", "Setup cancelled."))
             return 1
         if start_setup:
             print()
@@ -6877,7 +7363,7 @@ def _wizard_print_default_guidance():
 def _wizard_input(prompt_text, input_func=None):
     prompt = input if input_func is None else input_func
     try:
-        return read_interactively(prompt, prompt_text)
+        return read_interactively(prompt, colorize("info", prompt_text))
     except (EOFError, KeyboardInterrupt):
         # The interrupted prompt owns the line break, so every handler prints its message alone
         print()
@@ -6930,7 +7416,7 @@ def _wizard_ask_choice(question, options, default_index=0, input_func=None):
     print(question)
     for index, (label, description) in enumerate(options, 1):
         marker = " (default)" if index - 1 == default_index else ""
-        print(f"  {index}. {label}{marker}")
+        print(f"  {colorize('username', str(index))}. {label}{colorize('info', marker)}")
         if description:
             for line in description.splitlines():
                 print(f"     {line}")
@@ -6997,7 +7483,7 @@ def _wizard_ask_secret(question, getpass_func=None):
     hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
     try:
         with debug_output_suppressed():
-            return str(read_secret_interactively(hidden_prompt, f"{question}: ")).strip()
+            return str(read_secret_interactively(hidden_prompt, colorize("info", f"{question}: "))).strip()
     except (EOFError, KeyboardInterrupt):
         print()
         raise
@@ -7625,11 +8111,33 @@ def _wizard_edit_setup_section(state, input_func=None, getpass_func=None):
     collectors[name]()
 
 
+# The theme part each setup summary row draws its value in, for rows whose value has a known kind
+WIZARD_SUMMARY_VALUE_STYLES = {
+    "Target": "username",
+    "Polling interval while idle": "duration",
+    "Polling interval while listening": "duration",
+    "Inactivity threshold": "duration",
+}
+
+
+# Colours one setup summary value from its row label
+def _wizard_summary_value(label, value):
+    text = str(value)
+    part = WIZARD_SUMMARY_VALUE_STYLES.get(label)
+    if part:
+        return colorize(part, text)
+    if text.startswith("enabled") or text in ("complete", "yes"):
+        return colorize("boolean_true", text)
+    if text in ("disabled", "incomplete", "no", "none", "not set"):
+        return colorize("boolean_false", text)
+    return text
+
+
 # Prints one aligned label and value block, so every summary row lines up
 def _wizard_print_summary_rows(rows):
     width = max(len(label) for label, _ in rows) + 1
     for label, value in rows:
-        print(f"  {(label + ':'):<{width}} {value}")
+        print(f"  {(label + ':'):<{width}} {_wizard_summary_value(label, value)}")
 
 
 # Names the alerts one channel will send, or says none
@@ -7666,7 +8174,7 @@ def _wizard_print_setup_summary(state):
         ("Dotenv destination", state.env_path),
         ("Install method", install_method()),
     ]
-    print("\nSetup summary\n")
+    print(colorize("header", "\nSetup summary\n"))
     _wizard_print_summary_rows(rows)
 
 
@@ -7692,7 +8200,7 @@ def _wizard_review_setup(state, input_func=None, getpass_func=None):
 
 # Prints where setup will write and which install method the printed commands are written for
 def _wizard_print_setup_destinations(method, config_path, env_path):
-    print(f"Detected install method: {method}")
+    print(f"Detected install method: {colorize('username', method)}")
     print(f"Configuration:          {config_path}")
     print(f"Dotenv:                 {env_path}\n")
 
@@ -7759,7 +8267,7 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
         print_recovery_error(exc, context="file", detail=str(exc))
         return 1
 
-    print("Setup Wizard\n")
+    print(colorize("header", "Setup Wizard\n"))
     print("This asks a few questions and writes a ready-to-run configuration.")
     _wizard_print_default_guidance()
     print("Secrets go to the dotenv file. Non-secret settings go to the config file.")
@@ -7775,7 +8283,7 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
         config_existed = Path(config_path).exists()
         chosen_config = _wizard_choose_config_destination(config_path, input_func=input_func)
         if chosen_config is None:
-            print("\nSetup cancelled. Destination files were not changed.")
+            print("\n" + colorize("warning", "Setup cancelled. Destination files were not changed."))
             return 1
         state.config_path = chosen_config
         # A destination nothing was asked about printed nothing, so the separator would leave a blank gap
@@ -7797,10 +8305,10 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
         print()
         _wizard_collect_webhook_section(state, input_func=input_func, getpass_func=getpass_func)
         if not _wizard_review_setup(state, input_func=input_func, getpass_func=getpass_func):
-            print("\nSetup cancelled. Destination files were not changed.")
+            print("\n" + colorize("warning", "Setup cancelled. Destination files were not changed."))
             return 1
     except (EOFError, KeyboardInterrupt):
-        print("Setup cancelled. Destination files were not changed.")
+        print(colorize("warning", "Setup cancelled. Destination files were not changed."))
         return 1
 
     # Everything above only filled the state, so this is the first and only point anything reaches disk
@@ -7818,7 +8326,7 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
             print_recovery_error(exc, context="file", detail=f"Could not write secrets to '{state.env_path}'")
             return 1
 
-    print("\nSaved files\n")
+    print(colorize("header", "\nSaved files\n"))
     print(f"  Configuration: {state.config_path}")
     if backup_path:
         print(f"  Backup:        {backup_path}")
@@ -7835,12 +8343,12 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
             doctor_exit = run_doctor(target_value=state.target, config_path=str(state.config_path), env_path=str(state.env_path) if dotenv_path else None)
     except (EOFError, KeyboardInterrupt):
         # The files are already written, so an interrupt here only skips the optional check
-        print("Setup is saved. Use the commands below when ready.")
+        print(colorize("warning", "Setup is saved. Use the commands below when ready."))
 
     env_argument = str(state.env_path) if dotenv_path else ""
     # A persisted target is already in the config file, so the printed commands stay short
     target_arguments = [] if state.persist_target or not state.target else [state.target]
-    print("\nNext steps\n")
+    print(colorize("header", "\nNext steps\n"))
     _wizard_print_command("Check setup again:", render_command(["--doctor"] + target_arguments, config_path=str(state.config_path), env_path=env_argument))
     start_label = "After Doctor passes, start monitoring:" if doctor_exit not in (None, 0) else "Start monitoring:"
     _wizard_print_command(start_label, render_command(target_arguments, config_path=str(state.config_path), env_path=env_argument))
@@ -7851,7 +8359,7 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
         start_monitoring = bool(state.target and doctor_exit == 0 and _wizard_ask_yes_no("Start monitoring now? Monitoring will continue until Ctrl+C.", default=True, input_func=input_func))
     except (EOFError, KeyboardInterrupt):
         # The files are already written, so an interrupt here only skips the optional launch
-        print("Setup is saved. Start monitoring with the command above when ready.")
+        print(colorize("warning", "Setup is saved. Start monitoring with the command above when ready."))
         return 0
     if start_monitoring:
         launch_arguments = _wizard_local_command_args(target=None if state.persist_target else state.target, config_path=state.config_path, env_path=state.env_path if dotenv_path else None)
@@ -8005,7 +8513,7 @@ def apply_cli_overrides(args):
 
 # Runs the command-line interface
 def main():
-    global CLI_CONFIG_PATH, CONFIG_DISCOVERY_DISABLED, DOTENV_FILE, CLEAR_SCREEN, LIVENESS_REMINDER_SECONDS, LASTFM_USERNAME, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_PROFILE_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, PROFILE_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, VERBOSE_MODE, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
+    global CLI_CONFIG_PATH, CONFIG_DISCOVERY_DISABLED, DOTENV_FILE, CLEAR_SCREEN, COLORED_OUTPUT, COLOR_THEME, LIVENESS_REMINDER_SECONDS, LASTFM_USERNAME, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_PROFILE_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, PROFILE_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, VERBOSE_MODE, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
 
     if "--generate-config" in sys.argv and not any(flag in sys.argv for flag in SECRET_ACTION_FLAGS):
         config_content = CONFIG_BLOCK.strip("\n") + "\n"
@@ -8043,24 +8551,30 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # The screen clearing runs before argparse, so its setting is resolved from the config file
-    # first rather than from the built-in default alone
+    # The screen clearing and the version line both run before argparse, so the settings that decide
+    # them are resolved from the config file first rather than from the built-in defaults alone
     apply_early_output_config()
 
-    # Read straight from sys.argv because argparse has not run yet, and the screen is cleared before it does
+    # Read straight from sys.argv because argparse has not run yet, and the screen is cleared and the
+    # version line printed before it does. Debug mode is read first so it also traces the colour setup
     if "--debug" in sys.argv:
         DEBUG_MODE = True
+
+    if "--no-color" in sys.argv:
+        COLORED_OUTPUT = False
+
+    init_color_output(stdout_bck)
 
     if CLEAR_SCREEN and DEBUG_MODE:
         debug_print("Terminal screen clear", outcome="skipped", reason="debug mode is active")
 
     clear_screen(CLEAR_SCREEN and not keep_terminal_history() and not DEBUG_MODE)
 
-    print(f"Last.fm Monitoring Tool v{VERSION}\n")
+    print(colorize("header", f"Last.fm Monitoring Tool v{VERSION}") + "\n")
 
     parser = argparse.ArgumentParser(
         prog=TOOL_NAME,
-        description=(f"Monitor a Last.fm user's scrobbles and send customizable email or webhook alerts [ {PROJECT_URL}/ ]"), epilog=help_examples(), formatter_class=argparse.RawTextHelpFormatter
+        description=(f"Monitor a Last.fm user's scrobbles and send customizable email or webhook alerts [ {PROJECT_URL}/ ]"), epilog=help_examples(), formatter_class=argparse.RawTextHelpFormatter, **argparse_color_kwargs()
     )
 
     # Positional
@@ -8411,6 +8925,13 @@ def main():
         help="Disable logging to lastfm_monitor_<username>.log"
     )
     opts.add_argument(
+        "--no-color",
+        dest="no_color",
+        action="store_true",
+        default=None,
+        help="Disable coloured output in the terminal"
+    )
+    opts.add_argument(
         "--verbose",
         dest="verbose",
         action="store_true",
@@ -8449,6 +8970,12 @@ def main():
             sys.exit(1)
 
     apply_diagnostic_cli_flags(args)
+
+    if args.no_color is True:
+        COLORED_OUTPUT = False
+
+    # Re-initialised so a COLORED_OUTPUT or COLOR_THEME the config file sets reaches everything printed from here
+    init_color_output(stdout_bck)
 
     # Runs after the config file is read, so a saved LASTFM_USERNAME counts as a target
     if len(sys.argv) == 1 and not LASTFM_USERNAME:
