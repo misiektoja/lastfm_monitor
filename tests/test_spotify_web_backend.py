@@ -124,7 +124,7 @@ class SpotifyWebBackendTests(unittest.TestCase):
         self.assertEqual(second, "oauth-token")
         memory_cache.assert_called_once_with()
         self.assertEqual(credentials.call_count, 2)
-        credentials.assert_called_with(client_id="client-id", client_secret="client-secret", requests_timeout=monitor.FUNCTION_TIMEOUT, cache_handler=cache_handler)
+        credentials.assert_called_with(client_id="client-id", client_secret="client-secret", requests_timeout=monitor.FUNCTION_TIMEOUT, cache_handler=cache_handler, requests_session=monitor.SPOTIFY_SESSION)
         self.assertEqual(auth_manager.get_access_token.call_args_list, [call(as_dict=False), call(as_dict=False)])
         get.assert_not_called()
 
