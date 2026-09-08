@@ -20,6 +20,14 @@ To get the list of all supported command-line arguments / flags:
 lastfm_monitor --help
 ```
 
+To check the setup before the first run, without writing anything:
+
+```sh
+lastfm_monitor --doctor <lastfm_username>
+```
+
+See [Doctor Preflight](troubleshooting.md#doctor-preflight) for what it reports.
+
 ## Last.fm API Key and Shared Secret
 
 - Create your Last.fm `API key` and `Shared secret` at: [https://www.last.fm/api/account/create](https://www.last.fm/api/account/create)

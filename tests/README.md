@@ -30,6 +30,7 @@ and again before anything is published to PyPI.
 | File | Area under test |
 | --- | --- |
 | `test_config_loading.py` | Config files read as data and never executed |
+| `test_doctor.py` | The preflight row contract, every check's failure branches, the section order and the verdict |
 | `test_documentation.py` | Documentation site structure, its internal links, the links pointing into it from the repository and the guide constants the module prints |
 | `test_install_method_commands.py` | Install detection and the commands the tool prints, including the paths each one carries |
 | `test_friends_notifications.py` | Friend and profile change alerts plus one user per line in plain text and HTML |

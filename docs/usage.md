@@ -22,6 +22,8 @@ lastfm_monitor <lastfm_username> -z "your_spotify_app_client_id:your_spotify_app
 
 Settings come from a configuration file when one is found. [Configuration File](configuration.md#configuration-file) covers where the tool looks for it and how to select another one with `--config-file`.
 
+If a run does not start, `--doctor` reports every check the tool makes before monitoring. See [Doctor Preflight](troubleshooting.md#doctor-preflight).
+
 To enable tracking of followers and/or followings changes:
 - set `TRACK_FOLLOWERS` and/or `TRACK_FOLLOWINGS` to `True`
 - or use the `--track-followers` and/or `--track-followings` flags

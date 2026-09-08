@@ -1,5 +1,34 @@
 # Troubleshooting
 
+## Doctor Preflight
+
+`--doctor` runs every check the tool needs before monitoring can start, then reports what is ready and what is not. It writes no files, and the email and webhook delivery tests only run after you approve each one separately.
+
+```sh
+lastfm_monitor --doctor <lastfm_username>
+```
+
+Each row is one result:
+
+```text
+Authentication
+[FAIL] Last.fm rejected the configured API key or shared secret
+  Invalid API key - You must be granted a valid key by last.fm
+  To fix: Save a working pair with 'lastfm_monitor --set-lastfm-credentials'
+  Guide: https://misiektoja.github.io/lastfm_monitor/setup-and-first-run/#lastfm-api-key-and-shared-secret
+```
+
+* `[PASS]` the check succeeded
+* `[WARN]` monitoring can start, but something is switched off or unreachable
+* `[FAIL]` monitoring cannot start until it is fixed
+* `[SKIP]` the check did not run, usually because an earlier one failed
+
+The report covers the Python version and the libraries in use, the configuration and dotenv files in effect, where each secret came from, every file the run will write, the connectivity endpoint, the Last.fm credentials, the Spotify metadata backend when track duration or playback is on, the monitored profile and both notification channels.
+
+Only a `[FAIL]` changes the exit code, which is `1` when anything failed and `0` otherwise, so the command can gate a deployment. The report ends with the command that starts monitoring using the same configuration and dotenv files you passed to doctor.
+
+The credentials themselves are never displayed. A row that reports a secret names the setting and its source, not its value.
+
 ## When Something Goes Wrong
 
 When the tool cannot continue, it reports the failure in the same three-line form: what went wrong, what to do about it and a link to the page that covers it.
