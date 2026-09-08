@@ -336,8 +336,8 @@ class TestInterruptHandling:
     def test_every_secret_prompt_goes_through_a_reader(self):
         source = (monitor.Path(__file__).resolve().parents[1] / "lastfm_monitor.py").read_text(encoding="utf-8")
         assert 'prompt(f"Replace' not in source
-        assert source.count("read_interactively(prompt") == 3
-        assert source.count("read_secret_interactively(hidden_prompt") == 3
+        assert source.count("read_interactively(prompt") == 4
+        assert source.count("read_secret_interactively(hidden_prompt") == 4
 
 
 class TestNoTargetIsNeeded:

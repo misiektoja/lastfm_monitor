@@ -111,7 +111,7 @@ class TestWelcomeScreen:
 
     @pytest.mark.parametrize("label, command", [
         ("Quickest start (already configured):", "lastfm_monitor <lastfm_username>"),
-        ("Save your Last.fm API credentials:", "lastfm_monitor --set-lastfm-credentials"),
+        ("Easiest start (guided setup wizard):", "lastfm_monitor --setup"),
         ("Check setup before monitoring:", "lastfm_monitor --doctor <lastfm_username>"),
         ("Show recent tracks and exit:", "lastfm_monitor -l <lastfm_username>"),
     ])
@@ -141,10 +141,10 @@ class TestWelcomeScreen:
 
     def test_the_full_option_list_is_no_longer_what_an_empty_command_prints(self):
         assert "parser.print_help(sys.stderr)" not in SOURCE
-        assert "if len(sys.argv) == 1:\n        sys.exit(print_welcome_screen())" in SOURCE
+        assert "if len(sys.argv) == 1 and not LASTFM_USERNAME:\n        sys.exit(print_welcome_screen())" in SOURCE
 
     def test_the_screen_and_the_doctor_print_a_command_the_same_way(self):
-        assert SOURCE.count("_wizard_print_command(") == 6
+        assert SOURCE.count("_wizard_print_command(") == 8
 
 
 class TestMissingTarget:
@@ -267,7 +267,7 @@ class TestConfigDiscoveryDisabled:
 
     def test_a_missing_path_is_still_an_error(self, tmp_path):
         assert monitor.find_config_file(str(tmp_path / "absent.conf")) is None
-        assert 'if not cfg_path and CLI_CONFIG_PATH and not CONFIG_DISCOVERY_DISABLED:' in SOURCE
+        assert 'if not cfg_path and CLI_CONFIG_PATH and not CONFIG_DISCOVERY_DISABLED and not args.setup:' in SOURCE
 
     # A printed command has to read back the setup the run used, so the sentinel is carried unexpanded
     def test_a_printed_command_carries_the_sentinel(self, monkeypatch):
