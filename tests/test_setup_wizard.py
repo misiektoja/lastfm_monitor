@@ -719,3 +719,55 @@ class TestASavedCredentialIsSettledBeforeTheHiddenPrompt:
 
         assert hidden.prompts == []
         assert state.secret_updates == {}
+
+
+# A required question that only re-asks is a trap, so every one of them is answered blank here and then declined
+class TestEveryRequiredQuestionCanBeAbandoned:
+
+    # How a blank answer is survivable at each prompt the wizard marks required
+    COVERAGE = {
+        ("_wizard_ask_positive_int", None): "the shown default is a number, so a blank answer is never empty",
+        ("_wizard_collect_target_section", None): "declining ends the target section without asking to persist it",
+        ("_wizard_collect_email_section", "SMTP host"): "declining switches email and its alerts off",
+        ("_wizard_collect_email_section", "SMTP username"): "declining switches email and its alerts off",
+        ("_wizard_collect_email_section", "Sender email"): "declining switches email and its alerts off",
+        ("_wizard_collect_email_section", "Receiver email"): "declining switches email and its alerts off",
+        ("_wizard_collect_destination_section", "Configuration file destination"): "the shown default is the current path",
+        ("_wizard_collect_destination_section", "Dotenv file destination"): "the shown default is the current path",
+    }
+
+    def test_every_required_prompt_is_accounted_for(self):
+        found = set()
+        for node in ast.walk(ast.parse(SOURCE)):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            for call in ast.walk(node):
+                if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Name) or call.func.id != "_wizard_ask_text":
+                    continue
+                if not any(keyword.arg == "required" and getattr(keyword.value, "value", False) is True for keyword in call.keywords):
+                    continue
+                question = call.args[0].value if call.args and isinstance(call.args[0], ast.Constant) else None
+                found.add((node.name, question))
+        assert found == set(self.COVERAGE)
+
+    @pytest.mark.parametrize("answers, abandoned", [
+        (["y", "", "n"], "SMTP host"),
+        (["y", "smtp.example.test", "", "", "", "n"], "SMTP username"),
+        (["y", "smtp.example.test", "", "", "user", "", "n"], "Sender email"),
+        (["y", "smtp.example.test", "", "", "user", "from@example.test", "", "n"], "Receiver email"),
+    ])
+    def test_a_blank_mail_server_answer_switches_the_channel_off(self, capsys, answers, abandoned):
+        state = monitor.WizardSetupState("config", "env", dict(monitor._config_template_defaults()))
+        script = Script(answers)
+        hidden = Script([])
+
+        monitor._wizard_collect_email_section(state, input_func=script, getpass_func=hidden)
+
+        assert script.answers == [], f"the section continued past the abandoned {abandoned}"
+        assert hidden.prompts == [], "the password prompt opened for a channel that was switched off"
+        assert f"Try entering the {abandoned} again?" in "".join(script.prompts)
+        assert all(state.config_values[key] is False for key in monitor.WIZARD_EMAIL_NOTIFICATION_KEYS)
+        assert monitor._wizard_email_enabled(state.config_values) is False
+        # Half a mail server must not survive the answer that was abandoned
+        assert state.config_values["SMTP_HOST"] == monitor._config_template_defaults()["SMTP_HOST"]
+        assert "Email notifications stay off until every mail server setting is answered." in capsys.readouterr().out
