@@ -792,6 +792,7 @@ from itertools import tee, islice, chain
 from collections import namedtuple
 from html import escape
 import contextlib
+import functools
 import shutil
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Tuple, cast
@@ -921,6 +922,27 @@ def read_interactively(reader, *args, **kwargs):
 def read_secret_interactively(reader, *args, **kwargs):
     with default_interrupt_handling():
         return reader(*args, **kwargs)
+
+
+# Silences debug output while a raw secret is entered or validated, then restores the previous mode
+@contextlib.contextmanager
+def debug_output_suppressed():
+    global DEBUG_MODE
+    previous_debug_mode = DEBUG_MODE
+    DEBUG_MODE = False
+    try:
+        yield
+    finally:
+        DEBUG_MODE = previous_debug_mode
+
+
+# Silences debug output for the whole of a function that handles a raw secret
+def suppresses_debug_output(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        with debug_output_suppressed():
+            return func(*args, **kwargs)
+    return wrapper
 
 
 # The last connectivity failure, so a quiet caller can classify it instead of the check printing it
@@ -3937,6 +3959,7 @@ def update_dotenv_file(destination, updates):
 
 
 # Collects hidden private values and saves them together after overwrite confirmation
+@suppresses_debug_output
 def _run_set_private_values(option_name: str, prompts: List[Tuple[str, str]], env_file=None, interactive=None, input_func=None, getpass_func=None, guidance: Optional[List[str]] = None, subject: str = "private settings", guide_url: Optional[str] = None, plural: bool = False) -> str:
     destination = resolve_private_settings_path(env_file)
     terminal_is_interactive = sys.stdin.isatty() if interactive is None else interactive
@@ -4008,6 +4031,7 @@ def smtp_sign_in(password, timeout=15):
 
 
 # Privately checks one SMTP password against the mail server and atomically stores it
+@suppresses_debug_output
 def run_set_smtp_password(env_file=None, interactive=None, input_func=None, getpass_func=None, sign_in=None) -> str:
     destination = resolve_private_settings_path(env_file)
     terminal_is_interactive = sys.stdin.isatty() if interactive is None else interactive
@@ -4054,6 +4078,7 @@ def run_set_smtp_password(env_file=None, interactive=None, input_func=None, getp
 
 
 # Safely stores one privately entered webhook URL
+@suppresses_debug_output
 def run_set_webhook_url(env_file=None, interactive=None, input_func=None, getpass_func=None) -> str:
     destination = resolve_private_settings_path(env_file)
     terminal_is_interactive = sys.stdin.isatty() if interactive is None else interactive
@@ -4090,6 +4115,7 @@ def run_set_webhook_url(env_file=None, interactive=None, input_func=None, getpas
 
 
 # Safely stores privately entered Last.fm API credentials
+@suppresses_debug_output
 def run_set_lastfm_credentials(env_file=None, interactive=None, input_func=None, getpass_func=None) -> str:
     prompts = [("LASTFM_API_KEY", "Enter the Last.fm API key privately: "), ("LASTFM_API_SECRET", "Enter the Last.fm shared secret privately: ")]
     guidance = [
@@ -4101,6 +4127,7 @@ def run_set_lastfm_credentials(env_file=None, interactive=None, input_func=None,
 
 
 # Safely stores privately entered Spotify OAuth app credentials
+@suppresses_debug_output
 def run_set_spotify_credentials(env_file=None, interactive=None, input_func=None, getpass_func=None) -> str:
     prompts = [("SP_CLIENT_ID", "Enter the Spotify client ID privately: "), ("SP_CLIENT_SECRET", "Enter the Spotify client secret privately: ")]
     guidance = [
@@ -6585,7 +6612,8 @@ def _wizard_ask_duration(question, default, input_func=None):
 def _wizard_ask_secret(question, getpass_func=None):
     hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
     try:
-        return str(read_secret_interactively(hidden_prompt, f"{question}: ")).strip()
+        with debug_output_suppressed():
+            return str(read_secret_interactively(hidden_prompt, f"{question}: ")).strip()
     except (EOFError, KeyboardInterrupt):
         print()
         raise
