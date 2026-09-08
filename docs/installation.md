@@ -44,3 +44,13 @@ pip install lastfm_monitor -U
 ```
 
 If you installed manually, download the newest *[lastfm_monitor.py](https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/lastfm_monitor.py)* file to replace your existing installation.
+
+## How Commands Are Printed
+
+Every command the tool suggests is written for the way it is installed: `lastfm_monitor ...` for a PyPI install and `python3 lastfm_monitor.py ...` for the downloaded script. The suggestion also repeats the `--config-file` and `--env-file` you started with, so pasting it checks the same setup that just failed.
+
+Detection uses the name the tool was started under. If a wrapper script or a container image makes that misleading, set `LASTFM_MONITOR_INSTALL_METHOD` to `pip` or `manual` to fix the form:
+
+```sh
+export LASTFM_MONITOR_INSTALL_METHOD=pip
+```
