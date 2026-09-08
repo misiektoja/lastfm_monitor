@@ -67,3 +67,5 @@ ignore = ["F541", "B904"]
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-ra"
+# The offline end-to-end run starts a loopback server and a subprocess, so it is marked for selection
+markers = ["e2e: drives the whole CLI against a local Last.fm fixture"]
