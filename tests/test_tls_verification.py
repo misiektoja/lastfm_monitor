@@ -86,7 +86,7 @@ class TestEveryCallSiteReadsTheSwitch:
     # One handshake, so the preflight check fails exactly where a real send would
     def test_one_helper_opens_every_authenticated_mail_session(self):
         assert SOURCE.count("smtplib.SMTP(") == 1
-        assert SOURCE.count("smtp_connect_and_login(") == 3
+        assert SOURCE.count("smtp_connect_and_login(") == 4
 
     # Spotipy owns its session, so it has to be handed the one already carrying the setting
     def test_spotipy_is_handed_the_configured_session(self):
