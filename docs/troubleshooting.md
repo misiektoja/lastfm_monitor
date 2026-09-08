@@ -47,4 +47,6 @@ That last group is the reason to reach for `--debug` first when track durations 
 
 Debug mode can also be turned on permanently with the `DEBUG_MODE` configuration setting. The `--debug` flag wins over a configuration file that sets `DEBUG_MODE = False`.
 
-Debug output is written to the terminal and to the log file. Read it before pasting it into a bug report.
+Debug output is written to the terminal and to the log file.
+
+Error text is redacted before it is printed. Configured secrets are replaced wherever they appear, as are `SETTING = value` lines for any of the secret settings, `Authorization: Bearer` and `Authorization: Basic` headers, signed Last.fm request parameters such as `api_key` and `api_sig`, and Discord webhook URLs. Redaction is a safety net rather than a guarantee, so still read the output before pasting it into a bug report.

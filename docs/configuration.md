@@ -161,6 +161,8 @@ lastfm_monitor --set-webhook-url
 
 Each command accepts `--env-file PATH`. Existing values require confirmation and the update is atomic. `--env-file none` is rejected because these commands must save their values.
 
+Whatever you store, the tool redacts these values from its error output and from the log file. A configured value shorter than 12 characters is only redacted in the forms that identify it as a secret, such as `SMTP_PASSWORD = ...` or an `Authorization` header, because replacing a short value everywhere would corrupt ordinary text that happens to contain the same word.
+
 Set the needed environment variables using `export` on **Linux/Unix/macOS/WSL** systems:
 
 ```sh
