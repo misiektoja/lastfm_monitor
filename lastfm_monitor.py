@@ -7475,6 +7475,20 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
         return _wizard_launch_monitor(launch_arguments)
     return 0
 
+# Names one parsed argument the way the user could have typed it, since an argparse destination is not
+# always a flag: --debug is stored as debug_mode and a positional has no flag at all
+def conflicting_argument_name(parser, dest, argv=None):
+    typed = set(sys.argv[1:] if argv is None else argv)
+    # argparse exposes no public listing of its arguments, so the actions it holds are read directly
+    for action in getattr(parser, "_actions", ()):
+        if action.dest != dest:
+            continue
+        if not action.option_strings:
+            return str(action.metavar or dest.upper())
+        return next((option for option in action.option_strings if option in typed), action.option_strings[0])
+    return f"--{dest.replace('_', '-')}"
+
+
 # Applies every command-line override that only assigns a setting, so the preflight report and the
 # monitoring run are decided by the same values rather than by where in main each flag was handled
 def apply_cli_overrides(args):
@@ -8075,7 +8089,7 @@ def main():
         allowed_private_args = {"config_file", "env_file", *private_actions}
         conflicts = [name for name, value in vars(args).items() if name not in allowed_private_args and value is not None and value is not False]
         if conflicts:
-            parser.error(f"--{selected_private_actions[0].replace('_', '-')} cannot be combined with " + ", ".join(f"--{name.replace('_', '-')}" for name in conflicts))
+            parser.error(f"--{selected_private_actions[0].replace('_', '-')} cannot be combined with " + ", ".join(conflicting_argument_name(parser, name) for name in conflicts))
         private_env_file = DOTENV_FILE or None
         runners = {
             "set_webhook_url": run_set_webhook_url,
