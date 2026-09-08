@@ -1,6 +1,7 @@
 """The guided setup: answers held until Save, the mail server sign-in, the escape from every rejected answer, the frame around its questions, the review summary, per-section editing and the files it writes."""
 
 import ast
+import os
 import smtplib
 import subprocess
 import sys
@@ -13,6 +14,19 @@ import lastfm_monitor as monitor
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (PROJECT_ROOT / "lastfm_monitor.py").read_text(encoding="utf-8")
 REAL_VERIFY_SMTP = monitor._wizard_verify_smtp
+
+
+# Puts back everything a saved run applies, module settings and the environment the dotenv is loaded into,
+# so one test's answers cannot reach the next
+@pytest.fixture(autouse=True)
+def module_settings_restored():
+    saved = {name: getattr(monitor, name) for name in monitor._config_allowed_names() if hasattr(monitor, name)}
+    saved_environment = dict(os.environ)
+    yield
+    for name, value in saved.items():
+        setattr(monitor, name, value)
+    os.environ.clear()
+    os.environ.update(saved_environment)
 
 
 # Keeps the wizard's mail server sign-in offline, so no scripted setup run opens a connection
@@ -820,3 +834,110 @@ class TestABlankSecretAnswer:
 
         assert code == 0
         assert env_path.read_bytes() == original.encode("utf-8")
+
+
+# Four ways a run can reach the end: no target, a declined doctor, a failed doctor and a passed one
+class TestTheFlowAfterSave:
+
+    # Records what the wizard would have launched instead of replacing the test process
+    @pytest.fixture
+    def launched(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(monitor, "_wizard_launch_monitor", lambda arguments: calls.append(list(arguments)) or 0)
+        return calls
+
+    def test_without_a_target_neither_offer_is_made(self, wizard, launched, capsys):
+        code, script = wizard(full_run_answers(target=["", "n"], review=["1"], doctor=[]))
+
+        assert code == 0
+        assert not any(prompt.startswith(("Run doctor now?", "Start monitoring now?")) for prompt in script.prompts)
+        assert launched == []
+
+    def test_a_declined_doctor_ends_on_the_next_steps_block(self, wizard, launched, capsys):
+        code, script = wizard(full_run_answers(doctor=["n"]))
+
+        assert code == 0
+        assert any(prompt.startswith("Run doctor now?") for prompt in script.prompts)
+        assert not any(prompt.startswith("Start monitoring now?") for prompt in script.prompts)
+        assert "Start monitoring:" in capsys.readouterr().out
+        assert launched == []
+
+    # Only a doctor run that passed proves the saved setup can monitor
+    def test_a_failed_doctor_removes_the_launch_offer(self, wizard, launched, monkeypatch, capsys):
+        monkeypatch.setattr(monitor, "run_doctor", lambda **kwargs: 1)
+
+        code, script = wizard(full_run_answers(doctor=["y"]))
+
+        assert code == 0
+        assert "After Doctor passes, start monitoring:" in capsys.readouterr().out
+        assert not any(prompt.startswith("Start monitoring now?") for prompt in script.prompts)
+        assert launched == []
+
+    def test_a_passed_doctor_offers_the_launch(self, wizard, launched, tmp_path, capsys):
+        code, script = wizard(full_run_answers(doctor=["y", "y"]))
+
+        assert code == 0
+        assert any(prompt.startswith("Start monitoring now?") for prompt in script.prompts)
+        assert "Start monitoring:" in capsys.readouterr().out
+        assert launched and str(tmp_path / "lastfm_monitor.conf") in launched[0]
+
+    def test_the_doctor_it_offers_is_the_one_the_command_runs(self):
+        # One implementation, called from the flag and from the wizard, so the two verdicts cannot drift
+        assert SOURCE.count("def run_doctor(") == 1
+        assert "doctor_exit = run_doctor(" in SOURCE
+
+    def test_setup_is_dispatched_before_the_connectivity_check(self):
+        # The wizard writes files and needs no network, so an offline machine can still run it
+        assert SOURCE.index("if args.setup:") < SOURCE.index("if not check_internet():")
+
+
+# What Enter does on a rerun, channel by channel: a saved setup must not be switched off by accepting defaults
+class TestTheDefaultsOnARerun:
+
+    def test_the_webhook_question_follows_the_saved_switch(self):
+        values = dict(monitor._config_template_defaults())
+        values["WEBHOOK_ENABLED"] = True
+        state = monitor.WizardSetupState("config", "env", values)
+        script = Script(["n"])
+
+        monitor._wizard_collect_webhook_section(state, input_func=script, getpass_func=Script([]))
+
+        assert script.prompts == ["Set up webhook alerts (Discord, ntfy etc.)? [Y/n]: "]
+
+    @pytest.mark.parametrize("saved, hint", [
+        ({}, "[y/N]"),
+        ({"ACTIVE_NOTIFICATION": True}, "[Y/n]"),
+        # The error alert ships on, so on its own it proposes email only once a mail server has been named
+        ({"SMTP_HOST": "smtp.example.test"}, "[Y/n]"),
+    ])
+    def test_the_email_question_follows_the_saved_alerts(self, saved, hint):
+        values = dict(monitor._config_template_defaults())
+        values.update(saved)
+        state = monitor.WizardSetupState("config", "env", values)
+        script = Script(["n"])
+
+        monitor._wizard_collect_email_section(state, input_func=script, getpass_func=Script([]))
+
+        assert script.prompts == [f"Configure email notifications? {hint}: "]
+
+    # Enter through the Custom branch must not switch alerts on that were never asked for
+    def test_a_custom_alert_question_defaults_to_no(self):
+        state = monitor.WizardSetupState("config", "env", dict(monitor._config_template_defaults()))
+        available = monitor._wizard_available_alert_keys(state, monitor.WIZARD_EMAIL_NOTIFICATION_KEYS)
+        script = Script(["3"] + [""] * len(available))
+
+        monitor._wizard_collect_alert_preset(state, "Which email notifications should be enabled?", monitor.WIZARD_EMAIL_NOTIFICATION_KEYS, monitor.WIZARD_RECOMMENDED_EMAIL_KEYS, prefix="Email on ", input_func=script)
+
+        assert all(prompt.endswith("[y/N]: ") for prompt in script.prompts[1:])
+        assert all(state.config_values[key] is False for key in monitor.WIZARD_EMAIL_NOTIFICATION_KEYS)
+
+    def test_a_declined_email_section_leaves_the_other_channel_alone(self):
+        values = dict(monitor._config_template_defaults())
+        values.update({"WEBHOOK_ACTIVE_NOTIFICATION": True, "WEBHOOK_ENABLED": True, "TRACK_SONGS": True})
+        state = monitor.WizardSetupState("config", "env", values)
+
+        monitor._wizard_collect_email_section(state, input_func=Script(["n"]), getpass_func=Script([]))
+
+        assert state.config_values["WEBHOOK_ACTIVE_NOTIFICATION"] is True
+        assert state.config_values["WEBHOOK_ENABLED"] is True
+        assert state.config_values["TRACK_SONGS"] is True
