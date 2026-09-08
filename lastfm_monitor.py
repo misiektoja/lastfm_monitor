@@ -644,6 +644,15 @@ INSTALL_METHOD_PYPI = "pip"
 INSTALL_METHOD_SCRIPT = "manual"
 INSTALL_METHOD_ENV_VAR = "LASTFM_MONITOR_INSTALL_METHOD"
 
+# Where each secret's effective value came from, recorded as precedence is applied rather than reconstructed afterwards
+SECRET_SOURCES = {}
+
+# The sources a secret can resolve from, in the order precedence applies them
+SECRET_SOURCE_ORDER = ("config file", "dotenv file", "environment", "command line")
+
+# Secrets whose length the provider issues, so reporting it discloses nothing a pasted support transcript should not carry
+FIXED_LENGTH_SECRET_KEYS = ("LASTFM_API_KEY", "LASTFM_API_SECRET", "SP_CLIENT_ID", "SP_CLIENT_SECRET")
+
 # Below this length a configured value is as likely to be an ordinary word as a credential, so replacing it would corrupt the text it appears in
 MIN_REDACTABLE_SECRET_LENGTH = 12
 
@@ -1091,6 +1100,40 @@ def render_command(arguments=None, include_paths: bool = True, config_path=None,
     if selected_env and not (str(selected_env).casefold() == "none" and command_writes_dotenv(arguments or ())):
         parts.extend(["--env-file", str(selected_env)])
     return " ".join(quote_command_argument(part) for part in parts)
+
+
+# True when a setting holds a real value rather than nothing or the placeholder the config template ships
+def doctor_value_is_set(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip()) and not value.strip().startswith("your_")
+
+
+# Reports whether a secret is present, with its length only for the ones whose length the provider fixes
+def secret_fingerprint(value: Any, name: str) -> str:
+    if not doctor_value_is_set(value):
+        return "not set"
+    return f"set, {len(str(value).strip())} chars" if name in FIXED_LENGTH_SECRET_KEYS else "set"
+
+
+# Records where one secret resolved from and traces it, so a later layer overwrites the earlier answer instead of adding to it
+def record_secret_source(name: str, source: str, value: Any = None) -> None:
+    if source not in SECRET_SOURCE_ORDER:
+        raise ValueError(f"Unsupported secret source: {source}")
+    resolved = globals().get(name) if value is None else value
+    # A placeholder is not a value, so it earns neither a source nor a row
+    if not doctor_value_is_set(resolved):
+        SECRET_SOURCES.pop(name, None)
+        return
+    SECRET_SOURCES[name] = source
+    debug_print(f"Secret resolution: name={name}, source={source}, value={secret_fingerprint(resolved, name)}")
+
+
+# Groups the configured secret names by the source each value actually came from, never by value
+def secrets_by_source() -> List[Tuple[str, List[str]]]:
+    grouped = {}
+    for name, source in SECRET_SOURCES.items():
+        if doctor_value_is_set(globals().get(name)):
+            grouped.setdefault(source, []).append(name)
+    return [(source, sorted(grouped[source])) for source in SECRET_SOURCE_ORDER if source in grouped]
 
 
 # Returns the private values worth replacing wherever they appear, skipping any too short to tell apart from an ordinary word
@@ -1960,6 +2003,7 @@ def reload_secrets_signal_handler(sig, frame):
                     oauth_credentials_changed = True
                 if secret == "WEBHOOK_URL":
                     webhook_url_changed = True
+                record_secret_source(secret, "dotenv file")
                 print(f"* Reloaded {secret} from {env_path}")
     if oauth_credentials_changed:
         SP_OAUTH_MEMORY_CACHE_HANDLER = None
@@ -5358,6 +5402,7 @@ def apply_webhook_cli_overrides(args: argparse.Namespace, parser: argparse.Argum
             parser.error("--webhook-url must contain a complete HTTPS link without embedded credentials")
         WEBHOOK_URL = str(args.webhook_url).strip()
         WEBHOOK_ENABLED = True
+        record_secret_source("WEBHOOK_URL", "command line")
     if args.webhook_enabled is not None:
         WEBHOOK_ENABLED = args.webhook_enabled
     event_overrides = (
@@ -5758,6 +5803,11 @@ def main():
 
     args = parser.parse_args()
 
+    # Applied before the config file so its own failures and the secret resolution traces are visible, then
+    # applied again afterwards so a saved DEBUG_MODE = False cannot erase what the command line asked for
+    if args.debug_mode is True:
+        DEBUG_MODE = True
+
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
         sys.exit(1)
@@ -5775,7 +5825,14 @@ def main():
         if not load_config_file(cfg_path):
             sys.exit(1)
 
+    if args.debug_mode is True:
+        DEBUG_MODE = True
+
     apply_tls_verification_setting()
+
+    # Anything already set once the config file has been read came from the settings, edited in place or loaded
+    for secret in SECRET_KEYS:
+        record_secret_source(secret, "config file")
 
     if args.env_file:
         DOTENV_FILE = os.path.expanduser(args.env_file)
@@ -5809,6 +5866,8 @@ def main():
             sys.exit(1)
         sys.exit(0)
 
+    exported_secrets = frozenset(secret for secret in SECRET_KEYS if os.getenv(secret) is not None)
+
     if DOTENV_FILE and DOTENV_FILE.lower() == 'none':
         env_path = None
     else:
@@ -5838,8 +5897,13 @@ def main():
         val = os.getenv(secret)
         if val is not None:
             globals()[secret] = val
+            record_secret_source(secret, "environment" if secret in exported_secrets else "dotenv file")
 
     apply_webhook_cli_overrides(args, parser)
+
+    if WEBHOOK_ENABLED and not validate_webhook_url():
+        print("* Webhook alerts are off because WEBHOOK_URL is not a complete HTTPS link\n")
+        WEBHOOK_ENABLED = False
 
     if args.send_test_email:
         print("* Sending test email notification ...\n")
@@ -5866,24 +5930,32 @@ def main():
 
     if args.lastfm_api_key:
         LASTFM_API_KEY = args.lastfm_api_key
+        record_secret_source("LASTFM_API_KEY", "command line")
 
     if args.lastfm_secret:
         LASTFM_API_SECRET = args.lastfm_secret
+        record_secret_source("LASTFM_API_SECRET", "command line")
 
     if args.spotify_creds:
         SP_CLIENT_ID, separator, SP_CLIENT_SECRET = args.spotify_creds.partition(":")
         if not separator or not SP_CLIENT_ID or not SP_CLIENT_SECRET:
             print("* Error: -z / --spotify-creds has invalid format - use SP_CLIENT_ID:SP_CLIENT_SECRET")
             sys.exit(1)
+        record_secret_source("SP_CLIENT_ID", "command line")
+        record_secret_source("SP_CLIENT_SECRET", "command line")
+
+    # Emitted once every layer has been applied, so a support transcript answers where each credential came from
+    grouped_secrets = secrets_by_source()
+    debug_print("Secret sources: " + ("; ".join(f"{source}={', '.join(names)}" for source, names in grouped_secrets) if grouped_secrets else "none configured"))
 
     if SP_TOKENS_FILE:
         SP_TOKENS_FILE = os.path.expanduser(SP_TOKENS_FILE)
 
-    if not LASTFM_API_KEY or LASTFM_API_KEY == "your_lastfm_api_key":
+    if not doctor_value_is_set(LASTFM_API_KEY):
         print_recovery_error(context="secret.missing", detail="LASTFM_API_KEY (-u / --lastfm-api-key) is empty or still the placeholder value")
         sys.exit(1)
 
-    if not LASTFM_API_SECRET or LASTFM_API_SECRET == "your_lastfm_api_secret":
+    if not doctor_value_is_set(LASTFM_API_SECRET):
         print_recovery_error(context="secret.missing", detail="LASTFM_API_SECRET (-w / --lastfm-secret) is empty or still the placeholder value")
         sys.exit(1)
 
