@@ -612,6 +612,20 @@ exec(CONFIG_BLOCK, globals())
 # Default name for the optional config file
 DEFAULT_CONFIG_FILENAME = "lastfm_monitor.conf"
 
+# Documentation links, kept as constants so messages, help text and the guides they point at cannot drift apart
+PROJECT_URL = "https://github.com/misiektoja/lastfm_monitor"
+DOCS_BASE_URL = "https://misiektoja.github.io/lastfm_monitor"
+GUIDE_URL = f"{DOCS_BASE_URL}/"
+INSTALL_GUIDE_URL = f"{DOCS_BASE_URL}/installation/"
+LASTFM_API_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/#lastfm-api-key-and-shared-secret"
+SPOTIFY_APP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#optional-spotify-oauth-app-setup"
+WEBHOOK_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#webhook-settings"
+
+# Pages where the user creates or views the credentials this tool reads
+LASTFM_API_REGISTRATION_URL = "https://www.last.fm/api/account/create"
+LASTFM_API_ACCOUNTS_URL = "https://www.last.fm/api/accounts"
+SPOTIFY_DASHBOARD_URL = "https://developer.spotify.com/dashboard"
+
 # List of secret keys to load from env/config
 SECRET_KEYS = ("LASTFM_API_KEY", "LASTFM_API_SECRET", "SP_CLIENT_ID", "SP_CLIENT_SECRET", "SMTP_PASSWORD", "WEBHOOK_URL", "NTFY_ACCESS_TOKEN")
 
@@ -682,7 +696,7 @@ import csv
 try:
     import pylast
 except ModuleNotFoundError:
-    raise SystemExit("Error: Couldn't find the pyLast library !\n\nTo install it, run:\n    pip install pylast\n\nOnce installed, re-run this tool. For more help, visit:\nhttps://github.com/pylast/pylast")
+    raise SystemExit(f"Error: Couldn't find the pyLast library !\n\nTo install it, run:\n    pip install pylast\n\nOnce installed, re-run this tool.\n\nGuide: {INSTALL_GUIDE_URL}")
 from urllib.parse import quote_plus, quote, urljoin, urlsplit
 import subprocess
 import platform
@@ -3324,7 +3338,7 @@ def update_dotenv_file(destination, updates):
 
 
 # Collects hidden private values and saves them together after overwrite confirmation
-def _run_set_private_values(option_name: str, prompts: List[Tuple[str, str]], env_file=None, interactive=None, input_func=None, getpass_func=None) -> str:
+def _run_set_private_values(option_name: str, prompts: List[Tuple[str, str]], env_file=None, interactive=None, input_func=None, getpass_func=None, guidance: Optional[List[str]] = None) -> str:
     destination = resolve_private_settings_path(env_file)
     terminal_is_interactive = sys.stdin.isatty() if interactive is None else interactive
     if not terminal_is_interactive:
@@ -3338,6 +3352,8 @@ def _run_set_private_values(option_name: str, prompts: List[Tuple[str, str]], en
             confirmed = False
         if not confirmed:
             raise PrivateSettingsError("Private settings update was cancelled. The dotenv file was not changed")
+    for line in guidance or []:
+        print(f"* {line}")
     hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
     updates = {}
     try:
@@ -3373,6 +3389,9 @@ def run_set_webhook_url(env_file=None, interactive=None, input_func=None, getpas
             confirmed = False
         if not confirmed:
             raise PrivateSettingsError("Webhook setup was cancelled. The dotenv file was not changed")
+    print("* Discord: Edit Channel -> Integrations -> Webhooks -> New Webhook -> Copy Webhook URL")
+    print("* ntfy: the complete topic URL, such as https://ntfy.sh/your-private-topic")
+    print(f"* Guide: {WEBHOOK_GUIDE_URL}")
     hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
     try:
         webhook_url = hidden_prompt("Paste the Discord or ntfy webhook URL (input hidden): ").strip()
@@ -3393,13 +3412,23 @@ def run_set_webhook_url(env_file=None, interactive=None, input_func=None, getpas
 # Safely stores privately entered Last.fm API credentials
 def run_set_lastfm_credentials(env_file=None, interactive=None, input_func=None, getpass_func=None) -> str:
     prompts = [("LASTFM_API_KEY", "Enter the Last.fm API key privately: "), ("LASTFM_API_SECRET", "Enter the Last.fm shared secret privately: ")]
-    return _run_set_private_values("--set-lastfm-credentials", prompts, env_file, interactive, input_func, getpass_func)
+    guidance = [
+        f"Create your API key and shared secret at {LASTFM_API_REGISTRATION_URL}",
+        f"View the credentials of an application you already registered at {LASTFM_API_ACCOUNTS_URL}",
+        f"Guide: {LASTFM_API_GUIDE_URL}",
+    ]
+    return _run_set_private_values("--set-lastfm-credentials", prompts, env_file, interactive, input_func, getpass_func, guidance)
 
 
 # Safely stores privately entered Spotify OAuth app credentials
 def run_set_spotify_credentials(env_file=None, interactive=None, input_func=None, getpass_func=None) -> str:
     prompts = [("SP_CLIENT_ID", "Enter the Spotify client ID privately: "), ("SP_CLIENT_SECRET", "Enter the Spotify client secret privately: ")]
-    return _run_set_private_values("--set-spotify-credentials", prompts, env_file, interactive, input_func, getpass_func)
+    guidance = [
+        f"Create an app at {SPOTIFY_DASHBOARD_URL} with 'Web API' selected and a redirect URI of http://127.0.0.1:1234",
+        "Then copy its Client ID and, through 'View client secret', its Client Secret.",
+        f"Guide: {SPOTIFY_APP_GUIDE_URL}",
+    ]
+    return _run_set_private_values("--set-spotify-credentials", prompts, env_file, interactive, input_func, getpass_func, guidance)
 
 
 # Finds an optional config file
@@ -5072,7 +5101,7 @@ def main():
 
     parser = argparse.ArgumentParser(
         prog="lastfm_monitor",
-        description=("Monitor a Last.fm user's scrobbles and send customizable email or webhook alerts [ https://github.com/misiektoja/lastfm_monitor/ ]"), formatter_class=argparse.RawTextHelpFormatter
+        description=(f"Monitor a Last.fm user's scrobbles and send customizable email or webhook alerts [ {PROJECT_URL}/ ]"), epilog=f"Guide: {GUIDE_URL}", formatter_class=argparse.RawTextHelpFormatter
     )
 
     # Positional
@@ -5478,7 +5507,7 @@ def main():
         except ImportError:
             env_path = DOTENV_FILE if DOTENV_FILE else None
             if env_path:
-                print(f"* Warning: Cannot load dotenv file '{env_path}' because 'python-dotenv' is not installed\n\nTo install it, run:\n    pip install python-dotenv\n\nOnce installed, re-run this tool\n")
+                print(f"* Warning: Cannot load dotenv file '{env_path}' because 'python-dotenv' is not installed\n\nTo install it, run:\n    pip install python-dotenv\n\nOnce installed, re-run this tool\n\nGuide: {INSTALL_GUIDE_URL}\n")
 
     # Environment variables are a documented alternative to a dotenv file, so they apply even when no file was loaded
     for secret in SECRET_KEYS:
