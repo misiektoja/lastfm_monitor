@@ -13,8 +13,15 @@ TREE = ast.parse((PROJECT_ROOT / "lastfm_monitor.py").read_text(encoding="utf-8"
 
 API_KEY = "lastfmapikey00000000000000000000"
 API_SECRET = "lastfmapisecret00000000000000000"
-# A scrobble title is attacker-controlled text that reaches a terminal, so it is treated as hostile input
-HOSTILE_TRACK = "\x1b[2J\x1b]0;pwned\x07Track\x08\x00"
+# A scrobble title is attacker-controlled text that reaches a terminal, so it is treated as hostile input.
+# It carries an SGR sequence too, which the writers keep because this tool's own colours travel the same path
+HOSTILE_TRACK = "\x1b[2J\x1b]0;pwned\x1b[31mTrack\x08\x00"
+
+
+# Asserts nothing that moves the cursor, clears the screen or sets the title survived, allowing only inert SGR
+def assert_no_terminal_controls(output):
+    assert "\r" not in output and "\x07" not in output and "\x9b" not in output
+    assert monitor.SGR_SEQUENCE_RE.sub("", output).count("\x1b") == 0
 
 
 @pytest.fixture
@@ -28,6 +35,14 @@ def restored_globals():
 class TestTheSanitizerItself:
     def test_an_escape_sequence_is_removed(self):
         assert monitor.sanitize_terminal_text("before\x1b[2Jafter") == "beforeafter"
+
+    # This tool's own colours re-enter the same writer, so a colour change is the one sequence that is kept.
+    # A bare SGR sequence in upstream text survives with it, visible but unable to drive the terminal
+    def test_a_colour_change_survives_because_the_tool_emits_them(self):
+        assert monitor.sanitize_terminal_text("before\x1b[31mafter") == "before\x1b[31mafter"
+
+    def test_a_cursor_move_next_to_a_colour_change_is_still_removed(self):
+        assert monitor.sanitize_terminal_text("\x1b[31mred\x1b[2Jcleared") == "\x1b[31mredcleared"
 
     def test_a_window_title_sequence_cannot_survive(self):
         assert monitor.sanitize_terminal_text("\x1b]0;pwned\x07name") == "name"
@@ -52,15 +67,16 @@ class TestEveryWriterSanitizes:
         stream.write(f"* Last track:\t\t\t{HOSTILE_TRACK}\n")
         printed = capsys.readouterr().out
         logged = (tmp_path / "run.log").read_text(encoding="utf-8")
-        assert "\x1b" not in printed and "\x07" not in printed
-        assert "\x1b" not in logged and "\x07" not in logged
+        assert_no_terminal_controls(printed)
+        # The log file is plain text, so even the colour codes the terminal is allowed to keep are stripped
+        assert "\x1b" not in logged
         assert "Track" in printed and "Track" in logged
 
     def test_each_single_channel_cleans_what_it_writes(self, tmp_path, capsys):
         stream = monitor.Logger(str(tmp_path / "run.log"))
         stream.terminal_only(f"{HOSTILE_TRACK}\n")
         stream.log_only(f"{HOSTILE_TRACK}\n")
-        assert "\x1b" not in capsys.readouterr().out
+        assert_no_terminal_controls(capsys.readouterr().out)
         assert "\x1b" not in (tmp_path / "run.log").read_text(encoding="utf-8")
 
     # With logging switched off nothing used to wrap stdout, so nothing sanitized what a run printed
@@ -68,7 +84,7 @@ class TestEveryWriterSanitizes:
         stream = monitor.TerminalStream(sys.stdout)
         stream.write(f"{HOSTILE_TRACK}\n")
         printed = capsys.readouterr().out
-        assert "\x1b" not in printed
+        assert_no_terminal_controls(printed)
         assert "Track" in printed
 
     def test_the_terminal_stream_has_nowhere_to_log(self, capsys):

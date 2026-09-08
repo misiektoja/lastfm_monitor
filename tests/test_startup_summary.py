@@ -36,6 +36,7 @@ SHARED_ROW_ORDER = (
     "Secrets from command line",
     "TLS verification",
     "ASCII log separators",
+    "Coloured output",
     "Verbose mode",
     "Debug mode",
     "More details",
