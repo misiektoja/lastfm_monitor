@@ -39,6 +39,10 @@ CONFIG_BLOCK = """
 LASTFM_API_KEY = "your_lastfm_api_key"
 LASTFM_API_SECRET = "your_lastfm_api_secret"
 
+# Last.fm username to monitor
+# A username given on the command line overrides this value
+LASTFM_USERNAME = ""
+
 # Spotify Client Credentials OAuth Flow (OAuth app) is optional
 # When configured, the official Web API is tried before the anonymous web-player backend
 #
@@ -511,6 +515,7 @@ FRIENDS_RETRY_INTERVAL = 90
 # Do not change values below - modify them in the configuration section or config file instead
 LASTFM_API_KEY = ""
 LASTFM_API_SECRET = ""
+LASTFM_USERNAME = ""
 SP_CLIENT_ID = ""
 SP_CLIENT_SECRET = ""
 SP_TOKENS_FILE = ""
@@ -775,7 +780,7 @@ try:
     import pylast
 except ModuleNotFoundError:
     raise SystemExit(f"Error: Couldn't find the pyLast library !\n\nTo install it, run:\n    pip install pylast\n\nOnce installed, re-run this tool.\n\nGuide: {INSTALL_GUIDE_URL}")
-from urllib.parse import quote_plus, quote, urljoin, urlsplit
+from urllib.parse import quote_plus, quote, unquote, urljoin, urlsplit
 import subprocess
 import platform
 import re
@@ -4170,6 +4175,50 @@ def _config_allowed_names():
     return frozenset(statement.targets[0].id for statement in template_tree.body if isinstance(statement, ast.Assign) and len(statement.targets) == 1 and isinstance(statement.targets[0], ast.Name))
 
 
+# Returns the values the built-in template ships, so a section the user declines is written as shipped
+def _config_template_defaults():
+    defaults = {}
+    for statement in ast.parse(CONFIG_BLOCK, "<built-in-config>", "exec").body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1 or not isinstance(statement.targets[0], ast.Name):
+            continue
+        try:
+            defaults[statement.targets[0].id] = ast.literal_eval(statement.value)
+        except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+            continue
+    return defaults
+
+
+# Renders one configuration file from the built-in template with the chosen values substituted in
+def generate_config_with_current_values(config_values):
+    tree = ast.parse(CONFIG_BLOCK, "<built-in-config>", "exec")
+    replacements = {}
+    for statement in tree.body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1 or not isinstance(statement.targets[0], ast.Name):
+            continue
+        name = statement.targets[0].id
+        # A secret belongs in the dotenv file, so its template placeholder stays even when the running values hold the real one
+        if name not in config_values or name in SECRET_KEYS:
+            continue
+        replacements[name] = (statement.lineno, getattr(statement, "end_lineno", statement.lineno), repr(config_values[name]))
+    lines = CONFIG_BLOCK.strip("\n").split("\n")
+    # The template keeps its own leading blank line, so template line numbers are one ahead of this list
+    offset = 1 if CONFIG_BLOCK.startswith("\n") else 0
+    skip_until = 0
+    output = []
+    for number, line in enumerate(lines, 1):
+        template_line = number + offset
+        if template_line < skip_until:
+            continue
+        replaced = next((name for name, (start, _end, _value) in replacements.items() if start == template_line), None)
+        if replaced is None:
+            output.append(line)
+            continue
+        start, end, rendered = replacements[replaced]
+        output.append(f"{replaced} = {rendered}")
+        skip_until = end + 1
+    return "\n".join(output) + "\n"
+
+
 # Parses allowlisted literal config assignments without executing any file content
 def parse_config_content(content, filename="<config>", retired_out=None, reference_values=None):
     tree = ast.parse(content, filename, "exec")
@@ -6306,16 +6355,28 @@ def print_doctor_next_steps(target_value=None, doctor_exit=0):
 
 
 # Prints the commands a newcomer needs next, instead of an argparse usage error
-def print_welcome_screen():
+def print_welcome_screen(input_func=None, interactive=None):
+    terminal_is_interactive = sys.stdin.isatty() if interactive is None else interactive
     print(f"For <lastfm_username>, use the {LASTFM_TARGET_FORMS}.\n")
     _wizard_print_command("Quickest start (already configured):", render_command(["<lastfm_username>"], include_paths=False))
-    _wizard_print_command("Save your Last.fm API credentials:", render_command(["--set-lastfm-credentials"], include_paths=False))
+    setup_suffix = "   (or just answer Y below)" if terminal_is_interactive else ""
+    _wizard_print_command("Easiest start (guided setup wizard):", render_command(["--setup"], include_paths=False), setup_suffix)
     _wizard_print_command("Check setup before monitoring:", render_command(["--doctor", "<lastfm_username>"], include_paths=False))
     _wizard_print_command("Show recent tracks and exit:", render_command(["-l", "<lastfm_username>"], include_paths=False))
     print(f"Full options: {render_command(['--help'], include_paths=False)}")
     print(f"\nGuide:        {QUICK_START_GUIDE_URL}\n")
-    # Nothing was asked, so a bare invocation stays the usage error argparse would otherwise have reported
-    return 1
+    if terminal_is_interactive:
+        try:
+            start_setup = _wizard_ask_yes_no("Run the guided setup wizard now?", default=True, input_func=input_func)
+        except (EOFError, KeyboardInterrupt):
+            # This prompt sits outside the wizard, which handles its own interrupts
+            print("Setup cancelled.")
+            return 1
+        if start_setup:
+            print()
+            return run_setup_wizard(input_func=input_func)
+    # Without a terminal there was nothing to answer, so a bare invocation stays the usage error it was
+    return 0 if terminal_is_interactive else 1
 
 
 # Runs every preflight check, then the approved delivery tests, returning zero only when nothing failed
@@ -6345,6 +6406,1016 @@ def run_doctor(target_value=None, config_path=None, env_path=None, input_func=No
     print_doctor_next_steps(target_value, exit_code)
     return exit_code
 
+
+# Reads a duration written the way people type one, returning whole seconds or None when it is not one
+def parse_duration_input(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value) if value > 0 else None
+    if not isinstance(value, str):
+        return None
+    text = value.strip().casefold().replace(",", ".")
+    if not text:
+        return None
+    units = {"s": 1, "sec": 1, "secs": 1, "second": 1, "seconds": 1,
+             "m": 60, "min": 60, "mins": 60, "minute": 60, "minutes": 60,
+             "h": 3600, "hr": 3600, "hrs": 3600, "hour": 3600, "hours": 3600,
+             "d": 86400, "day": 86400, "days": 86400}
+    matches = re.findall(r"(\d+(?:\.\d+)?)\s*([a-z]*)", text)
+    # Reject anything the pattern did not fully consume, so "5x" or "abc" cannot read as a bare number
+    if not matches or re.sub(r"(\d+(?:\.\d+)?)\s*([a-z]*)", "", text).strip():
+        return None
+    total = 0.0
+    for amount, unit in matches:
+        if unit and unit not in units:
+            return None
+        total += float(amount) * units.get(unit, 1)
+    seconds = int(round(total))
+    return seconds if seconds > 0 else None
+
+
+# Reads a Last.fm username from a bare name or any profile URL, returning an empty string when it is neither
+def normalize_lastfm_username(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if "/" in text or text.casefold().startswith(("http://", "https://", "www.", "last.fm")):
+        match = re.search(r"last\.fm/(?:[a-z]{2}/)?user/([^/?#]+)", text, re.IGNORECASE)
+        if not match:
+            return ""
+        text = unquote(match.group(1)).strip()
+    # Last.fm allows a wide range of names, so only the characters a URL or a shell would break on are refused
+    return text if re.fullmatch(r"[^\s/?#@]+", text) else ""
+
+
+# Returns a stored value only when it is a real answer, so template placeholders are never offered as defaults
+def _wizard_default(value):
+    return str(value) if doctor_value_is_set(value if isinstance(value, str) else str(value or "")) else ""
+
+
+# Prints the shared line telling the user how defaults and cancelling work
+def _wizard_print_default_guidance():
+    print("Press Enter to accept the shown default. Ctrl+C cancels.\n")
+
+
+# Reads one setup line. Cancelling propagates to the one handler in run_setup_wizard, which reports that nothing was written
+def _wizard_input(prompt_text, input_func=None):
+    prompt = input if input_func is None else input_func
+    try:
+        return read_interactively(prompt, prompt_text)
+    except (EOFError, KeyboardInterrupt):
+        # The interrupted prompt owns the line break, so every handler prints its message alone
+        print()
+        raise
+
+
+# Asks one free-text question, returning the shown default when the answer is empty
+def _wizard_ask_text(question, default="", required=False, input_func=None):
+    suffix = f" [{default}]" if default else ""
+    while True:
+        answer = _wizard_input(f"{question}{suffix}: ", input_func=input_func).strip()
+        if not answer:
+            answer = default
+        if answer or not required:
+            return answer
+        print("  This value is required.")
+        if not _wizard_offer_retry(question, input_func=input_func):
+            return ""
+
+
+# Asks one yes or no question with a visible default
+def _wizard_ask_yes_no(question, default=True, input_func=None):
+    hint = "[Y/n]" if default else "[y/N]"
+    while True:
+        answer = _wizard_input(f"{question} {hint}: ", input_func=input_func).strip().casefold()
+        if not answer:
+            return default
+        if answer in ("y", "yes"):
+            return True
+        if answer in ("n", "no"):
+            return False
+        print("  Please answer 'y' or 'n'.")
+
+
+# Offers the one way out after an entry the wizard cannot use, so declining keeps every answer already given
+def _wizard_offer_retry(label, consequence="", input_func=None):
+    if consequence:
+        return not _wizard_ask_yes_no(f"Continue without the {label}? {consequence}", default=False, input_func=input_func)
+    return _wizard_ask_yes_no(f"Try entering the {label} again?", default=True, input_func=input_func)
+
+
+# Asks one numbered multiple-choice question and returns the chosen index
+def _wizard_ask_choice(question, options, default_index=0, input_func=None):
+    print()
+    print(question)
+    for index, (label, description) in enumerate(options, 1):
+        marker = " (default)" if index - 1 == default_index else ""
+        print(f"  {index}. {label}{marker}")
+        if description:
+            for line in description.splitlines():
+                print(f"     {line}")
+    while True:
+        answer = _wizard_input(f"Choose [1-{len(options)}]: ", input_func=input_func).strip()
+        if not answer:
+            return default_index
+        if answer.isdigit() and 1 <= int(answer) <= len(options):
+            return int(answer) - 1
+        print(f"  Enter a number between 1 and {len(options)}.")
+
+
+# Asks until the user provides a positive whole number or accepts the default
+def _wizard_ask_positive_int(question, default, maximum=None, input_func=None):
+    while True:
+        answer = _wizard_ask_text(question, default=str(default), required=True, input_func=input_func)
+        # An empty answer means the retry offer was declined, so the default stands instead of asking again
+        if not answer:
+            return int(default)
+        try:
+            parsed = int(answer)
+        except ValueError:
+            parsed = 0
+        if parsed > 0 and (maximum is None or parsed <= maximum):
+            return parsed
+        print(f"  Enter a whole number from 1 through {maximum}." if maximum is not None else "  Enter a positive whole number.")
+
+
+# Renders a wizard duration as raw seconds plus a readable form, so the stored config value stays visible
+def _wizard_format_duration(seconds):
+    remaining = seconds
+    parts = []
+    for suffix, count in (("d", 86400), ("h", 3600), ("m", 60), ("s", 1)):
+        value, remaining = divmod(remaining, count)
+        if value:
+            parts.append(f"{value}{suffix}")
+    raw = f"{seconds}s"
+    readable = " ".join(parts) or raw
+    return raw if readable == raw else f"{raw} - {readable}"
+
+
+# Asks one duration, accepting the formats people actually type
+def _wizard_ask_duration(question, default, input_func=None):
+    prompt_text = f"{question} [{_wizard_format_duration(default)}]: "
+    while True:
+        answer = _wizard_input(prompt_text, input_func=input_func).strip()
+        if not answer:
+            return default
+        seconds = parse_duration_input(answer)
+        if seconds is not None:
+            return seconds
+        print("  Enter a positive duration such as 120, 2m, 1.5h, 1h 30m or 1d.")
+
+
+# Asks one secret through a hidden prompt, so it never reaches the screen or the shell history
+def _wizard_ask_secret(question, getpass_func=None):
+    hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
+    try:
+        return str(read_secret_interactively(hidden_prompt, f"{question}: ")).strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        raise
+
+
+# Checks one setup destination without creating or modifying it, so an unwritable path is caught before any question
+def _wizard_validate_destination(path, label):
+    destination = Path(path).expanduser().resolve()
+    if destination.exists() and destination.is_dir():
+        raise ValueError(f"{label} must be a file path, not a directory")
+    parent = nearest_existing_parent(destination)
+    if not parent.is_dir():
+        raise ValueError(f"{label} does not have a usable parent directory")
+    if not os.access(str(parent), os.W_OK):
+        raise ValueError(f"{label} is not writable through parent '{parent}'")
+    return destination
+
+
+# Resolves both setup destinations, refusing the disabled settings that leave nowhere to write
+def _wizard_destinations(config_file=None, env_file=None):
+    # The sentinel is a deliberate choice rather than a broken path, so it gets the fix that undoes it
+    if config_file is not None and str(config_file).casefold() == "none":
+        raise RecoveryError(make_recovery_advice("config.invalid", "--setup has nowhere to write the configuration", recovery_fix_with_guide(f"Replace '--config-file none' with a writable path, or drop the flag to write {DEFAULT_CONFIG_FILENAME} in the current directory", CONFIG_FILE_GUIDE_URL), False))
+    if env_file is not None and str(env_file).casefold() == "none":
+        raise RecoveryError(make_recovery_advice("secret.entry", "--setup has nowhere to write the secrets", recovery_fix_with_guide("Replace '--env-file none' with a writable path, or drop the flag to write .env in the current directory", SECRETS_GUIDE_URL), False))
+    config_path = Path(config_file).expanduser() if config_file is not None else Path.cwd() / DEFAULT_CONFIG_FILENAME
+    env_path = Path(env_file).expanduser() if env_file is not None else Path.cwd() / ".env"
+    return _wizard_validate_destination(config_path, "Configuration destination"), _wizard_validate_destination(env_path, "Dotenv destination")
+
+
+# Confirms replacing an existing config before any question is asked, so a long run cannot end in a surprise
+def _wizard_choose_config_destination(config_path, input_func=None):
+    selected = Path(config_path)
+    while selected.exists() and not _wizard_ask_yes_no(f"Configuration file '{selected}' exists. A timestamped backup is kept. Rebuild it from your answers, starting from its current settings?", default=False, input_func=input_func):
+        alternative = _wizard_ask_text("Another config destination or leave empty to cancel", input_func=input_func)
+        if not alternative:
+            return None
+        try:
+            selected = _wizard_validate_destination(alternative, "Configuration destination")
+        except ValueError as exc:
+            print(f"  {exc}.")
+    return selected
+
+
+# Reports whether a usable secret is already saved, without reading its value into the transcript
+def _wizard_existing_secret(key, env_path):
+    try:
+        if _dotenv_contains_key(env_path, key):
+            return True
+    except PrivateSettingsError:
+        return False
+    return doctor_value_is_set(os.environ.get(key))
+
+
+# Queues one secret for the save step, asking first when the dotenv file already assigns it
+def _wizard_queue_secret(state, key, value, input_func=None):
+    if not value:
+        return False
+    if _dotenv_contains_key(state.env_path, key) and not _wizard_ask_yes_no(f"The dotenv file already contains {key}. Replace that value?", default=False, input_func=input_func):
+        print(f"  Existing {key} will be retained without being displayed or rewritten.")
+        return False
+    state.secret_updates[key] = value
+    return True
+
+
+# Holds every wizard answer until the user explicitly saves, so nothing is written during questioning
+class WizardSetupState:
+    # Starts from the values already in effect, which become both the defaults and the revert target
+    def __init__(self, config_path, env_path, baseline_values):
+        self.config_path = Path(config_path)
+        self.env_path = Path(env_path)
+        self.baseline_values = dict(baseline_values)
+        self.config_values = dict(baseline_values)
+        self.secret_updates = {}
+        self.target = ""
+        self.persist_target = True
+
+
+# The mail server settings the wizard collects, and how long its sign-in check waits for the server
+WIZARD_SMTP_CONFIG_KEYS = ("SMTP_HOST", "SMTP_PORT", "SMTP_SSL", "SMTP_USER", "SENDER_EMAIL", "RECEIVER_EMAIL")
+WIZARD_SMTP_TIMEOUT = 5
+
+# The email and webhook alert settings the wizard offers, in the order the questions are asked
+WIZARD_EMAIL_NOTIFICATION_KEYS = ("ACTIVE_NOTIFICATION", "INACTIVE_NOTIFICATION", "TRACK_NOTIFICATION", "SONG_NOTIFICATION", "SONG_ON_LOOP_NOTIFICATION", "OFFLINE_ENTRIES_NOTIFICATION", "FOLLOWERS_NOTIFICATION", "FOLLOWINGS_NOTIFICATION", "PROFILE_NOTIFICATION", "ERROR_NOTIFICATION")
+WIZARD_WEBHOOK_NOTIFICATION_KEYS = ("WEBHOOK_ACTIVE_NOTIFICATION", "WEBHOOK_INACTIVE_NOTIFICATION", "WEBHOOK_TRACK_NOTIFICATION", "WEBHOOK_SONG_NOTIFICATION", "WEBHOOK_SONG_ON_LOOP_NOTIFICATION", "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION", "WEBHOOK_FOLLOWERS_NOTIFICATION", "WEBHOOK_FOLLOWINGS_NOTIFICATION", "WEBHOOK_PROFILE_NOTIFICATION", "WEBHOOK_ERROR_NOTIFICATION")
+
+# The alerts the recommended preset switches on, named rather than counted: a message per song change is
+# too much for a default, and the alerts that need a monitored list or profile tracking are asked for there
+WIZARD_RECOMMENDED_EMAIL_KEYS = ("ACTIVE_NOTIFICATION", "INACTIVE_NOTIFICATION", "OFFLINE_ENTRIES_NOTIFICATION", "ERROR_NOTIFICATION")
+WIZARD_RECOMMENDED_WEBHOOK_KEYS = ("WEBHOOK_ACTIVE_NOTIFICATION", "WEBHOOK_INACTIVE_NOTIFICATION", "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION", "WEBHOOK_ERROR_NOTIFICATION")
+
+# What each alert is called in the questions and in the setup summary
+WIZARD_ALERT_LABELS = {
+    "ACTIVE_NOTIFICATION": "starts listening",
+    "INACTIVE_NOTIFICATION": "stops listening",
+    "TRACK_NOTIFICATION": "monitored track or album",
+    "SONG_NOTIFICATION": "every song change",
+    "SONG_ON_LOOP_NOTIFICATION": "song on loop",
+    "OFFLINE_ENTRIES_NOTIFICATION": "scrobbles added while offline",
+    "FOLLOWERS_NOTIFICATION": "follower changes",
+    "FOLLOWINGS_NOTIFICATION": "following changes",
+    "PROFILE_NOTIFICATION": "profile changes",
+    "ERROR_NOTIFICATION": "errors",
+}
+
+# The setting each alert needs before it can ever fire, so the wizard never offers an alert this setup cannot produce
+WIZARD_ALERT_REQUIREMENTS = {
+    "TRACK_NOTIFICATION": ("MONITOR_LIST_FILE",),
+    "FOLLOWERS_NOTIFICATION": ("TRACK_FOLLOWERS",),
+    "FOLLOWINGS_NOTIFICATION": ("TRACK_FOLLOWINGS",),
+    "PROFILE_NOTIFICATION": ("TRACK_BIO", "TRACK_DISPLAY_NAME"),
+}
+
+# The Spotify settings the wizard collects, and the tracking settings the friend and profile alerts depend on
+WIZARD_SPOTIFY_CONFIG_KEYS = ("USE_TRACK_DURATION_FROM_SPOTIFY", "TRACK_SONGS", "SP_TOKENS_FILE")
+WIZARD_TRACKING_CONFIG_KEYS = ("TRACK_FOLLOWERS", "TRACK_FOLLOWINGS", "TRACK_BIO", "TRACK_DISPLAY_NAME", "FRIENDS_CHECK_INTERVAL")
+
+
+# Each editable section: internal name, menu label and description, then the keys reverted when it is re-entered
+WIZARD_SECTIONS = (
+    ("Target", "Target", "Change the Last.fm user that is monitored.", ("LASTFM_USERNAME",), ()),
+    ("Polling", "Polling intervals", "Change how often Last.fm is checked.", ("LASTFM_CHECK_INTERVAL", "LASTFM_ACTIVE_CHECK_INTERVAL", "LASTFM_INACTIVITY_CHECK"), ()),
+    ("Authentication", "Authentication", "Enter the Last.fm API key and shared secret again.", (), ("LASTFM_API_KEY", "LASTFM_API_SECRET")),
+    ("Spotify", "Spotify track details", "Change track duration, playback and Spotify app credentials.", WIZARD_SPOTIFY_CONFIG_KEYS, ("SP_CLIENT_ID", "SP_CLIENT_SECRET")),
+    ("Tracking", "Profile tracking", "Change follower, following and profile tracking.", WIZARD_TRACKING_CONFIG_KEYS, ()),
+    ("Output", "Output files", "Change the log, CSV and monitored track list destinations.", ("DISABLE_LOGGING", "CSV_FILE", "MONITOR_LIST_FILE"), ()),
+    ("Email", "Email notifications", "Change SMTP details and email events.", WIZARD_SMTP_CONFIG_KEYS + WIZARD_EMAIL_NOTIFICATION_KEYS, ("SMTP_PASSWORD",)),
+    ("Webhook", "Webhook alerts", "Change Discord or ntfy details and events.", ("WEBHOOK_ENABLED", "WEBHOOK_PROVIDER") + WIZARD_WEBHOOK_NOTIFICATION_KEYS, ("WEBHOOK_URL", "NTFY_ACCESS_TOKEN")),
+    ("Destinations", "File destinations", "Change the configuration or dotenv output path.", (), ()),
+)
+
+
+# Restores one section to the values setup started with and drops any secret it had queued
+def _wizard_reset_section(state, config_keys, secret_keys):
+    for key in config_keys:
+        if key in state.baseline_values:
+            state.config_values[key] = state.baseline_values[key]
+        else:
+            state.config_values.pop(key, None)
+    for key in secret_keys:
+        state.secret_updates.pop(key, None)
+
+
+# Returns one declined section to the built-in template values, so nothing the user turned down is written
+def _wizard_clear_section(state, config_keys, secret_keys=()):
+    defaults = _config_template_defaults()
+    for key in config_keys:
+        if key in defaults:
+            state.config_values[key] = defaults[key]
+        else:
+            state.config_values.pop(key, None)
+    for key in secret_keys:
+        state.secret_updates.pop(key, None)
+
+
+# Mirrors the settled target into the config values, so an unpersisted target is left out of the file
+def _wizard_apply_target(state):
+    state.config_values["LASTFM_USERNAME"] = state.target if state.persist_target and state.target else ""
+
+
+# Asks for the monitored user, accepting a username or any Last.fm profile URL
+def _wizard_collect_target_section(state, initial_target=None, input_func=None):
+    question = "Last.fm username or profile URL to monitor"
+    while True:
+        answer = _wizard_ask_text(question, default=str(initial_target or state.target or ""), required=True, input_func=input_func)
+        if not answer:
+            # The question already offered another attempt and it was declined, so the section ends instead of asking again
+            break
+        username = normalize_lastfm_username(answer)
+        if username:
+            state.target = username
+            break
+        print(f"  '{answer}' is not a Last.fm username or profile URL.")
+        if not _wizard_offer_retry(question, input_func=input_func):
+            break
+    if not state.target:
+        print("  No target selected. Nothing can be monitored until one is set. Run --setup again or pass the target on the command line.")
+        _wizard_apply_target(state)
+        return
+    state.persist_target = _wizard_ask_yes_no("Persist this target in the generated config?", default=state.persist_target, input_func=input_func)
+    _wizard_apply_target(state)
+
+
+# Asks how often the tool checks and when a user counts as inactive
+def _wizard_collect_polling_section(state, input_func=None):
+    state.config_values["LASTFM_CHECK_INTERVAL"] = _wizard_ask_duration("Polling interval while the user is not listening (seconds or use s/m/h/d)", int(state.config_values.get("LASTFM_CHECK_INTERVAL") or LASTFM_CHECK_INTERVAL), input_func=input_func)
+    state.config_values["LASTFM_ACTIVE_CHECK_INTERVAL"] = _wizard_ask_duration("Polling interval while the user is listening (seconds or use s/m/h/d)", int(state.config_values.get("LASTFM_ACTIVE_CHECK_INTERVAL") or LASTFM_ACTIVE_CHECK_INTERVAL), input_func=input_func)
+    state.config_values["LASTFM_INACTIVITY_CHECK"] = _wizard_ask_duration("Silence after the last scrobble before the user counts as inactive", int(state.config_values.get("LASTFM_INACTIVITY_CHECK") or LASTFM_INACTIVITY_CHECK), input_func=input_func)
+
+
+# Signs in to Last.fm with the entered pair, so a rejected credential is caught during setup
+def _wizard_verify_lastfm_credentials(api_key, api_secret):
+    try:
+        pylast.LastFMNetwork(api_key, api_secret).get_top_artists(limit=1)
+    except Exception as exc:
+        return classify_recovery_error(exc)
+    return None
+
+
+# Asks for the Last.fm API key and shared secret as one credential and checks the pair against Last.fm
+def _wizard_collect_auth_section(state, input_func=None, getpass_func=None, validator=None):
+    print(f"Create or view your Last.fm API key and shared secret: {LASTFM_API_REGISTRATION_URL}")
+    print(f"Credentials of an application you already registered: {LASTFM_API_ACCOUNTS_URL}")
+    configured = all(doctor_value_is_set(state.config_values.get(name)) for name in ("LASTFM_API_KEY", "LASTFM_API_SECRET"))
+    # The key and the secret are one credential, so the replace question covers the pair rather than each value
+    if configured and not _wizard_ask_yes_no("Replace the Last.fm API credentials already configured?", default=False, input_func=input_func):
+        return
+    verify = _wizard_verify_lastfm_credentials if validator is None else validator
+    while True:
+        api_key = _wizard_ask_secret("Last.fm API key", getpass_func=getpass_func)
+        api_secret = _wizard_ask_secret("Last.fm shared secret", getpass_func=getpass_func)
+        if not api_key or not api_secret:
+            # Monitoring cannot run without the pair, so leaving it unset has to be a decision rather than a fallthrough
+            if not _wizard_offer_retry("Last.fm API credentials", "Nothing can be monitored until both values are set", input_func=input_func):
+                return
+            continue
+        # Last.fm is contacted here, which takes long enough to look like a hang without a notice
+        print("  Checking the credentials with Last.fm ...")
+        advice = verify(api_key, api_secret)
+        if advice is None:
+            _wizard_queue_secret(state, "LASTFM_API_KEY", api_key, input_func=input_func)
+            _wizard_queue_secret(state, "LASTFM_API_SECRET", api_secret, input_func=input_func)
+            print("  Last.fm accepted the credentials.")
+            return
+        print(f"  {advice.summary}: {advice.detail}" if advice.detail else f"  {advice.summary}")
+        if advice.retryable:
+            # Being offline is the usual reason a correct pair fails here, so the values are kept rather than discarded
+            _wizard_queue_secret(state, "LASTFM_API_KEY", api_key, input_func=input_func)
+            _wizard_queue_secret(state, "LASTFM_API_SECRET", api_secret, input_func=input_func)
+            print("  The credentials were saved without being checked. Run --doctor to check them again.")
+            return
+        # A pair Last.fm keeps rejecting cannot be corrected from inside the loop, so the wizard must be leavable here too
+        if not _wizard_offer_retry("Last.fm API credentials", input_func=input_func):
+            return
+
+
+# Switches the Spotify metadata features off together, so a declined section leaves no half-configured app behind
+def _wizard_disable_spotify(state):
+    _wizard_clear_section(state, WIZARD_SPOTIFY_CONFIG_KEYS, ("SP_CLIENT_ID", "SP_CLIENT_SECRET"))
+    state.config_values["USE_TRACK_DURATION_FROM_SPOTIFY"] = False
+    state.config_values["TRACK_SONGS"] = False
+
+
+# Asks whether Spotify supplies track details and collects the optional app credentials behind that one gate
+def _wizard_collect_spotify_section(state, input_func=None, getpass_func=None):
+    enabled = bool(state.config_values.get("USE_TRACK_DURATION_FROM_SPOTIFY") or state.config_values.get("TRACK_SONGS"))
+    if not _wizard_ask_yes_no("Use Spotify for track details?", default=enabled, input_func=input_func):
+        _wizard_disable_spotify(state)
+        return
+    state.config_values["USE_TRACK_DURATION_FROM_SPOTIFY"] = _wizard_ask_yes_no("Take track duration from Spotify? Last.fm often lacks it or reports it wrong", default=bool(state.config_values.get("USE_TRACK_DURATION_FROM_SPOTIFY", True)), input_func=input_func)
+    state.config_values["TRACK_SONGS"] = _wizard_ask_yes_no("Play each scrobbled track in your own Spotify client?", default=bool(state.config_values.get("TRACK_SONGS")), input_func=input_func)
+    if not (state.config_values["USE_TRACK_DURATION_FROM_SPOTIFY"] or state.config_values["TRACK_SONGS"]):
+        _wizard_disable_spotify(state)
+        return
+    print(f"  Without app credentials the anonymous Spotify web player supplies the metadata. Create an app at {SPOTIFY_DASHBOARD_URL}")
+    configured = all(doctor_value_is_set(state.config_values.get(name)) for name in ("SP_CLIENT_ID", "SP_CLIENT_SECRET"))
+    question = "Replace the Spotify app credentials already configured?" if configured else "Add Spotify app credentials? They are optional and are tried before the anonymous backend"
+    if not _wizard_ask_yes_no(question, default=False, input_func=input_func):
+        if not configured:
+            print("  Keeping the anonymous Spotify web player, which needs no credentials.")
+        return
+    while True:
+        client_id = _wizard_ask_secret("Spotify client ID", getpass_func=getpass_func)
+        client_secret = _wizard_ask_secret("Spotify client secret", getpass_func=getpass_func)
+        if not client_id or not client_secret:
+            if not _wizard_offer_retry("Spotify app credentials", "The anonymous Spotify web player is used instead", input_func=input_func):
+                return
+            continue
+        print("  Checking the credentials with Spotify ...")
+        try:
+            spotify_get_access_token(client_id, client_secret)
+        except Exception as exc:
+            print(f"  Spotify did not accept the credentials: {sanitize_error_text(exc)}")
+            if not _wizard_offer_retry("Spotify app credentials", "The anonymous Spotify web player is used instead", input_func=input_func):
+                return
+            continue
+        _wizard_queue_secret(state, "SP_CLIENT_ID", client_id, input_func=input_func)
+        _wizard_queue_secret(state, "SP_CLIENT_SECRET", client_secret, input_func=input_func)
+        print("  Spotify accepted the credentials.")
+        state.config_values["SP_TOKENS_FILE"] = _wizard_normalize_json_path(_wizard_ask_text("Token cache file (blank keeps the tokens in memory only)", default=str(state.config_values.get("SP_TOKENS_FILE") or ""), input_func=input_func))
+        return
+
+
+# Asks which profile changes are watched, and how often, since one timer covers all of them
+def _wizard_collect_tracking_section(state, input_func=None):
+    questions = (
+        ("TRACK_FOLLOWERS", "Watch for follower changes?"),
+        ("TRACK_FOLLOWINGS", "Watch for following changes?"),
+        ("TRACK_DISPLAY_NAME", "Watch for display name changes?"),
+        ("TRACK_BIO", "Watch for About Me changes?"),
+    )
+    for key, question in questions:
+        state.config_values[key] = _wizard_ask_yes_no(question, default=bool(state.config_values.get(key)), input_func=input_func)
+    if any(state.config_values.get(key) for key, _question in questions):
+        state.config_values["FRIENDS_CHECK_INTERVAL"] = _wizard_ask_duration("How often to check for those changes", int(state.config_values.get("FRIENDS_CHECK_INTERVAL") or FRIENDS_CHECK_INTERVAL), input_func=input_func)
+
+
+# Adds the .csv extension when the answer carries none, so a bare name still names a CSV file
+def _wizard_normalize_csv_path(answer):
+    text = str(answer).strip()
+    if not text or Path(text).suffix:
+        return text
+    return text + ".csv"
+
+
+# Adds the .json extension when the answer carries none, so a bare name still names a JSON file
+def _wizard_normalize_json_path(answer):
+    text = str(answer).strip()
+    if not text or Path(text).suffix:
+        return text
+    return text + ".json"
+
+
+# Collects the files monitoring writes and the optional list of tracks to alert on
+def _wizard_collect_output_section(state, input_func=None):
+    state.config_values["DISABLE_LOGGING"] = not _wizard_ask_yes_no("Write the normal per-user log file?", default=not bool(state.config_values.get("DISABLE_LOGGING")), input_func=input_func)
+    state.config_values["CSV_FILE"] = _wizard_normalize_csv_path(_wizard_ask_text("Optional CSV output path (blank disables it)", default=str(state.config_values.get("CSV_FILE") or ""), input_func=input_func))
+    while True:
+        answer = _wizard_ask_text("Optional file listing tracks and albums to alert on (blank disables it)", default=str(state.config_values.get("MONITOR_LIST_FILE") or ""), input_func=input_func).strip()
+        if not answer or Path(answer).expanduser().is_file():
+            state.config_values["MONITOR_LIST_FILE"] = answer
+            return
+        print(f"  '{answer}' does not exist. The alerts it drives would never fire.")
+        if not _wizard_offer_retry("track list file", "Monitored track alerts stay off", input_func=input_func):
+            state.config_values["MONITOR_LIST_FILE"] = ""
+            return
+
+
+# Returns the alerts this setup can actually produce, so a question is never asked about one that cannot fire
+def _wizard_available_alert_keys(state, keys):
+    available = []
+    for key in keys:
+        requirements = WIZARD_ALERT_REQUIREMENTS.get(key.replace("WEBHOOK_", "", 1) if key.startswith("WEBHOOK_") else key, ())
+        if requirements and not any(state.config_values.get(name) for name in requirements):
+            continue
+        available.append(key)
+    return tuple(available)
+
+
+# Switches every email alert off together, so an abandoned answer cannot leave half a mail server configured
+def _wizard_disable_email(state):
+    _wizard_clear_section(state, WIZARD_SMTP_CONFIG_KEYS, ("SMTP_PASSWORD",))
+    # Only the alerts the wizard offers are cleared, so alerts enabled by hand survive a declined email section
+    for key in WIZARD_EMAIL_NOTIFICATION_KEYS:
+        state.config_values[key] = False
+
+
+# Signs in to the collected mail server without sending anything, so a refused login is caught during setup
+def _wizard_verify_smtp(values, password):
+    names = ("SMTP_HOST", "SMTP_PORT", "SMTP_SSL", "SMTP_USER", "SMTP_PASSWORD", "SENDER_EMAIL", "RECEIVER_EMAIL")
+    previous = {name: globals()[name] for name in names}
+    smtp_object = None
+    try:
+        globals().update(values)
+        # A blank answer keeps the password already stored, which is the one the sign-in must then prove
+        globals()["SMTP_PASSWORD"] = password or previous["SMTP_PASSWORD"]
+        smtp_object = smtp_connect_and_login(SMTP_SSL, smtp_timeout=WIZARD_SMTP_TIMEOUT)
+        return None
+    except Exception as exc:
+        return classify_recovery_error(exc, "email")
+    finally:
+        if smtp_object is not None:
+            try:
+                smtp_object.quit()
+            except Exception:
+                pass
+        globals().update(previous)
+
+
+# Reports the outcome of the sign-in check: True to continue, False to ask again, None to switch email off
+def _wizard_smtp_sign_in_accepted(values, password, input_func=None):
+    print("  Checking the sign-in with the mail server ...")
+    advice = _wizard_verify_smtp(values, password)
+    if advice is None:
+        print("  The mail server accepted the sign-in. No email was sent.")
+        return True
+    print(f"  {advice.summary}: {advice.detail}" if advice.detail else f"  {advice.summary}")
+    print(f"  To fix: {advice.fix}")
+    if _wizard_offer_retry("mail server settings", input_func=input_func):
+        return False
+    if advice.retryable:
+        # Being offline is the usual reason a correct setup fails here, so the answers are kept rather than discarded
+        print("  The settings were kept without being checked. Run --doctor to check the sign-in again.")
+        return True
+    print("  Email notifications stay off until the mail server accepts the settings.")
+    return None
+
+
+# Reports whether one required mail server answer was abandoned, switching the channel off when it was
+def _wizard_email_answer_missing(state, key):
+    if state.config_values.get(key):
+        return False
+    print("  Email notifications stay off until every mail server setting is answered.")
+    _wizard_disable_email(state)
+    return True
+
+
+# Reports whether the saved settings already send email, so a rerun proposes keeping the channel it has
+def _wizard_email_enabled(config_values):
+    # The error alert ships switched on, so on its own it counts only once a mail server has been named
+    for key in WIZARD_EMAIL_NOTIFICATION_KEYS:
+        if key != "ERROR_NOTIFICATION" and bool(config_values.get(key)):
+            return True
+    return bool(config_values.get("ERROR_NOTIFICATION")) and doctor_value_is_set(config_values.get("SMTP_HOST"))
+
+
+# Asks which alerts one channel sends, from the presets plus a custom branch over the alerts this setup can produce
+def _wizard_collect_alert_preset(state, question, keys, recommended, prefix="", input_func=None):
+    available = _wizard_available_alert_keys(state, keys)
+    recommended_available = tuple(key for key in recommended if key in available)
+    preset = _wizard_ask_choice(question, [
+        ("Activity and errors, recommended", "Alerts when listening starts or stops, when offline scrobbles arrive and when monitoring has a problem."),
+        ("Every supported alert", "Includes an alert on every single song change."),
+        ("Custom", "Choose each alert separately."),
+    ], input_func=input_func)
+    if preset == 0:
+        selected = {key: key in recommended_available for key in keys}
+    elif preset == 1:
+        selected = {key: key in available for key in keys}
+    else:
+        print()
+        selected = {}
+        for key in keys:
+            if key not in available:
+                selected[key] = False
+                continue
+            label = WIZARD_ALERT_LABELS[key.replace("WEBHOOK_", "", 1) if key.startswith("WEBHOOK_") else key]
+            selected[key] = _wizard_ask_yes_no(f"{prefix}{label}?", default=False, input_func=input_func)
+    state.config_values.update(selected)
+
+
+# Asks whether to send email alerts and collects only the settings that choice needs
+def _wizard_collect_email_section(state, input_func=None, getpass_func=None):
+    if not _wizard_ask_yes_no("Configure email notifications?", default=_wizard_email_enabled(state.config_values), input_func=input_func):
+        _wizard_disable_email(state)
+        return
+    while True:
+        state.config_values["SMTP_HOST"] = _wizard_ask_text("SMTP host", default=_wizard_default(state.config_values.get("SMTP_HOST")), required=True, input_func=input_func)
+        if _wizard_email_answer_missing(state, "SMTP_HOST"):
+            return
+        state.config_values["SMTP_PORT"] = _wizard_ask_positive_int("SMTP port", int(state.config_values.get("SMTP_PORT") or 587), maximum=65535, input_func=input_func)
+        state.config_values["SMTP_SSL"] = _wizard_ask_yes_no("Enable TLS/SSL for SMTP?", default=bool(state.config_values.get("SMTP_SSL", True)), input_func=input_func)
+        state.config_values["SMTP_USER"] = _wizard_ask_text("SMTP username", default=_wizard_default(state.config_values.get("SMTP_USER")), required=True, input_func=input_func)
+        if _wizard_email_answer_missing(state, "SMTP_USER"):
+            return
+        state.config_values["SENDER_EMAIL"] = _wizard_ask_text("Sender email", default=_wizard_default(state.config_values.get("SENDER_EMAIL")), required=True, input_func=input_func)
+        if _wizard_email_answer_missing(state, "SENDER_EMAIL"):
+            return
+        state.config_values["RECEIVER_EMAIL"] = _wizard_ask_text("Receiver email", default=_wizard_default(state.config_values.get("RECEIVER_EMAIL")), required=True, input_func=input_func)
+        if _wizard_email_answer_missing(state, "RECEIVER_EMAIL"):
+            return
+        password = _wizard_ask_secret("SMTP password", getpass_func=getpass_func)
+        if password:
+            _wizard_queue_secret(state, "SMTP_PASSWORD", password, input_func=input_func)
+        outcome = _wizard_smtp_sign_in_accepted({name: state.config_values[name] for name in WIZARD_SMTP_CONFIG_KEYS}, password, input_func=input_func)
+        if outcome is None:
+            _wizard_disable_email(state)
+            return
+        if outcome:
+            break
+    _wizard_collect_alert_preset(state, "Which email notifications should be enabled?", WIZARD_EMAIL_NOTIFICATION_KEYS, WIZARD_RECOMMENDED_EMAIL_KEYS, prefix="Email on ", input_func=input_func)
+
+
+# Switches the channel and every alert it owns off together, so a half-configured webhook cannot be written
+def _wizard_disable_webhook(state):
+    _wizard_clear_section(state, ("WEBHOOK_PROVIDER",), ("WEBHOOK_URL", "NTFY_ACCESS_TOKEN"))
+    state.config_values["WEBHOOK_ENABLED"] = False
+    state.config_values.update({name: False for name in WIZARD_WEBHOOK_NOTIFICATION_KEYS})
+
+
+# Asks whether to send webhook alerts and collects the provider, the hidden URL and the alert choices
+def _wizard_collect_webhook_section(state, input_func=None, getpass_func=None):
+    if not _wizard_ask_yes_no("Set up webhook alerts (Discord, ntfy etc.)?", default=bool(state.config_values.get("WEBHOOK_ENABLED")), input_func=input_func):
+        _wizard_disable_webhook(state)
+        return
+    provider_choice = _wizard_ask_choice("Which webhook service should receive alerts?", [
+        ("Discord", "Sends a Discord embed to one channel webhook."),
+        ("ntfy", "Sends a native notification to one ntfy topic URL."),
+    ], default_index=0 if normalized_webhook_provider(state.config_values.get("WEBHOOK_PROVIDER")) != "ntfy" else 1, input_func=input_func)
+    provider = "discord" if provider_choice == 0 else "ntfy"
+    state.config_values["WEBHOOK_PROVIDER"] = provider
+    if provider == "discord":
+        print("  In Discord: Edit Channel > Integrations > Webhooks > New Webhook > Copy Webhook URL.")
+    else:
+        print("  In ntfy: choose a hard-to-guess topic and paste its complete topic URL, such as https://ntfy.sh/your-private-topic.")
+    replace_webhook = True
+    if _wizard_existing_secret("WEBHOOK_URL", state.env_path):
+        choice = _wizard_ask_choice("Which webhook URL should be used?", [
+            ("Keep the saved URL", "Keeps the private value without displaying or changing it."),
+            ("Paste a new URL", "Uses a hidden prompt then saves the new private value in the dotenv file."),
+        ], input_func=input_func)
+        replace_webhook = choice == 1
+    if replace_webhook:
+        while True:
+            webhook_url = _wizard_ask_secret("Paste the Discord webhook URL" if provider == "discord" else "Paste the ntfy topic URL", getpass_func=getpass_func)
+            if validate_webhook_url(webhook_url):
+                state.secret_updates["WEBHOOK_URL"] = webhook_url
+                break
+            # Nothing can be delivered without a destination, so giving up has to stay reachable from the prompt
+            if not webhook_url:
+                if not _wizard_offer_retry("webhook URL", "Webhook alerts stay off until one is set", input_func=input_func):
+                    _wizard_disable_webhook(state)
+                    return
+                continue
+            print("  That does not look like a complete HTTPS webhook URL. Copy it from the webhook service and try again.")
+            if not _wizard_offer_retry("webhook URL", input_func=input_func):
+                _wizard_disable_webhook(state)
+                return
+    if provider == "ntfy":
+        _wizard_collect_ntfy_access_token(state, input_func=input_func, getpass_func=getpass_func)
+    state.config_values["WEBHOOK_ENABLED"] = True
+    _wizard_collect_alert_preset(state, "Which webhook alerts should be sent?", WIZARD_WEBHOOK_NOTIFICATION_KEYS, WIZARD_RECOMMENDED_WEBHOOK_KEYS, prefix="Send a webhook alert on ", input_func=input_func)
+
+
+# Collects an optional ntfy access token without displaying it or contacting the service
+def _wizard_collect_ntfy_access_token(state, input_func=None, getpass_func=None):
+    if _wizard_existing_secret("NTFY_ACCESS_TOKEN", state.env_path):
+        choice = _wizard_ask_choice("Which ntfy authentication should be used?", [
+            ("Keep the saved access token", "Keeps the private value without displaying or changing it."),
+            ("Paste a new access token", "Uses a hidden prompt then saves the replacement in the dotenv file."),
+            ("Do not use an access token", "Disables the saved token. Authentication in the topic URL still works."),
+        ], input_func=input_func)
+        if choice == 0:
+            return
+        if choice == 2:
+            state.secret_updates["NTFY_ACCESS_TOKEN"] = ""
+            print("  The saved ntfy access token will be disabled without being displayed.")
+            return
+    elif not _wizard_ask_yes_no("Authenticate this ntfy topic with a separate access token?", default=False, input_func=input_func):
+        print("  No separate access token selected. Authentication already present in the topic URL still works.")
+        return
+    while True:
+        token = _wizard_ask_secret("Paste the ntfy access token only", getpass_func=getpass_func)
+        if not token or ("\r" not in token and "\n" not in token and not token.casefold().startswith(("bearer ", "basic "))):
+            if token:
+                state.secret_updates["NTFY_ACCESS_TOKEN"] = token
+            return
+        print("  Paste only the access token without a Bearer or Basic prefix.")
+        if not _wizard_offer_retry("ntfy access token", input_func=input_func):
+            return
+
+
+# Changes where setup writes, re-asking the sections that hold secrets when the dotenv destination moves
+def _wizard_collect_destination_section(state, input_func=None, getpass_func=None):
+    while True:
+        config_text = _wizard_ask_text("Configuration file destination", default=str(state.config_path), required=True, input_func=input_func)
+        try:
+            selected_config = _wizard_validate_destination(config_text, "Configuration destination")
+            break
+        except ValueError as exc:
+            print(f"  {exc}.")
+    # Both sides are compared resolved, so an unchanged answer written a different way is not read as a move
+    if selected_config != Path(state.config_path).expanduser().resolve():
+        chosen_config = _wizard_choose_config_destination(selected_config, input_func=input_func)
+        # Giving up on every offered path keeps the current destination rather than cancelling the whole setup
+        if chosen_config is not None:
+            state.config_path = chosen_config
+    while True:
+        env_text = _wizard_ask_text("Dotenv file destination", default=str(state.env_path), required=True, input_func=input_func)
+        if env_text.casefold() == "none":
+            print("  Setup needs a writable dotenv file and cannot use 'none'.")
+            continue
+        try:
+            selected_env = _wizard_validate_destination(env_text, "Dotenv destination")
+        except ValueError as exc:
+            print(f"  {exc}.")
+            continue
+        # One file cannot hold both, since saving the configuration would overwrite the secrets beside it
+        if selected_env == Path(state.config_path).expanduser().resolve():
+            print("  The dotenv file has to be a different file from the configuration.")
+            continue
+        break
+    state.config_values["DOTENV_FILE"] = str(selected_env)
+    if selected_env == Path(state.env_path).expanduser().resolve():
+        return
+    state.env_path = selected_env
+    # A secret kept rather than retyped was never queued, so it would be missing from a dotenv file that just moved
+    print("  The dotenv destination changed. Re-enter authentication and notification settings that may contain secrets.")
+    _wizard_collect_auth_section(state, input_func=input_func, getpass_func=getpass_func)
+    print()
+    _wizard_collect_spotify_section(state, input_func=input_func, getpass_func=getpass_func)
+    print()
+    _wizard_collect_email_section(state, input_func=input_func, getpass_func=getpass_func)
+    print()
+    _wizard_collect_webhook_section(state, input_func=input_func, getpass_func=getpass_func)
+
+
+# Runs one editable section again after resetting only the keys it owns
+def _wizard_edit_setup_section(state, input_func=None, getpass_func=None):
+    options = [(label, description) for _name, label, description, _config_keys, _secret_keys in WIZARD_SECTIONS]
+    options.append(("Return to summary", "Keep every current answer."))
+    choice = _wizard_ask_choice("Which setup section should be changed?", options, input_func=input_func)
+    if choice == len(WIZARD_SECTIONS):
+        return
+    name, _label, _description, config_keys, secret_keys = WIZARD_SECTIONS[choice]
+    _wizard_reset_section(state, config_keys, secret_keys)
+    if name == "Target":
+        state.target = ""
+    print()
+    collectors = {
+        "Target": lambda: _wizard_collect_target_section(state, input_func=input_func),
+        "Polling": lambda: _wizard_collect_polling_section(state, input_func=input_func),
+        "Authentication": lambda: _wizard_collect_auth_section(state, input_func=input_func, getpass_func=getpass_func),
+        "Spotify": lambda: _wizard_collect_spotify_section(state, input_func=input_func, getpass_func=getpass_func),
+        "Tracking": lambda: _wizard_collect_tracking_section(state, input_func=input_func),
+        "Output": lambda: _wizard_collect_output_section(state, input_func=input_func),
+        "Email": lambda: _wizard_collect_email_section(state, input_func=input_func, getpass_func=getpass_func),
+        "Webhook": lambda: _wizard_collect_webhook_section(state, input_func=input_func, getpass_func=getpass_func),
+        "Destinations": lambda: _wizard_collect_destination_section(state, input_func=input_func, getpass_func=getpass_func),
+    }
+    collectors[name]()
+
+
+# Prints one aligned label and value block, so every summary row lines up
+def _wizard_print_summary_rows(rows):
+    width = max(len(label) for label, _ in rows) + 1
+    for label, value in rows:
+        print(f"  {(label + ':'):<{width}} {value}")
+
+
+# Names the alerts one channel will send, or says none
+def _wizard_enabled_alerts(state, keys):
+    labels = [WIZARD_ALERT_LABELS[key.replace("WEBHOOK_", "", 1) if key.startswith("WEBHOOK_") else key] for key in keys if state.config_values.get(key)]
+    return ", ".join(labels) if labels else "none"
+
+
+# Shows everything that is about to be written, by name and never by secret value
+def _wizard_print_setup_summary(state):
+    credentials_set = all(key in state.secret_updates or doctor_value_is_set(state.config_values.get(key)) for key in ("LASTFM_API_KEY", "LASTFM_API_SECRET"))
+    tracked = [label for key, label in (("TRACK_FOLLOWERS", "followers"), ("TRACK_FOLLOWINGS", "followings"), ("TRACK_DISPLAY_NAME", "display name"), ("TRACK_BIO", "About Me")) if state.config_values.get(key)]
+    spotify_enabled = bool(state.config_values.get("USE_TRACK_DURATION_FROM_SPOTIFY") or state.config_values.get("TRACK_SONGS"))
+    spotify_app = "SP_CLIENT_ID" in state.secret_updates or doctor_value_is_set(state.config_values.get("SP_CLIENT_ID"))
+    email_alerts = _wizard_enabled_alerts(state, WIZARD_EMAIL_NOTIFICATION_KEYS)
+    webhook_alerts = _wizard_enabled_alerts(state, WIZARD_WEBHOOK_NOTIFICATION_KEYS) if state.config_values.get("WEBHOOK_ENABLED") else "none"
+    rows = [
+        ("Target", state.target or "not set"),
+        ("Persist target", "yes" if state.persist_target else "no"),
+        ("Polling interval while idle", _wizard_format_duration(int(state.config_values.get("LASTFM_CHECK_INTERVAL") or 0))),
+        ("Polling interval while listening", _wizard_format_duration(int(state.config_values.get("LASTFM_ACTIVE_CHECK_INTERVAL") or 0))),
+        ("Inactivity threshold", _wizard_format_duration(int(state.config_values.get("LASTFM_INACTIVITY_CHECK") or 0))),
+        ("Authentication status", "complete" if credentials_set else "incomplete"),
+        ("Spotify track details", ("enabled with an app" if spotify_app else "enabled, anonymous backend") if spotify_enabled else "disabled"),
+        ("Profile tracking", ", ".join(tracked) if tracked else "disabled"),
+        ("Email", "enabled" if email_alerts != "none" else "disabled"),
+        ("Email notifications", email_alerts),
+        ("Webhook", f"enabled ({webhook_provider_display_name(state.config_values.get('WEBHOOK_PROVIDER'))})" if state.config_values.get("WEBHOOK_ENABLED") else "disabled"),
+        ("Webhook alerts", webhook_alerts),
+        ("Output log", "disabled" if state.config_values.get("DISABLE_LOGGING") else "enabled"),
+        ("CSV output", state.config_values.get("CSV_FILE") or "disabled"),
+        ("Monitored track list", state.config_values.get("MONITOR_LIST_FILE") or "disabled"),
+        ("Config destination", state.config_path),
+        ("Dotenv destination", state.env_path),
+        ("Install method", install_method()),
+    ]
+    print("\nSetup summary\n")
+    _wizard_print_summary_rows(rows)
+
+
+# Loops on the summary until the user saves or explicitly discards, so nothing is written by accident
+def _wizard_review_setup(state, input_func=None, getpass_func=None):
+    while True:
+        _wizard_print_setup_summary(state)
+        action = _wizard_ask_choice("What would you like to do?", [
+            ("Save settings", "Write the displayed settings to the selected files."),
+            ("Review or change settings", "Edit one section without losing the other answers."),
+            ("Discard answers and exit", "Leave the destination files unchanged."),
+        ], input_func=input_func)
+        if action == 0:
+            return True
+        if action == 1:
+            _wizard_edit_setup_section(state, input_func=input_func, getpass_func=getpass_func)
+            continue
+        print()
+        if _wizard_ask_yes_no("Discard all entered answers and exit?", default=False, input_func=input_func):
+            return False
+        print("  Setup answers retained.")
+
+
+# Prints where setup will write and which install method the printed commands are written for
+def _wizard_print_setup_destinations(method, config_path, env_path):
+    print(f"Detected install method: {method}")
+    print(f"Configuration:          {config_path}")
+    print(f"Dotenv:                 {env_path}\n")
+
+
+# Puts the values setup just saved into effect, so doctor checks the written files instead of the pre-setup state
+def _wizard_apply_saved_values(state, env_path=None):
+    # Config values first: they carry the unset placeholders for every secret, which would otherwise
+    # overwrite the secrets applied below and make doctor report a working setup as unconfigured
+    globals().update(state.config_values)
+    if env_path:
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(str(env_path), override=True, interpolate=False)
+        except Exception:
+            # Reading the file back needs python-dotenv, so the entered values are applied directly below
+            pass
+    for secret in SECRET_KEYS:
+        value = os.environ.get(secret)
+        if value is not None:
+            globals()[secret] = value
+    # Secrets exported before startup keep winning here, exactly as they will when monitoring runs
+    for key, value in state.secret_updates.items():
+        if os.environ.get(key) is None and value:
+            globals()[key] = value
+
+
+# Builds the exact local command that starts this monitor, used when setup offers to launch it
+def _wizard_local_command_args(target=None, config_path=None, env_path=None):
+    executable = sys.executable or ("python" if platform.system() == "Windows" else "python3")
+    arguments = [executable, "-m", TOOL_NAME] if install_method() == INSTALL_METHOD_PYPI else [executable, str(Path(__file__).resolve())]
+    if target:
+        arguments.append(str(target))
+    if config_path:
+        arguments.extend(["--config-file", str(config_path)])
+    if env_path:
+        arguments.extend(["--env-file", str(env_path)])
+    return arguments
+
+
+# Hands the terminal to the monitor, replacing this process where the platform allows it
+def _wizard_launch_monitor(arguments):
+    command = [str(argument) for argument in arguments]
+    if platform.system() == "Windows":
+        try:
+            return subprocess.run(command, check=False).returncode
+        except KeyboardInterrupt:
+            return 0
+    os.execv(command[0], command)
+    return 0
+
+
+# Runs the guided setup, holding every answer until the user saves
+def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input_func=None, getpass_func=None, interactive=None):
+    terminal_is_interactive = sys.stdin.isatty() if interactive is None else interactive
+    if not terminal_is_interactive:
+        print("The setup wizard needs an interactive terminal (TTY).")
+        print("Run --setup from an interactive shell or use --generate-config and edit the files manually.")
+        print(f"Guide: {QUICK_START_GUIDE_URL}")
+        return 1
+
+    try:
+        config_path, env_path = _wizard_destinations(config_file, env_file)
+    except (ValueError, RecoveryError) as exc:
+        print_recovery_error(exc, context="file", detail=str(exc))
+        return 1
+
+    print("Setup Wizard\n")
+    print("This asks a few questions and writes a ready-to-run configuration.")
+    _wizard_print_default_guidance()
+    print("Secrets go to the dotenv file. Non-secret settings go to the config file.")
+    print()
+    _wizard_print_setup_destinations(install_method(), config_path, env_path)
+
+    baseline_values = {name: value for name, value in globals().items() if name in _config_allowed_names()}
+    state = WizardSetupState(config_path, env_path, baseline_values)
+    state.config_values["DOTENV_FILE"] = str(env_path)
+
+    try:
+        # Asked before anything else, so a config that has to be replaced is agreed to rather than discovered at Save
+        config_existed = Path(config_path).exists()
+        chosen_config = _wizard_choose_config_destination(config_path, input_func=input_func)
+        if chosen_config is None:
+            print("\nSetup cancelled. Destination files were not changed.")
+            return 1
+        state.config_path = chosen_config
+        # A destination nothing was asked about printed nothing, so the separator would leave a blank gap
+        if config_existed:
+            print()
+        _wizard_collect_target_section(state, initial_target, input_func=input_func)
+        print()
+        _wizard_collect_polling_section(state, input_func=input_func)
+        print()
+        _wizard_collect_auth_section(state, input_func=input_func, getpass_func=getpass_func)
+        print()
+        _wizard_collect_spotify_section(state, input_func=input_func, getpass_func=getpass_func)
+        print()
+        _wizard_collect_tracking_section(state, input_func=input_func)
+        print()
+        _wizard_collect_output_section(state, input_func=input_func)
+        print()
+        _wizard_collect_email_section(state, input_func=input_func, getpass_func=getpass_func)
+        print()
+        _wizard_collect_webhook_section(state, input_func=input_func, getpass_func=getpass_func)
+        if not _wizard_review_setup(state, input_func=input_func, getpass_func=getpass_func):
+            print("\nSetup cancelled. Destination files were not changed.")
+            return 1
+    except (EOFError, KeyboardInterrupt):
+        print("Setup cancelled. Destination files were not changed.")
+        return 1
+
+    # Everything above only filled the state, so this is the first and only point anything reaches disk
+    try:
+        backup_path, _written = write_generated_config(state.config_path, generate_config_with_current_values(state.config_values), force=True)
+    except Exception as exc:
+        print_recovery_error(exc, context="file", detail=f"Could not write the configuration to '{state.config_path}'")
+        return 1
+    dotenv_path = None
+    if state.secret_updates:
+        try:
+            dotenv_path = update_dotenv_file(state.env_path, state.secret_updates)
+        except Exception as exc:
+            print_recovery_error(exc, context="file", detail=f"Could not write secrets to '{state.env_path}'")
+            return 1
+
+    print("\nSaved files\n")
+    print(f"  Configuration: {state.config_path}")
+    if backup_path:
+        print(f"  Backup:        {backup_path}")
+    if dotenv_path:
+        print(f"  Secrets:       {dotenv_path}")
+
+    doctor_exit = None
+    if state.target:
+        print()
+    try:
+        if state.target and _wizard_ask_yes_no("Run doctor now? It writes no files and offers real delivery tests only with separate approval.", default=True, input_func=input_func):
+            print()
+            _wizard_apply_saved_values(state, env_path=state.env_path if dotenv_path else None)
+            doctor_exit = run_doctor(target_value=state.target, config_path=str(state.config_path), env_path=str(state.env_path) if dotenv_path else None)
+    except (EOFError, KeyboardInterrupt):
+        # The files are already written, so an interrupt here only skips the optional check
+        print("Setup is saved. Use the commands below when ready.")
+
+    env_argument = str(state.env_path) if dotenv_path else ""
+    # A persisted target is already in the config file, so the printed commands stay short
+    target_arguments = [] if state.persist_target or not state.target else [state.target]
+    print("\nNext steps\n")
+    _wizard_print_command("Check setup again:", render_command(["--doctor"] + target_arguments, config_path=str(state.config_path), env_path=env_argument))
+    start_label = "After Doctor passes, start monitoring:" if doctor_exit not in (None, 0) else "Start monitoring:"
+    _wizard_print_command(start_label, render_command(target_arguments, config_path=str(state.config_path), env_path=env_argument))
+    print(f"Guide: {QUICK_START_GUIDE_URL}\n")
+
+    try:
+        # Only a doctor run that passed proves the saved setup can monitor, so the launch offer waits for it
+        start_monitoring = bool(state.target and doctor_exit == 0 and _wizard_ask_yes_no("Start monitoring now? Monitoring will continue until Ctrl+C.", default=True, input_func=input_func))
+    except (EOFError, KeyboardInterrupt):
+        # The files are already written, so an interrupt here only skips the optional launch
+        print("Setup is saved. Start monitoring with the command above when ready.")
+        return 0
+    if start_monitoring:
+        launch_arguments = _wizard_local_command_args(target=None if state.persist_target else state.target, config_path=state.config_path, env_path=state.env_path if dotenv_path else None)
+        sys.stdout.flush()
+        return _wizard_launch_monitor(launch_arguments)
+    return 0
 
 # Applies every command-line override that only assigns a setting, so the preflight report and the
 # monitoring run are decided by the same values rather than by where in main each flag was handled
@@ -6476,7 +7547,7 @@ def apply_cli_overrides(args):
 
 # Runs the command-line interface
 def main():
-    global CLI_CONFIG_PATH, CONFIG_DISCOVERY_DISABLED, DOTENV_FILE, CLEAR_SCREEN, LIVENESS_REMINDER_SECONDS, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_PROFILE_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, PROFILE_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
+    global CLI_CONFIG_PATH, CONFIG_DISCOVERY_DISABLED, DOTENV_FILE, CLEAR_SCREEN, LIVENESS_REMINDER_SECONDS, LASTFM_USERNAME, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_PROFILE_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, PROFILE_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
 
     if "--generate-config" in sys.argv and not any(flag in sys.argv for flag in SECRET_ACTION_FLAGS):
         config_content = CONFIG_BLOCK.strip("\n") + "\n"
@@ -6576,6 +7647,12 @@ def main():
         dest="force",
         action="store_true",
         help="Let --generate-config replace an existing file, after a timestamped backup",
+    )
+    conf.add_argument(
+        "--setup",
+        dest="setup",
+        action="store_true",
+        help="Run the guided setup and write a ready-to-run configuration",
     )
     conf.add_argument(
         "--env-file",
@@ -6890,9 +7967,6 @@ def main():
     if args.debug_mode is True:
         DEBUG_MODE = True
 
-    if len(sys.argv) == 1:
-        sys.exit(print_welcome_screen())
-
     if args.config_file:
         CONFIG_DISCOVERY_DISABLED = args.config_file.casefold() == "none"
         # The sentinel is kept unexpanded, so every command this run prints reads back the setup it used
@@ -6900,8 +7974,9 @@ def main():
 
     cfg_path = find_config_file(CLI_CONFIG_PATH)
 
-    # A missing path is still an error, since only the literal 'none' is a selection
-    if not cfg_path and CLI_CONFIG_PATH and not CONFIG_DISCOVERY_DISABLED:
+    # A missing path is still an error, since only the literal 'none' is a selection.
+    # Setup is allowed to name a file that does not exist yet, since creating it is the point
+    if not cfg_path and CLI_CONFIG_PATH and not CONFIG_DISCOVERY_DISABLED and not args.setup:
         print_recovery_error(context="config", detail=f"Config file '{CLI_CONFIG_PATH}' does not exist")
         sys.exit(1)
 
@@ -6911,6 +7986,10 @@ def main():
 
     if args.debug_mode is True:
         DEBUG_MODE = True
+
+    # Runs after the config file is read, so a saved LASTFM_USERNAME counts as a target
+    if len(sys.argv) == 1 and not LASTFM_USERNAME:
+        sys.exit(print_welcome_screen())
 
     apply_tls_verification_setting()
 
@@ -6966,7 +8045,8 @@ def main():
             # The SIGHUP reload still overrides, because there the edited file is exactly what must take effect.
             if DOTENV_FILE:
                 env_path = DOTENV_FILE
-                if not os.path.isfile(env_path):
+                # Setup writes that file, so naming one that is not there yet is its destination, not a problem
+                if not os.path.isfile(env_path) and not args.setup:
                     print(f"* Warning: dotenv file '{env_path}' does not exist\n")
                 else:
                     load_dotenv(env_path, override=False, interpolate=False)
@@ -6988,6 +8068,14 @@ def main():
 
     apply_webhook_cli_overrides(args, parser)
     apply_cli_overrides(args)
+
+    # The positional wins over the saved setting, and every read below sees the settled target
+    if not args.username and LASTFM_USERNAME:
+        args.username = LASTFM_USERNAME
+
+    if args.setup:
+        # Runs here rather than earlier so the values already in effect become the defaults it offers
+        sys.exit(run_setup_wizard(initial_target=args.username, config_file=args.config_file or cfg_path, env_file=args.env_file or env_path))
 
     if args.doctor:
         sys.exit(run_doctor(target_value=args.username, config_path=cfg_path, env_path=env_path))
