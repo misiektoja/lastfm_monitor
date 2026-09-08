@@ -894,6 +894,16 @@ class Logger(object):
         self.terminal.flush()
         self.logfile.flush()
 
+    # Writes one message only to the terminal, so a line that orients a reader at a screen stays out of the log
+    def terminal_only(self, message):
+        self.terminal.write(message)
+        self.terminal.flush()
+
+    # Writes one message only to the log, so the file keeps the full view whichever one the terminal was shown
+    def log_only(self, message):
+        self.logfile.write(normalize_log_separators(message.expandtabs(8)))
+        self.logfile.flush()
+
     def flush(self):
         pass
 
