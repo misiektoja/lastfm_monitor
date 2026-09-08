@@ -189,17 +189,80 @@ class TestRendering:
         assert monitor.RecoveryError(monitor.classify_recovery_error(cause), cause).__cause__ is cause
 
 
+# A real Last.fm key is 32 hex characters, so anything at that length has to be replaced wherever it appears
+FULL_LENGTH_KEY = "lastfmapikey00000000000000000000"
+
+
 class TestRedaction:
     def test_a_configured_secret_is_replaced_in_every_field(self, monkeypatch):
-        monkeypatch.setattr(monitor, "LASTFM_API_KEY", "s3cret-key-value")
-        advice = monitor.make_recovery_advice("unknown", "Failed with s3cret-key-value", "Retry with s3cret-key-value", True, "Sent s3cret-key-value")
-        assert "s3cret-key-value" not in advice.summary + advice.fix + advice.detail
+        monkeypatch.setattr(monitor, "LASTFM_API_KEY", FULL_LENGTH_KEY)
+        advice = monitor.make_recovery_advice("unknown", f"Failed with {FULL_LENGTH_KEY}", f"Retry with {FULL_LENGTH_KEY}", True, f"Sent {FULL_LENGTH_KEY}")
+        assert FULL_LENGTH_KEY not in advice.summary + advice.fix + advice.detail
         assert advice.summary.count("<redacted>") == 1
 
     def test_a_classified_failure_does_not_echo_the_key_back(self, monkeypatch):
-        monkeypatch.setattr(monitor, "LASTFM_API_KEY", "s3cret-key-value")
-        advice = monitor.classify_recovery_error(RuntimeError("rejected key s3cret-key-value"))
-        assert "s3cret-key-value" not in advice.detail
+        monkeypatch.setattr(monitor, "LASTFM_API_KEY", FULL_LENGTH_KEY)
+        advice = monitor.classify_recovery_error(RuntimeError(f"rejected key {FULL_LENGTH_KEY}"))
+        assert FULL_LENGTH_KEY not in advice.detail
+
+    def test_a_full_length_secret_is_replaced_anywhere_it_appears(self, monkeypatch):
+        monkeypatch.setattr(monitor, "NTFY_ACCESS_TOKEN", "tk_ntfyaccesstoken00000000000000")
+        assert "tk_ntfyaccesstoken00000000000000" not in monitor.sanitize_error_text("Delivery failed with tk_ntfyaccesstoken00000000000000")
+
+    # A short configured password is also an ordinary word, so replacing it would corrupt the text it happens to appear in
+    def test_a_short_secret_leaves_ordinary_text_untouched(self, monkeypatch):
+        monkeypatch.setattr(monitor, "SMTP_PASSWORD", "lastfm")
+        assert monitor.sanitize_error_text("Cannot read the recent tracks of 'lastfm_listener'") == "Cannot read the recent tracks of 'lastfm_listener'"
+
+    # The shape patterns anchor on the setting name rather than the value, so a short password stays covered where it is actually exposed
+    def test_a_short_secret_is_still_redacted_in_the_assignment_form(self, monkeypatch):
+        monkeypatch.setattr(monitor, "SMTP_PASSWORD", "lastfm")
+        assert monitor.sanitize_error_text("SMTP_PASSWORD = lastfm") == "SMTP_PASSWORD = <redacted>"
+
+    def test_a_placeholder_is_never_treated_as_a_secret(self, monkeypatch):
+        monkeypatch.setattr(monitor, "LASTFM_API_KEY", "your_lastfm_api_key")
+        assert monitor.sanitize_error_text("still set to your_lastfm_api_key") == "still set to your_lastfm_api_key"
+
+    # Replacing the shorter value first would leave the longer one half redacted and still readable
+    def test_a_secret_containing_another_secret_is_replaced_whole(self, monkeypatch):
+        monkeypatch.setattr(monitor, "LASTFM_API_KEY", FULL_LENGTH_KEY)
+        monkeypatch.setattr(monitor, "LASTFM_API_SECRET", f"{FULL_LENGTH_KEY}-and-more")
+        assert monitor.sanitize_error_text(f"sent {FULL_LENGTH_KEY}-and-more") == "sent <redacted>"
+
+    @pytest.mark.parametrize("key", monitor.SECRET_KEYS)
+    def test_every_secret_setting_is_redacted_in_a_quoted_source_line(self, key):
+        assert monitor.sanitize_error_text(f'{key} = "whatever-was-written-here"') == f"{key} = <redacted>"
+
+    # This is the real path: a config file that fails to parse quotes its own offending line back to the terminal and the log
+    def test_a_quoted_config_source_line_cannot_leak_a_password(self):
+        detail = 'Config file \'x.conf\' has invalid Python syntax at line 1 | Source: SMTP_PASSWORD = "hunter2-not-a-real-password | Parser: unterminated string literal'
+        assert "hunter2" not in monitor.classify_recovery_error(context="config", detail=detail).summary
+
+    # spotipy authenticates the Spotify app with Basic while Spotify and ntfy carry Bearer, so both schemes have to be covered
+    @pytest.mark.parametrize("scheme", ["Bearer", "bearer", "Basic", "basic"])
+    def test_both_authorization_schemes_this_tool_sends_are_redacted(self, scheme):
+        assert monitor.sanitize_error_text(f"Authorization: {scheme} c2VjcmV0LXZhbHVlLWhlcmU=") == f"Authorization: {scheme} <redacted>"
+
+    def test_an_authorization_header_inside_a_dict_repr_is_redacted(self):
+        assert "c2VjcmV0" not in monitor.sanitize_error_text("Sending POST request with Headers: {'Authorization': 'Basic c2VjcmV0LXZhbHVlLWhlcmU='}")
+
+    # pylast signs every request, so the signature and the key travel as parameters
+    @pytest.mark.parametrize("parameter", ["api_key", "api_sig", "sk", "token", "secret", "password"])
+    def test_a_signed_request_parameter_is_redacted(self, parameter):
+        assert monitor.sanitize_error_text(f"GET https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&{parameter}=8b1e5d2846af0b7c") == f"GET https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&{parameter}=<redacted>"
+
+    def test_a_discord_webhook_url_is_redacted_even_when_it_is_not_the_configured_one(self):
+        assert monitor.sanitize_error_text("posted to https://discord.com/api/webhooks/123456789/aBcDeFgHiJkLmNoPqRsTuVwXyZ") == "posted to <redacted>"
+
+    def test_an_authorization_value_configured_in_webhook_headers_is_redacted(self, monkeypatch):
+        monkeypatch.setattr(monitor, "WEBHOOK_HEADERS", {"Authorization": "Bearer tk_ntfyaccesstoken00000000000000"})
+        assert "tk_ntfyaccesstoken00000000000000" not in monitor.sanitize_error_text("header was Bearer tk_ntfyaccesstoken00000000000000")
+
+    def test_known_secret_values_skips_anything_below_the_floor(self, monkeypatch):
+        monkeypatch.setattr(monitor, "SMTP_PASSWORD", "short")
+        monkeypatch.setattr(monitor, "LASTFM_API_KEY", FULL_LENGTH_KEY)
+        assert "short" not in monitor.known_secret_values()
+        assert FULL_LENGTH_KEY in monitor.known_secret_values()
 
 
 class TestRecoveryHintTracker:
