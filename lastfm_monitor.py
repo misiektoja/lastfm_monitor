@@ -2043,7 +2043,7 @@ def debug_swallowed_exception(context, exc):
     debug_print(context, outcome="failed", error=f"{type(exc).__name__}: {exc}")
 
 
-# Names the alert a feature feeds when that feature could not be read, so silence is not read as nothing to report
+# Names the alert a feature feeds when that feature could not be read and reports whether the reader saw it
 def verbose_degraded_feature(feature, alert, error=None):
     global PENDING_NOTICE_BLOCK
     debug_print(feature, outcome="degraded", alert=alert, error=None if error is None else f"{type(error).__name__}: {error}")
@@ -2051,6 +2051,7 @@ def verbose_degraded_feature(feature, alert, error=None):
     # A degraded feature can be reported from inside a report, so the check closes the block instead of this line
     if VERBOSE_MODE and MONITORING_ACTIVE:
         PENDING_NOTICE_BLOCK = True
+    return bool(VERBOSE_MODE)
 
 
 # Returns the timestamp/datetime object in human readable format (long version); eg. Sun 21 Apr 2024, 15:08:45
@@ -5016,6 +5017,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
     # Main loop
     friends_pending_changes = None
     friends_streak = 0
+    friends_failure_announced = False
     friends_next_check_ts = 0
 
     while True:
@@ -5046,6 +5048,12 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
                         # Reset error streak on any successful check
                         if friends_streak < 0:
+                            failed_checks = abs(friends_streak)
+                            debug_print("Friends/profile check", outcome="OK", failures=failed_checks)
+                            # A recovery is only news if the failure was, so an outage nobody saw clears in silence
+                            if friends_failure_announced:
+                                print(f"* Friends/profile check is available again after {failed_checks} failed check{'' if failed_checks == 1 else 's'}, so friend and profile change alerts can fire again")
+                                print_cur_ts("Timestamp:\t\t\t")
                             friends_streak = 0
 
                         if changes:
@@ -5101,7 +5109,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             # Start measuring error streak (negative values)
                             friends_streak = -1
                             # Nothing else is printed until the streak reaches its alert threshold, which reads as a check that stopped running
-                            verbose_degraded_feature("Friends/profile check", "friend and profile change alerts", e)
+                            friends_failure_announced = verbose_degraded_feature("Friends/profile check", "friend and profile change alerts", e)
                         elif friends_streak < 0:
                             # Continue error streak
                             friends_streak -= 1
@@ -5112,6 +5120,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             # We were tracking a change but hit an error
                             retry_interval = FRIENDS_RETRY_INTERVAL
                             friends_next_check_ts = current_ts + retry_interval
+                            friends_failure_announced = True
                             print(f"* Error during friend/profile check: {e}")
                             print(f"* Preserving confirmation streak ({friends_streak}/{FRIENDS_CHANGE_COUNTER}) despite error; will retry in {display_time(retry_interval)}")
                             print_cur_ts("Timestamp:\t\t\t")
@@ -5121,6 +5130,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
                             # Throttling: Alert on threshold, then every 10 attempts
                             if current_error_streak == FRIENDS_CHANGE_COUNTER or (current_error_streak > FRIENDS_CHANGE_COUNTER and (current_error_streak - FRIENDS_CHANGE_COUNTER) % 10 == 0):
+                                friends_failure_announced = True
                                 print(f"* Error confirming friend/profile state (attempt {current_error_streak}): {e}")
                                 print_cur_ts("Timestamp:\t\t\t")
 
