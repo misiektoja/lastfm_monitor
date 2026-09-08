@@ -147,6 +147,10 @@ Protected ntfy topics can use `NTFY_ACCESS_TOKEN` from an environment variable o
 
 Last.fm Monitor does not attach artwork to ntfy alerts because it does not retrieve a trusted artwork source. Webhook delivery remains text-only.
 
+### When Alerts Are Switched Off
+
+If `WEBHOOK_ENABLED` is on but `WEBHOOK_URL` is not a complete HTTPS link, the tool says so once at startup and turns webhook alerts off, rather than failing on every alert for the rest of the run.
+
 ## Storing Secrets
 
 It is recommended to store secrets like `LASTFM_API_KEY`, `LASTFM_API_SECRET`, `SP_CLIENT_ID`, `SP_CLIENT_SECRET`, `SMTP_PASSWORD`, `WEBHOOK_URL` or `NTFY_ACCESS_TOKEN` as either an environment variable or in a dotenv file.
@@ -204,6 +208,26 @@ lastfm_monitor <lastfm_username> --env-file none
 ```
 
 As a fallback, you can also store secrets in the configuration file or source code.
+
+### Which Source Wins
+
+The same secret can be set in several places. The later source in this list wins:
+
+1. the configuration file, or the settings in the script itself
+2. the dotenv file
+3. an exported environment variable
+4. a command-line argument such as `-u`, `-w`, `-z` or `--webhook-url`
+
+An exported variable therefore beats the dotenv file, which is what `python-dotenv`, systemd, Docker and a one-off `LASTFM_API_KEY=... lastfm_monitor ...` all assume. The exception is reloading with `SIGHUP`, where the edited dotenv file is exactly what has to take effect and so it wins.
+
+A forgotten `export` can shadow the file invisibly, so `--debug` names each secret and the source it resolved from, never the value:
+
+```text
+[DEBUG 12:00:00] Secret resolution: name=LASTFM_API_KEY, source=environment, value=set, 32 chars
+[DEBUG 12:00:00] Secret sources: dotenv file=SMTP_PASSWORD; environment=LASTFM_API_KEY
+```
+
+A secret still holding its `your_...` placeholder counts as unset and is left out. Lengths appear only for the secrets whose length the provider issues, never for a password you chose.
 
 ## TLS Verification
 

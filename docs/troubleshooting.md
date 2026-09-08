@@ -41,7 +41,7 @@ Failures that clear on their own, such as a Last.fm outage or a rate limit, say 
 lastfm_monitor <lastfm_username> --debug
 ```
 
-Traced operations include the Last.fm polling cycle, the sleep interval before each check, offline entries being detected, CSV initialization, email delivery attempts and the full [Spotify metadata](configuration.md#spotify-metadata-backends) path: server time, anonymous web-player token requests and refreshes, persisted-query hash discovery, OAuth app token retrieval and every search and match decision that resolves a track ID and duration.
+Traced operations include where each secret resolved from, the Last.fm polling cycle, the sleep interval before each check, offline entries being detected, CSV initialization, email delivery attempts and the full [Spotify metadata](configuration.md#spotify-metadata-backends) path: server time, anonymous web-player token requests and refreshes, persisted-query hash discovery, OAuth app token retrieval and every search and match decision that resolves a track ID and duration.
 
 That last group is the reason to reach for `--debug` first when track durations or automatic playback are not working. The trace names which backend answered, which candidate tracks came back and why one was chosen or rejected.
 
