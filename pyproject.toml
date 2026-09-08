@@ -36,7 +36,7 @@ classifiers = [
 keywords = ["lastfm", "monitoring", "tracking", "real-time", "osint", "pylast", "spotify"]
 
 [project.optional-dependencies]
-test = ["pytest>=7.0", "pyyaml>=6.0"]
+test = ["hypothesis>=6.100", "pytest>=7.0", "pyyaml>=6.0"]
 # Pinned so a new ruff release cannot fail CI on a rule that did not exist when the change was written
 lint = ["ruff==0.16.4"]
 
