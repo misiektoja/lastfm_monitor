@@ -347,8 +347,15 @@ SP_USER_GOT_OFFLINE_TRACK_ID = ""
 # Set to 0 to keep playing indefinitely until manually paused
 SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE = 5  # 5 seconds
 
-# Enable debug mode for full technical logging (can also be enabled via --debug flag)
-# Shows every API request and internal state changes
+# Whether to print extra startup and runtime detail
+# Independent of DEBUG_MODE, so enable both to see everything
+# Can also be enabled via the --verbose flag, which turns it on regardless of this setting
+VERBOSE_MODE = False
+
+# Whether to print timestamped diagnostic detail, including every outbound call,
+# each notification delivery attempt and the technical cause of failures
+# Independent of VERBOSE_MODE, so enable both to see everything
+# Can also be enabled via the --debug flag, which turns it on regardless of this setting
 DEBUG_MODE = False
 
 # How often to print a "liveness check" message to the output; in seconds
@@ -616,10 +623,14 @@ FOLLOWINGS_NOTIFICATION = False
 PROFILE_NOTIFICATION = False
 FRIENDS_CHANGE_COUNTER = 0
 FRIENDS_RETRY_INTERVAL = 0
+VERBOSE_MODE = False
 DEBUG_MODE = False
 LASTFM_USERNAME_GLOBAL = ""
 
 exec(CONFIG_BLOCK, globals())
+
+# True once monitoring has printed its header, so a verbose notice after that closes its own block
+MONITORING_ACTIVE = False
 
 # The tool's own name, printed where a message has to say which monitor sent it
 TOOL_NAME = "lastfm_monitor"
@@ -957,12 +968,14 @@ def check_internet(url=None, timeout=None, quiet=False):
     try:
         pylast_version = getattr(pylast, '__version__', 'unknown')
         headers = {'User-Agent': f'pylast/{pylast_version}'}
-        _ = req.get(selected_url, timeout=selected_timeout, headers=headers, verify=VERIFY_SSL)
+        response = req.get(selected_url, timeout=selected_timeout, headers=headers, verify=VERIFY_SSL)
+        debug_print("Connectivity check", url=selected_url, timeout=f"{selected_timeout}s", status=response.status_code, outcome="OK")
         return True
     except req.RequestException as e:
         # Quiet callers render the failure themselves, which doctor needs so nothing lands on its progress line
         global LAST_CONNECTIVITY_ERROR
         LAST_CONNECTIVITY_ERROR = e
+        debug_print("Connectivity check", url=selected_url, timeout=f"{selected_timeout}s", outcome="failed", error=f"{type(e).__name__}: {e}")
         if not quiet:
             print_recovery_error(e, context="connectivity")
         return False
@@ -1098,14 +1111,14 @@ def smtp_connect_and_login(use_ssl, smtp_timeout=15):
     except Exception:
         try:
             smtp_object.quit()
-        except Exception:
-            pass
+        except Exception as cleanup_error:
+            debug_swallowed_exception("SMTP session cleanup", cleanup_error)
         raise
 
 
 # Sends an email notification
 def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
-    debug_print(f"Attempting to send email: {subject}")
+    debug_print("Email delivery attempt", host=SMTP_HOST, port=SMTP_PORT, recipient=RECEIVER_EMAIL, subject=subject)
     fqdn_re = re.compile(r'(?=^.{4,253}$)(^((?!-)[a-zA-Z0-9-]{1,63}(?<!-)\.)+[a-zA-Z]{2,63}\.?$)')
     email_re = re.compile(r'[^@]+@[^@]+\.[^@]+')
 
@@ -1159,8 +1172,9 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
 
         smtpObj.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, email_msg.as_string())
         smtpObj.quit()
-        debug_print("Email sent successfully")
+        debug_print("Email delivery", host=SMTP_HOST, port=SMTP_PORT, recipient=RECEIVER_EMAIL, outcome="OK")
     except Exception as e:
+        debug_print("Email delivery", host=SMTP_HOST, port=SMTP_PORT, recipient=RECEIVER_EMAIL, outcome="failed", error=f"{type(e).__name__}: {e}")
         print_recovery_error(e, context="email")
         return 1
     return 0
@@ -1185,7 +1199,7 @@ def apply_tls_verification_setting() -> None:
     if hasattr(pylast, "SSL_CONTEXT"):
         pylast.SSL_CONTEXT = tls_context()
     else:
-        debug_print("TLS verification could not be applied to pylast, which no longer exposes SSL_CONTEXT")
+        debug_print("TLS setting applied to pylast", outcome="skipped", reason="pylast no longer exposes SSL_CONTEXT")
     if not VERIFY_SSL:
         # Silenced only once the config file has been read, so the shipped default never decides this
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -1268,7 +1282,7 @@ def record_secret_source(name: str, source: str, value: Any = None) -> None:
         SECRET_SOURCES.pop(name, None)
         return
     SECRET_SOURCES[name] = source
-    debug_print(f"Secret resolution: name={name}, source={source}, value={secret_fingerprint(resolved, name)}")
+    debug_print("Secret resolution", name=name, source=source, value="set", chars=len(str(resolved).strip()) if name in FIXED_LENGTH_SECRET_KEYS else None)
 
 
 # Groups the configured secret names by the source each value actually came from, never by value
@@ -1661,6 +1675,14 @@ def webhook_event_enabled(notification_type: str) -> bool:
     return bool(WEBHOOK_ENABLED and settings.get(notification_type, False))
 
 
+# Returns the webhook host alone, so a delivery can be traced without printing the private URL it carries
+def webhook_destination_host(url: Any = None) -> str:
+    try:
+        return urlsplit(str(WEBHOOK_URL if url is None else url).strip()).hostname or "unknown host"
+    except ValueError:
+        return "unknown host"
+
+
 # Parses a webhook rate-limit delay and caps untrusted server values to a short wait
 def webhook_retry_after_seconds(response: Any) -> float:
     candidates: List[Any] = []
@@ -1669,7 +1691,8 @@ def webhook_retry_after_seconds(response: Any) -> float:
         candidates.append(headers.get("Retry-After"))
     try:
         payload = response.json()
-    except Exception:
+    except Exception as exc:
+        debug_swallowed_exception("Webhook retry delay payload read", exc)
         payload = None
     if isinstance(payload, dict):
         candidates.append(payload.get("retry_after"))
@@ -1682,7 +1705,8 @@ def webhook_retry_after_seconds(response: Any) -> float:
             try:
                 retry_at = parsedate_to_datetime(str(candidate))
                 seconds = (retry_at - datetime.now(retry_at.tzinfo)).total_seconds()
-            except Exception:
+            except Exception as exc:
+                debug_swallowed_exception("Webhook retry delay header read", exc)
                 continue
         return max(0.0, min(seconds, WEBHOOK_MAX_RETRY_AFTER_SECONDS))
     return WEBHOOK_FALLBACK_RETRY_SECONDS
@@ -1899,20 +1923,25 @@ def send_webhook(title: str, description: str, notification_type: str = "song", 
                 response = post_webhook_request(data=discord_payload, headers=request_headers)
             else:
                 response = post_webhook_request(json=discord_payload, headers=request_headers)
+            attempt_label = f"#{attempt + 1}/{WEBHOOK_MAX_ATTEMPTS}"
             if 200 <= response.status_code <= 299:
+                debug_print("Webhook delivery", provider=provider, host=webhook_destination_host(), attempt=attempt_label, status=response.status_code, outcome="OK")
                 return 0
             retryable = response.status_code == 429 or 500 <= response.status_code <= 599
             if not retryable or attempt == WEBHOOK_MAX_ATTEMPTS - 1:
+                debug_print("Webhook delivery", provider=provider, host=webhook_destination_host(), attempt=attempt_label, status=response.status_code, retryable=retryable, outcome="failed")
                 print_recovery_error(req.HTTPError(response=response), context="webhook", detail=f"The webhook service returned HTTP {response.status_code}")
                 return 1
             delay = webhook_retry_after_seconds(response) if response.status_code == 429 else WEBHOOK_FALLBACK_RETRY_SECONDS
-            debug_print(f"Webhook delivery returned HTTP {response.status_code}. Retrying once in {delay:g} seconds")
+            debug_print("Webhook delivery retry", provider=provider, host=webhook_destination_host(), attempt=attempt_label, status=response.status_code, delay=f"{delay:g}s", outcome="failed")
             sleep_func(delay)
         except req.RequestException as exc:
+            attempt_label = f"#{attempt + 1}/{WEBHOOK_MAX_ATTEMPTS}"
             if attempt == WEBHOOK_MAX_ATTEMPTS - 1:
+                debug_print("Webhook delivery", provider=provider, host=webhook_destination_host(), attempt=attempt_label, outcome="failed", error=f"{type(exc).__name__}: {exc}")
                 print_recovery_error(exc, context="webhook", detail=f"The webhook service could not be reached ({type(exc).__name__})")
                 return 1
-            debug_print(f"Webhook delivery failed with {type(exc).__name__}. Retrying once in {WEBHOOK_FALLBACK_RETRY_SECONDS:g} seconds")
+            debug_print("Webhook delivery retry", provider=provider, host=webhook_destination_host(), attempt=attempt_label, delay=f"{WEBHOOK_FALLBACK_RETRY_SECONDS:g}s", outcome="failed", error=f"{type(exc).__name__}: {exc}")
             sleep_func(WEBHOOK_FALLBACK_RETRY_SECONDS)
     return 1
 
@@ -1923,25 +1952,28 @@ def send_notification_channels(notification_type: str, subject: str, body: str, 
     webhook_attempted = webhook_event_enabled(notification_type) if webhook_enabled is None else bool(webhook_enabled)
     if email_attempted:
         print(f"Sending email notification to {RECEIVER_EMAIL}")
-        send_email(subject, body, body_html, SMTP_SSL)
+        email_result = send_email(subject, body, body_html, SMTP_SSL)
+        debug_print("Notification dispatch", type=notification_type, channel="email", outcome="failed" if email_result else "OK")
     if webhook_attempted:
         print("Sending webhook notification")
         use_short_content = NTFY_SHORT is True and normalized_webhook_provider() == "ntfy"
         webhook_subject = (subject_short or subject) if use_short_content else subject
         webhook_body = (body_short or body) if use_short_content else body
-        send_webhook(webhook_subject, webhook_body, notification_type, force=True)
+        webhook_result = send_webhook(webhook_subject, webhook_body, notification_type, force=True)
+        debug_print("Notification dispatch", type=notification_type, channel="webhook", outcome="failed" if webhook_result else "OK")
     return email_attempted, webhook_attempted
 
 
 # Initializes the CSV file
 def init_csv_file(csv_file_name):
-    debug_print(f"Initializing CSV file: {csv_file_name}")
     try:
         if not os.path.isfile(csv_file_name) or os.path.getsize(csv_file_name) == 0:
             with open(csv_file_name, 'a', newline='', buffering=1, encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=csvfieldnames, quoting=csv.QUOTE_NONNUMERIC)
                 writer.writeheader()
+        debug_print("CSV file initialization", path=csv_file_name, outcome="OK")
     except Exception as e:
+        debug_print("CSV file initialization", path=csv_file_name, outcome="failed", error=f"{type(e).__name__}: {e}")
         raise RuntimeError(f"Could not initialize CSV file '{csv_file_name}': {e}")
 
 
@@ -1952,8 +1984,10 @@ def write_csv_entry(csv_file_name, timestamp, artist, track, album):
         with open(csv_file_name, 'a', newline='', buffering=1, encoding="utf-8") as csv_file:
             csvwriter = csv.DictWriter(csv_file, fieldnames=csvfieldnames, quoting=csv.QUOTE_NONNUMERIC)
             csvwriter.writerow({'Date': timestamp, 'Artist': artist, 'Track': track, 'Album': album})
+        debug_print("CSV entry write", path=csv_file_name, outcome="OK")
 
     except Exception as e:
+        debug_print("CSV entry write", path=csv_file_name, outcome="failed", error=f"{type(e).__name__}: {e}")
         raise RuntimeError(f"Failed to write to CSV file '{csv_file_name}': {e}")
 
 
@@ -1968,14 +2002,52 @@ def print_cur_ts(ts_str=""):
     print("─" * HORIZONTAL_LINE)
 
 
-# Debug print helper - only prints if DEBUG_MODE is enabled
-def debug_print(message):
+# Renders one diagnostic line as an operation followed by comma-separated key=value fields, dropping unset ones
+def format_diagnostic_line(operation, fields):
+    rendered = ", ".join(f"{key}={value}" for key, value in fields.items() if value is not None)
+    return f"{operation}: {rendered}" if rendered else str(operation)
+
+
+# Prints one timestamped and sanitized diagnostic line only when debug mode is enabled
+def debug_print(_operation, **fields):
     if DEBUG_MODE:
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        # Kept for the commented-out per-user debug line directly below
-        prefix = f" [{LASTFM_USERNAME_GLOBAL}]" if LASTFM_USERNAME_GLOBAL else ""  # noqa: F841
-        # print(f"[DEBUG {timestamp}]{prefix} {message}")
-        print(f"[DEBUG {timestamp}] {message}")
+        # Sanitized here rather than at each call site, since one caller interpolating a secret is enough to leak it
+        message = format_diagnostic_line(_operation, fields)
+        print(f"[DEBUG {datetime.now().strftime('%H:%M:%S')}] {sanitize_error_text(message)}")
+
+
+# Prints one sanitized operational detail only when verbose mode is enabled
+def verbose_print(message):
+    if VERBOSE_MODE:
+        print(f"* {sanitize_error_text(message)}")
+
+
+# Prints verbose-only notices as one block, so a standalone line is not left without the timestamp trailer
+def verbose_notice(*messages):
+    if not VERBOSE_MODE or not messages:
+        return
+    for message in messages:
+        verbose_print(message)
+    # Before monitoring starts the notice belongs to the startup screen, which the monitoring header closes
+    if MONITORING_ACTIVE:
+        print_cur_ts("Timestamp:\t\t\t")
+
+
+# Marks the point where output stops being the startup screen, so later notices close their own block
+def mark_monitoring_started():
+    global MONITORING_ACTIVE
+    MONITORING_ACTIVE = True
+
+
+# Records a swallowed exception in debug output so a silently degraded feature can still be diagnosed
+def debug_swallowed_exception(context, exc):
+    debug_print(context, outcome="failed", error=f"{type(exc).__name__}: {exc}")
+
+
+# Names the alert a feature feeds when that feature could not be read, so silence is not read as nothing to report
+def verbose_degraded_feature(feature, alert, error=None):
+    debug_print(feature, outcome="degraded", alert=alert, error=None if error is None else f"{type(error).__name__}: {error}")
+    verbose_print(f"{feature} is unavailable, so {alert} cannot fire")
 
 
 # Returns the timestamp/datetime object in human readable format (long version); eg. Sun 21 Apr 2024, 15:08:45
@@ -2233,7 +2305,8 @@ def get_spotify_apple_genius_search_urls(artist, track, album=None, network=None
     if track_obj and hasattr(track_obj, 'get_url'):
         try:
             lastfm_url = track_obj.get_url()
-        except Exception:
+        except Exception as exc:
+            debug_swallowed_exception("Last.fm track URL read", exc)
             # Fallback to manual construction if get_url() fails
             artist_encoded = quote_plus(str(artist))
             track_encoded = quote_plus(str(track))
@@ -2243,7 +2316,8 @@ def get_spotify_apple_genius_search_urls(artist, track, album=None, network=None
         try:
             track_obj_temp = pylast.Track(artist, track, network)
             lastfm_url = track_obj_temp.get_url()
-        except Exception:
+        except Exception as exc:
+            debug_swallowed_exception("Last.fm track URL read", exc)
             # Fallback to manual construction
             artist_encoded = quote_plus(str(artist))
             track_encoded = quote_plus(str(track))
@@ -2259,20 +2333,23 @@ def get_spotify_apple_genius_search_urls(artist, track, album=None, network=None
         if network:
             try:
                 lastfm_album_url = pylast.Album(artist, album, network).get_url()
-            except Exception:
+            except Exception as exc:
+                debug_swallowed_exception("Last.fm album URL read", exc)
                 try:
                     # Fallback to manual construction
                     artist_encoded = quote_plus(str(artist))
                     album_encoded = quote_plus(str(album))
                     lastfm_album_url = f"https://www.last.fm/music/{artist_encoded}/{album_encoded}"
-                except Exception:
+                except Exception as build_error:
+                    debug_swallowed_exception("Last.fm album URL construction", build_error)
                     lastfm_album_url = ""
         else:
             try:
                 artist_encoded = quote_plus(str(artist))
                 album_encoded = quote_plus(str(album))
                 lastfm_album_url = f"https://www.last.fm/music/{artist_encoded}/{album_encoded}"
-            except Exception:
+            except Exception as exc:
+                debug_swallowed_exception("Last.fm album URL construction", exc)
                 lastfm_album_url = ""
 
     return spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, lastfm_url, lastfm_album_url
@@ -2400,12 +2477,35 @@ def format_music_urls_email_html(spotify_url, lastfm_url, lastfm_album_url, appl
     return "<br>".join(lines) if lines else ""
 
 
+# Writes the last activity snapshot the next run starts from
+def save_last_activity_state(path, last_activity):
+    try:
+        write_json_atomically(path, last_activity)
+        debug_print("Last activity write", path=path, entries=len(last_activity), outcome="OK")
+    except Exception as e:
+        debug_print("Last activity write", path=path, outcome="failed", error=f"{type(e).__name__}: {e}")
+        print(f"* Cannot save last status to '{path}' file: {e}")
+
+
+# Returns the track the user is playing right now, or None when nothing is playing
+def lastfm_get_now_playing(username, user):
+    try:
+        now_playing = user.get_now_playing()
+        debug_print("Last.fm now playing fetch", user=username, track=str(now_playing) if now_playing else None, outcome="OK")
+        return now_playing
+    except Exception as exc:
+        debug_print("Last.fm now playing fetch", user=username, outcome="failed", error=f"{type(exc).__name__}: {exc}")
+        raise
+
+
 # Returns the list of recently played Last.fm tracks
 def lastfm_get_recent_tracks(username, network, number):
     try:
         recent_tracks = network.get_user(username).get_recent_tracks(limit=number)
+        debug_print("Last.fm recent tracks fetch", user=username, limit=number, tracks=len(recent_tracks or []), outcome="OK")
         return recent_tracks
-    except Exception:
+    except Exception as exc:
+        debug_print("Last.fm recent tracks fetch", user=username, limit=number, outcome="failed", error=f"{type(exc).__name__}: {exc}")
         raise
 
 
@@ -2441,22 +2541,32 @@ def _lastfm_retryable_response_error(response):
 # Fetches a URL with backoff for transient Last.fm HTTP and soft error responses then raises RuntimeError on final failure
 def _lastfm_http_get_with_retry(url, attempts=3, base_delay=2.0):
     last_exc = None
+    timeout = FUNCTION_TIMEOUT * 2
     for i in range(attempts):
+        attempt_label = f"#{i + 1}/{attempts}"
+        status = None
         try:
-            response = req.get(url, headers=_lastfm_scrape_headers(), timeout=FUNCTION_TIMEOUT * 2, verify=VERIFY_SSL)
+            response = req.get(url, headers=_lastfm_scrape_headers(), timeout=timeout, verify=VERIFY_SSL)
+            status = response.status_code
             retryable_error = _lastfm_retryable_response_error(response)
             if retryable_error:
                 last_exc = RuntimeError(retryable_error)
+                debug_print("HTTP GET", url=url, timeout=f"{timeout}s", attempt=attempt_label, status=status, outcome="failed", error=retryable_error)
             else:
                 response.raise_for_status()
+                debug_print("HTTP GET", url=url, timeout=f"{timeout}s", attempt=attempt_label, status=status, outcome="OK")
                 return response
         except (req.Timeout, req.ConnectionError) as e:
             last_exc = e
+            debug_print("HTTP GET", url=url, timeout=f"{timeout}s", attempt=attempt_label, outcome="failed", error=f"{type(e).__name__}: {e}")
         except req.HTTPError as e:
             # Non-retryable 4xx (except 429 handled above) propagates immediately
+            debug_print("HTTP GET", url=url, timeout=f"{timeout}s", attempt=attempt_label, status=status, outcome="failed", error=f"{type(e).__name__}: {e}")
             raise RuntimeError(f"Failed to fetch from Last.fm: {e}")
         if i < attempts - 1:
-            time.sleep(base_delay * (2 ** i))
+            delay = base_delay * (2 ** i)
+            debug_print("Last.fm request retry", url=url, attempt=attempt_label, delay=f"{delay:g}s", status=status, outcome="failed")
+            time.sleep(delay)
     raise RuntimeError(f"Failed to fetch from Last.fm after {attempts} attempts: {last_exc}")
 
 
@@ -2597,9 +2707,9 @@ def create_timestamped_backup(destination, attempts=100):
             try:
                 os.unlink(str(backup_path))
             except OSError as cleanup_error:
-                debug_print(f"Cannot remove the failed backup '{backup_path}': {cleanup_error}")
+                debug_swallowed_exception("Failed backup cleanup", cleanup_error)
             raise
-        debug_print(f"Backed up '{destination_path}' to '{backup_path}'")
+        debug_print("File backup", path=str(destination_path), backup=str(backup_path), outcome="OK")
         return str(backup_path)
     raise OSError(f"Could not create a unique backup for '{destination_path}' after {attempts} attempts")
 
@@ -2663,15 +2773,14 @@ def load_friends_state(username, friends_type):
         try:
             with open(filename, 'r', encoding="utf-8") as f:
                 data = json.load(f)
-                if isinstance(data, list):
-                    return set(data)
-                elif isinstance(data, dict) and 'users' in data:
-                    return set(data['users'])
-                else:
-                    return set()
+                saved_users = set(data) if isinstance(data, list) else set(data['users']) if isinstance(data, dict) and 'users' in data else set()
+                debug_print("Friends state load", path=filename, type=friends_type, users=len(saved_users), outcome="OK")
+                return saved_users
         except Exception as e:
+            debug_print("Friends state load", path=filename, type=friends_type, outcome="failed", error=f"{type(e).__name__}: {e}")
             print(f"* Warning: Cannot load {friends_type} state from '{filename}': {e}")
             return set()
+    debug_print("Friends state load", path=filename, type=friends_type, outcome="skipped", reason="no saved state")
     return set()
 
 
@@ -2685,7 +2794,9 @@ def save_friends_state(username, friends_type, users_set):
             'last_updated': int(time.time())
         }
         write_json_atomically(filename, data)
+        debug_print("Friends state write", path=filename, type=friends_type, users=len(users_set), outcome="OK")
     except Exception as e:
+        debug_print("Friends state write", path=filename, type=friends_type, outcome="failed", error=f"{type(e).__name__}: {e}")
         print(f"* Warning: Cannot save {friends_type} state to '{filename}': {e}")
 
 
@@ -2699,8 +2810,11 @@ def load_profile_state(username):
             data = json.load(f)
         if not isinstance(data, dict):
             raise ValueError("profile state must be a JSON object")
-        return {key: data[key] for key in ('display_name', 'bio') if isinstance(data.get(key), str)}
+        saved_profile = {key: data[key] for key in ('display_name', 'bio') if isinstance(data.get(key), str)}
+        debug_print("Profile state load", path=filename, fields=len(saved_profile), outcome="OK")
+        return saved_profile
     except Exception as e:
+        debug_print("Profile state load", path=filename, outcome="failed", error=f"{type(e).__name__}: {e}")
         print(f"* Warning: Cannot load profile state from '{filename}': {e}")
         return {}
 
@@ -2713,7 +2827,9 @@ def save_profile_state(username, profile):
         data.update({key: value for key, value in profile.items() if key in ('display_name', 'bio') and isinstance(value, str)})
         data['last_updated'] = int(time.time())
         write_json_atomically(filename, data, ensure_ascii=False)
+        debug_print("Profile state write", path=filename, fields=len(profile), outcome="OK")
     except Exception as e:
+        debug_print("Profile state write", path=filename, outcome="failed", error=f"{type(e).__name__}: {e}")
         print(f"* Warning: Cannot save profile state to '{filename}': {e}")
 
 
@@ -2758,6 +2874,7 @@ def check_friends_changes(username, track_followings, track_followers, track_bio
         except Exception as e:
             if raise_on_error:
                 raise e
+            verbose_degraded_feature("Followings check", "following change alerts", e)
 
     if track_followers:
         try:
@@ -2781,6 +2898,7 @@ def check_friends_changes(username, track_followings, track_followers, track_bio
         except Exception as e:
             if raise_on_error:
                 raise e
+            verbose_degraded_feature("Followers check", "follower change alerts", e)
 
     if track_bio or track_display_name:
         try:
@@ -2803,6 +2921,7 @@ def check_friends_changes(username, track_followings, track_followers, track_bio
         except Exception as e:
             if raise_on_error:
                 raise e
+            verbose_degraded_feature("Profile check", "profile change alerts", e)
 
     return changes, current_states
 
@@ -3065,7 +3184,7 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
     print(f"{list_operation} {number} tracks recently listened by {username} ...\n")
 
     try:
-        new_track = user.get_now_playing()
+        new_track = lastfm_get_now_playing(username, user)
         recent_tracks = lastfm_get_recent_tracks(username, network, number)
     except Exception as e:
         print_recovery_error(e, detail=f"Cannot read the recent tracks of '{username}'")
@@ -3134,7 +3253,8 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
     # Calculate column widths based on terminal size
     try:
         term_width = shutil.get_terminal_size(fallback=(100, 24)).columns
-    except Exception:
+    except Exception as exc:
+        debug_swallowed_exception("Terminal width probe", exc)
         term_width = 100
 
     w_num = 4
@@ -3359,16 +3479,15 @@ def spotify_get_access_token(sp_client_id, sp_client_secret):
     access_token = auth_manager.get_access_token(as_dict=False)
     if not access_token:
         raise RuntimeError("Spotify OAuth app token response was empty")
-    debug_print(f"Spotify OAuth app access token obtained through {cache_description} cache, token_len={len(access_token)}")
+    debug_print("Spotify OAuth app token", cache=cache_description, token_len=len(access_token), outcome="OK")
     return access_token
 
 
 # Fetches Spotify edge-server Unix time for anonymous token generation
 def spotify_fetch_server_time(session=SPOTIFY_SESSION):
     headers = {"Accept": "*/*", "User-Agent": SPOTIFY_WEB_USER_AGENT}
-    debug_print(f"HTTP HEAD {SPOTIFY_SERVER_TIME_URL} [Spotify server time]")
     response = session.head(SPOTIFY_SERVER_TIME_URL, headers=headers, timeout=FUNCTION_TIMEOUT)
-    debug_print(f"HTTP HEAD {SPOTIFY_SERVER_TIME_URL} [Spotify server time] -> {response.status_code}")
+    debug_print("HTTP HEAD", url=SPOTIFY_SERVER_TIME_URL, purpose="Spotify server time", timeout=f"{FUNCTION_TIMEOUT}s", status=response.status_code, outcome="OK" if response.status_code < 400 else "failed")
     response.raise_for_status()
     date_header = response.headers.get("Date")
     if not date_header:
@@ -3401,9 +3520,8 @@ def spotify_refresh_web_access_token(session=SPOTIFY_SESSION):
     for reason in ("transport", "init"):
         params = {"productType": "web-player", "reason": reason, "totp": otp_value, "totpServer": otp_value, "totpVer": SPOTIFY_TOTP_VERSION}
         try:
-            debug_print(f"HTTP GET {SPOTIFY_TOKEN_URL} [anonymous web token reason={reason}]")
             response = session.get(SPOTIFY_TOKEN_URL, params=params, headers=headers, timeout=FUNCTION_TIMEOUT)
-            debug_print(f"HTTP GET {SPOTIFY_TOKEN_URL} [anonymous web token reason={reason}] -> {response.status_code}")
+            debug_print("HTTP GET", url=SPOTIFY_TOKEN_URL, purpose="Spotify anonymous web token", reason=reason, timeout=f"{FUNCTION_TIMEOUT}s", status=response.status_code, outcome="OK" if response.status_code < 400 else "failed")
             response.raise_for_status()
             data = response.json()
             if not isinstance(data, dict):
@@ -3413,12 +3531,12 @@ def spotify_refresh_web_access_token(session=SPOTIFY_SESSION):
             expires_at = int(data.get("accessTokenExpirationTimestampMs", 0) / 1000)
             client_id = data.get("clientId", "")
             if access_token and expires_at and client_id:
-                debug_print(f"Anonymous Spotify web-player token obtained, token_len={len(access_token)}")
+                debug_print("Spotify anonymous web token", token_len=len(access_token), outcome="OK")
                 return {"access_token": access_token, "client_id": client_id, "expires_at": expires_at}
             last_error = "incomplete token data"
         except (req.RequestException, TypeError, ValueError) as error:
             last_error = type(error).__name__
-            debug_print(f"Anonymous Spotify web-player token request failed with {last_error}")
+            debug_print("Spotify anonymous web token", reason=reason, outcome="failed", error=f"{type(error).__name__}: {error}")
 
     raise RuntimeError(f"Spotify anonymous web-player token request failed: {last_error or 'unknown error'}")
 
@@ -3428,7 +3546,7 @@ def spotify_get_web_access_token_data():
     global SP_CACHED_WEB_ACCESS_TOKEN, SP_WEB_ACCESS_TOKEN_EXPIRES_AT, SP_CACHED_WEB_CLIENT_ID
     now = time.time()
     if SP_CACHED_WEB_ACCESS_TOKEN and SP_CACHED_WEB_CLIENT_ID and now < SP_WEB_ACCESS_TOKEN_EXPIRES_AT - SPOTIFY_WEB_TOKEN_EXPIRY_WINDOW:
-        debug_print("Using cached anonymous Spotify web-player access token")
+        debug_print("Spotify anonymous web token", source="cache", outcome="OK")
         return {"access_token": SP_CACHED_WEB_ACCESS_TOKEN, "client_id": SP_CACHED_WEB_CLIENT_ID, "expires_at": SP_WEB_ACCESS_TOKEN_EXPIRES_AT}
 
     token_data = spotify_refresh_web_access_token()
@@ -3463,9 +3581,8 @@ def spotify_discover_web_query_hash(operation_name, force=False):
         return cached_hash
 
     headers = {"Accept": "text/html,application/xhtml+xml", "User-Agent": SPOTIFY_WEB_USER_AGENT}
-    debug_print(f"HTTP GET {SPOTIFY_WEB_PLAYER_URL} [Spotify query discovery operation={operation_name}]")
     response = SPOTIFY_SESSION.get(SPOTIFY_WEB_PLAYER_URL, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
-    debug_print(f"HTTP GET {SPOTIFY_WEB_PLAYER_URL} [Spotify query discovery operation={operation_name}] -> {response.status_code}")
+    debug_print("HTTP GET", url=SPOTIFY_WEB_PLAYER_URL, purpose="Spotify query discovery", query=operation_name, timeout=f"{FUNCTION_TIMEOUT}s", status=response.status_code, outcome="OK" if response.status_code < 400 else "failed")
     response.raise_for_status()
 
     script_urls = re.findall(r'<script[^>]+src=["\']([^"\']+)["\']', response.text, flags=re.IGNORECASE)
@@ -3477,9 +3594,8 @@ def spotify_discover_web_query_hash(operation_name, force=False):
     if not bundle_url:
         raise RuntimeError("Cannot find the Spotify desktop web-player JavaScript bundle")
 
-    debug_print(f"HTTP GET {bundle_url} [Spotify query bundle operation={operation_name}]")
     bundle_response = SPOTIFY_SESSION.get(bundle_url, headers={"User-Agent": SPOTIFY_WEB_USER_AGENT}, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
-    debug_print(f"HTTP GET {bundle_url} [Spotify query bundle operation={operation_name}] -> {bundle_response.status_code}")
+    debug_print("HTTP GET", url=bundle_url, purpose="Spotify query bundle", query=operation_name, timeout=f"{FUNCTION_TIMEOUT}s", status=bundle_response.status_code, outcome="OK" if bundle_response.status_code < 400 else "failed")
     bundle_response.raise_for_status()
 
     discovered_hashes = {}
@@ -3495,7 +3611,7 @@ def spotify_discover_web_query_hash(operation_name, force=False):
     discovered_hash = discovered_hashes.get(operation_name, "")
     if not discovered_hash:
         raise RuntimeError(f"Cannot find the {operation_name} persisted-query hash in the Spotify web-player bundle")
-    debug_print(f"Discovered Spotify {operation_name} persisted-query hash from {bundle_url}")
+    debug_print("Spotify persisted-query hash discovery", query=operation_name, bundle=bundle_url, outcome="OK")
     return discovered_hash
 
 
@@ -3523,9 +3639,8 @@ def spotify_web_metadata_query(operation_name, variables):
         force_query_hash = False
         headers = {"Accept": "application/json", "App-Platform": "WebPlayer", "Authorization": f"Bearer {token_data['access_token']}", "Client-Id": token_data["client_id"], "Content-Type": "application/json", "User-Agent": SPOTIFY_WEB_USER_AGENT}
         payload = {"extensions": {"persistedQuery": {"sha256Hash": query_hash, "version": 1}}, "operationName": operation_name, "variables": variables}
-        debug_print(f"HTTP POST {SPOTIFY_WEB_QUERY_URL} [Spotify web metadata operation={operation_name}]")
         response = SPOTIFY_SESSION.post(SPOTIFY_WEB_QUERY_URL, headers=headers, json=payload, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
-        debug_print(f"HTTP POST {SPOTIFY_WEB_QUERY_URL} [Spotify web metadata operation={operation_name}] -> {response.status_code}")
+        debug_print("HTTP POST", url=SPOTIFY_WEB_QUERY_URL, purpose="Spotify web metadata", query=operation_name, timeout=f"{FUNCTION_TIMEOUT}s", status=response.status_code, outcome="OK" if response.status_code < 400 else "failed")
 
         try:
             json_response = response.json()
@@ -3542,7 +3657,7 @@ def spotify_web_metadata_query(operation_name, variables):
             SP_WEB_ACCESS_TOKEN_EXPIRES_AT = 0
             SP_CACHED_WEB_CLIENT_ID = ""
             token_refreshed = True
-            debug_print("Anonymous Spotify web-player token was rejected, refreshing it once")
+            debug_print("Spotify anonymous web token refresh", query=operation_name, reason="token rejected", outcome="degraded")
             continue
 
         persisted_query_rejected = bool(errors) and any(marker in error_message.lower() for marker in ("persistedquery", "persisted query", "sha256"))
@@ -3550,7 +3665,7 @@ def spotify_web_metadata_query(operation_name, variables):
             spotify_clear_web_query_hash(operation_name)
             hash_refreshed = True
             force_query_hash = True
-            debug_print(f"Spotify {operation_name} persisted query was rejected, rediscovering its hash once")
+            debug_print("Spotify persisted-query hash refresh", query=operation_name, reason="query rejected", outcome="degraded")
             continue
 
         if errors:
@@ -3629,7 +3744,7 @@ def spotify_web_search_track_uris(search_term):
         track_uri = item_data.get("uri", "") if isinstance(item_data, dict) else ""
         if track_uri.startswith("spotify:track:") and track_uri not in track_uris:
             track_uris.append(track_uri)
-    debug_print(f"Spotify anonymous search returned {len(track_uris)} track URIs")
+    debug_print("Spotify anonymous search", term=search_term, tracks=len(track_uris), outcome="OK")
     return track_uris
 
 
@@ -3677,16 +3792,16 @@ def spotify_search_process_track_items(track_items, original_artist, original_tr
         cleaned_track_match = bool(cleaned_track and item_name.casefold() == cleaned_track.casefold())
         album_match = bool(original_album and item_album_name and item_album_name.casefold() == original_album.casefold())
 
-        debug_print(f"  Found item: {item_artists_str} - {item_name} [{item_album_name}] ({item_duration}s)")
+        debug_print("Spotify search candidate", artist=item_artists_str, track=item_name, album=item_album_name, duration=f"{item_duration}s")
 
         # Artist match check
         artist_match = any(original_artist.casefold() in a.casefold() for a in item_artists_list)
         alias_match = exact_track_match and album_match
         if not artist_match and not alias_match:
-            debug_print("    Skipping item (artist mismatch)")
+            debug_print("Spotify search candidate", track=item_name, outcome="skipped", reason="artist mismatch")
             continue
         if not artist_match:
-            debug_print("    Accepting artist alias match through exact track and album")
+            debug_print("Spotify search candidate", track=item_name, outcome="OK", reason="artist alias matched through exact track and album")
 
         score = 0
         if exact_track_match:
@@ -3699,14 +3814,14 @@ def spotify_search_process_track_items(track_items, original_artist, original_tr
         # Album match bonus (+20 points)
         if album_match:
             score += 20
-            debug_print("    Album match! (+20 bonus)")
+            debug_print("Spotify search candidate scoring", track=item_name, bonus="album match", outcome="OK")
 
         if score > best_score:
             best_score = score
             best_item = item
-            debug_print(f"    => New best match! (score={score})")
+            debug_print("Spotify search candidate scoring", track=item_name, score=score, best=True, outcome="OK")
         else:
-            debug_print(f"    => Match not better than current best (score={score})")
+            debug_print("Spotify search candidate scoring", track=item_name, score=score, best=False, outcome="OK")
 
     if best_item and best_score > 0:
         sp_track_uri_id = best_item.get("id")
@@ -3719,16 +3834,15 @@ def spotify_search_process_track_items(track_items, original_artist, original_tr
 def spotify_oauth_search_track_items(access_token, search_query, strategy):
     headers = {"Authorization": f"Bearer {access_token}", "User-Agent": SPOTIFY_WEB_USER_AGENT}
     params = {"q": search_query, "type": "track", "limit": 5}
-    debug_print(f"HTTP GET {SPOTIFY_OAUTH_SEARCH_URL} [Spotify OAuth app search strategy={strategy}]")
     response = req.get(SPOTIFY_OAUTH_SEARCH_URL, params=params, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
-    debug_print(f"HTTP GET {SPOTIFY_OAUTH_SEARCH_URL} [Spotify OAuth app search strategy={strategy}] -> {response.status_code}")
+    debug_print("HTTP GET", url=SPOTIFY_OAUTH_SEARCH_URL, purpose="Spotify OAuth app search", strategy=strategy, timeout=f"{FUNCTION_TIMEOUT}s", status=response.status_code, outcome="OK" if response.status_code < 400 else "failed")
     response.raise_for_status()
     json_response = response.json()
     tracks = json_response.get("tracks") if isinstance(json_response, dict) else None
     if not isinstance(tracks, dict):
         raise RuntimeError("Spotify OAuth app search returned no track collection")
     items = tracks.get("items") or []
-    debug_print(f"Spotify OAuth app search strategy={strategy} returned {len(items)} track items")
+    debug_print("Spotify OAuth app search", strategy=strategy, tracks=len(items), outcome="OK")
     return items
 
 
@@ -3758,11 +3872,11 @@ def spotify_search_song_trackid_duration_oauth(access_token, artist, track, albu
         try:
             track_items = spotify_oauth_search_track_items(access_token, search_query, strategy)
         except (req.RequestException, RuntimeError, TypeError, ValueError) as error:
-            debug_print(f"Spotify OAuth app search strategy={strategy} failed with {type(error).__name__}")
+            debug_print("Spotify OAuth app search", strategy=strategy, outcome="failed", error=f"{type(error).__name__}: {error}")
             continue
         sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(track_items, artist, track, cleaned_track=track_cleaned or None, original_album=album)
         if sp_track_uri_id:
-            debug_print(f"Spotify OAuth app metadata matched track ID '{sp_track_uri_id}' with duration {sp_track_duration}s")
+            debug_print("Spotify OAuth app metadata match", track_id=sp_track_uri_id, duration=f"{sp_track_duration}s", outcome="OK")
             return sp_track_uri_id, sp_track_duration
 
     return None, 0
@@ -3785,17 +3899,17 @@ def spotify_search_song_trackid_duration(artist, track, album=""):
         search_terms.append(f"{artist} {track_cleaned}")
 
     for search_term in dict.fromkeys(search_terms):
-        debug_print(f"Searching Spotify anonymous web metadata for artist='{artist}', track='{track}', album='{album}'")
+        debug_print("Spotify anonymous web metadata search", artist=artist, track=track, album=album)
         track_items = []
         for track_uri in spotify_web_search_track_uris(search_term):
             try:
                 track_items.append(spotify_get_track_info_web(track_uri))
             except (req.RequestException, RuntimeError, TypeError, ValueError) as error:
-                debug_print(f"Spotify getTrack candidate failed with {type(error).__name__}")
+                debug_print("Spotify getTrack candidate", outcome="failed", error=f"{type(error).__name__}: {error}")
 
         sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(track_items, artist, track, cleaned_track=track_cleaned or None, original_album=album)
         if sp_track_uri_id:
-            debug_print(f"Spotify anonymous web metadata matched track ID '{sp_track_uri_id}' with duration {sp_track_duration}s")
+            debug_print("Spotify anonymous web metadata match", track_id=sp_track_uri_id, duration=f"{sp_track_duration}s", outcome="OK")
             return sp_track_uri_id, sp_track_duration
 
     return None, 0
@@ -3810,20 +3924,20 @@ def spotify_resolve_track_metadata(artist, track, album=""):
         try:
             access_token = spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET)
             sp_track_uri_id, sp_track_duration = spotify_search_song_trackid_duration_oauth(access_token, artist, track, album)
-            debug_print(f"Spotify OAuth app metadata result: id='{sp_track_uri_id}', duration={sp_track_duration}s")
+            debug_print("Spotify OAuth app metadata", track_id=sp_track_uri_id, duration=f"{sp_track_duration}s", outcome="OK")
         except Exception as error:
-            debug_print(f"Spotify OAuth app metadata failed with {type(error).__name__}")
+            debug_print("Spotify OAuth app metadata", outcome="failed", error=f"{type(error).__name__}: {error}")
 
     if not sp_track_uri_id or sp_track_duration <= 0:
         try:
             web_track_uri_id, web_track_duration = spotify_search_song_trackid_duration(artist, track, album)
-            debug_print(f"Spotify anonymous web metadata result: id='{web_track_uri_id}', duration={web_track_duration}s")
+            debug_print("Spotify anonymous web metadata", track_id=web_track_uri_id, duration=f"{web_track_duration}s", outcome="OK")
             if web_track_uri_id:
                 sp_track_uri_id = web_track_uri_id
             if web_track_duration > 0:
                 sp_track_duration = web_track_duration
         except Exception as error:
-            debug_print(f"Spotify anonymous web metadata failed with {type(error).__name__}")
+            debug_print("Spotify anonymous web metadata", outcome="failed", error=f"{type(error).__name__}: {error}")
 
     return sp_track_uri_id, sp_track_duration
 
@@ -4024,8 +4138,8 @@ def smtp_sign_in(password, timeout=15):
         if smtp_object is not None:
             try:
                 smtp_object.quit()
-            except Exception:
-                pass
+            except Exception as cleanup_error:
+                debug_swallowed_exception("SMTP session cleanup", cleanup_error)
         SMTP_PASSWORD = previous_password
     return str(SMTP_USER)
 
@@ -4301,6 +4415,7 @@ def load_config_file(config_path, namespace=None, report_errors=True):
         # Parsed as data rather than executed, so a config file picked up from the working directory cannot run code
         parsed_values = parse_config_content(content, str(config_path), retired_settings)
         selected_namespace.update(parsed_values)
+        debug_print("Configuration applied", path=str(config_path), settings=len(parsed_values), retired=len(retired_settings) or None, outcome="OK")
         if retired_settings and report_errors:
             print(f"* Note: {describe_retired_settings(retired_settings, chr(39) + str(config_path) + chr(39))}")
         return True
@@ -4318,6 +4433,7 @@ def load_config_file(config_path, namespace=None, report_errors=True):
         detail = f"Config file '{config_path}' contains unsupported content: {exc}"
     except Exception as exc:
         detail = f"Config file '{config_path}' failed with {type(exc).__name__}: {exc}"
+    debug_print("Configuration load", path=str(config_path), outcome="failed", error=detail)
     if report_errors:
         print_recovery_error(context="config", detail=detail)
         print("* Config files are read as data. Only documented SETTING = value lines with plain literal values are accepted.")
@@ -4343,7 +4459,7 @@ def get_track_info(artist, track, album, network):
     track_duration = 0
     duration_mark = ""
 
-    debug_print(f"get_track_info(artist='{artist}', track='{track}', album='{album}')")
+    debug_print("Track metadata lookup", artist=artist, track=track, album=album)
 
     if USE_TRACK_DURATION_FROM_SPOTIFY or TRACK_SONGS:
         sp_track_uri_id, sp_track_duration = spotify_resolve_track_metadata(artist, track, album)
@@ -4358,17 +4474,17 @@ def get_track_info(artist, track, album, network):
         try:
             lf_track = pylast.Track(artist, track, network)
             lf_duration = lf_track.get_duration()
-            debug_print(f"Last.fm fallback: raw duration={lf_duration}ms")
+            debug_print("Last.fm track duration fallback", artist=artist, track=track, duration=f"{lf_duration}ms", outcome="OK")
             if lf_duration and lf_duration > 0:
                 if USE_TRACK_DURATION_FROM_SPOTIFY and not DO_NOT_SHOW_DURATION_MARKS:
                     duration_mark = " L*"
                 # Last.fm returns duration in milliseconds
                 track_duration = int(lf_duration / 1000)
         except Exception as e:
-            debug_print(f"Last.fm fallback error: {e}")
+            debug_print("Last.fm track duration fallback", artist=artist, track=track, outcome="failed", error=f"{type(e).__name__}: {e}")
             track_duration = 0
 
-    debug_print(f"Final track_duration={track_duration}s, duration_mark='{duration_mark}'")
+    debug_print("Track metadata lookup", artist=artist, track=track, duration=f"{track_duration}s", mark=duration_mark or None, outcome="OK")
 
     return track_duration, sp_track_uri_id, duration_mark
 
@@ -4455,8 +4571,11 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
     error_network_issue_counter = 0
     error_network_issue_start_ts = 0
     friends_check_last_ts = 0
+    check_count = 0
 
-    debug_print(f"Starting monitor loop for user: {username}")
+    # Output after this point is no longer the startup screen, so a verbose notice closes its own block
+    mark_monitoring_started()
+    debug_print("Monitoring loop start", user=username, interval=f"{LASTFM_CHECK_INTERVAL}s", active_interval=f"{LASTFM_ACTIVE_CHECK_INTERVAL}s")
     try:
         if csv_file_name:
             init_csv_file(csv_file_name)
@@ -4474,7 +4593,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
         try:
             with open(lastfm_last_activity_file, 'r', encoding="utf-8") as f:
                 last_activity_read = json.load(f)
+            debug_print("Last activity read", path=lastfm_last_activity_file, entries=len(last_activity_read), outcome="OK")
         except Exception as e:
+            debug_print("Last activity read", path=lastfm_last_activity_file, outcome="failed", error=f"{type(e).__name__}: {e}")
             print_recovery_error(e, context="file", detail=f"Cannot load the last status from '{lastfm_last_activity_file}'")
         if last_activity_read:
             last_activity_ts = last_activity_read[0]
@@ -4489,7 +4610,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             print(f"* Last activity loaded from file '{lastfm_last_activity_file}' ({lastfm_last_activity_file_mdate_weekday} {lastfm_last_activity_file_mdate})")
 
     try:
-        new_track = user.get_now_playing()
+        new_track = lastfm_get_now_playing(username, user)
         recent_tracks = lastfm_get_recent_tracks(username, network, RECENT_TRACKS_NUMBER)
     except Exception as e:
         print_recovery_error(e, detail=f"Cannot read the recent tracks of '{username}'")
@@ -4520,7 +4641,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             last_activity_track = track
             playing_track = new_track
             lf_user_online = True
-            debug_print(f"{username} is now ONLINE (initial track)")
+            debug_print("User state change", user=username, state="online", reason="track playing at startup")
             print(f"\nTrack:\t\t\t\t{artist} - {track}")
             if album:
                 print(f"Album:\t\t\t\t{album}")
@@ -4552,10 +4673,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             last_activity_to_save.append(track)
             last_activity_to_save.append(album)
 
-            try:
-                write_json_atomically(lastfm_last_activity_file, last_activity_to_save)
-            except Exception as e:
-                print(f"* Cannot save last status to '{lastfm_last_activity_file}' file: {e}")
+            save_last_activity_state(lastfm_last_activity_file, last_activity_to_save)
 
             try:
                 if csv_file_name:
@@ -4719,10 +4837,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             last_activity_to_save.append(track)
             last_activity_to_save.append(album)
 
-            try:
-                write_json_atomically(lastfm_last_activity_file, last_activity_to_save)
-            except Exception as e:
-                print(f"* Cannot save last status to '{lastfm_last_activity_file}' file: {e}")
+            save_last_activity_state(lastfm_last_activity_file, last_activity_to_save)
 
             try:
                 if csv_file_name:
@@ -5000,15 +5115,16 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             retry_interval = FRIENDS_RETRY_INTERVAL
                             friends_next_check_ts = current_ts + retry_interval
 
-            debug_print(f"Fetching now playing / recent tracks...")
+            debug_print("Now playing and recent tracks fetch", user=username)
             recent_tracks = lastfm_get_recent_tracks(username, network, 1)
             # Handle case where user still has no tracks
             if not recent_tracks or len(recent_tracks) == 0:
                 # Wait for first track to appear
+                debug_print("Waiting for the first scrobble", user=username, interval=f"{LASTFM_ACTIVE_CHECK_INTERVAL}s")
                 time.sleep(LASTFM_ACTIVE_CHECK_INTERVAL)
                 continue
             last_track_start_ts = int(recent_tracks[0].timestamp)
-            new_track = user.get_now_playing()
+            new_track = lastfm_get_now_playing(username, user)
             email_sent = False
             webhook_sent = False
 
@@ -5018,12 +5134,12 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             if not lf_user_online:
                 # If this is the first track appearing (user had no tracks before)
                 if last_track_start_ts_old2 == 0:
-                    debug_print("First track appeared!")
+                    debug_print("First scrobble appeared", user=username, outcome="OK")
                     print("\n*** First track appeared! Starting monitoring...\n")
                     last_track_start_ts_old2 = last_track_start_ts
                     lf_track_ts_start_old = last_track_start_ts
                 if last_track_start_ts > last_track_start_ts_old2:
-                    debug_print(f"Detected new entries while offline ({last_track_start_ts} > {last_track_start_ts_old2})")
+                    debug_print("New scrobbles while offline", user=username, latest=last_track_start_ts, previous=last_track_start_ts_old2)
                     print("\n*** New last.fm entries showed up while user was offline!\n")
                     lf_track_ts_start_old = last_track_start_ts
                     duplicate_entries = False
@@ -5235,10 +5351,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     last_activity_to_save.append(artist)
                     last_activity_to_save.append(track)
                     last_activity_to_save.append(album)
-                    try:
-                        write_json_atomically(lastfm_last_activity_file, last_activity_to_save)
-                    except Exception as e:
-                        print(f"* Cannot save last status to '{lastfm_last_activity_file}' file: {e}")
+                    save_last_activity_state(lastfm_last_activity_file, last_activity_to_save)
 
                     duration_m_body = ""
                     duration_m_body_html = ""
@@ -5611,6 +5724,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             if platform.system() == 'Darwin':       # macOS
                                 spotify_macos_play_song(SP_USER_GOT_OFFLINE_TRACK_ID)
                                 if SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE > 0:
+                                    debug_print("Waiting before pausing the finishing track", delay=f"{SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE}s")
                                     time.sleep(SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE)
                                     spotify_macos_play_pause("pause")
                             elif platform.system() == 'Windows':    # Windows
@@ -5618,6 +5732,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             else:                                   # Linux variants
                                 spotify_linux_play_song(SP_USER_GOT_OFFLINE_TRACK_ID)
                                 if SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE > 0:
+                                    debug_print("Waiting before pausing the finishing track", delay=f"{SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE}s")
                                     time.sleep(SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE)
                                     spotify_linux_play_pause("pause")
                         else:
@@ -5632,10 +5747,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     last_activity_to_save.append(artist)
                     last_activity_to_save.append(track)
                     last_activity_to_save.append(album)
-                    try:
-                        write_json_atomically(lastfm_last_activity_file, last_activity_to_save)
-                    except Exception as e:
-                        print(f"* Cannot save last status to '{lastfm_last_activity_file}' file: {e}")
+                    save_last_activity_state(lastfm_last_activity_file, last_activity_to_save)
                     if INACTIVE_NOTIFICATION or webhook_event_enabled("inactive"):
                         # Format recently listened songs list for email (skip if only 1 song)
                         recent_songs_mbody = ""
@@ -5734,11 +5846,15 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
         except Exception as e:
 
+            debug_print("Monitoring cycle", check=f"#{check_count + 1}", user=username, outcome="failed", error=f"{type(e).__name__}: {e}")
+
             str_matches = ["http code 500", "http code 504", "http code 503", "http code 502"]
             if any(x in str(e).lower() for x in str_matches):
                 if not error_500_start_ts:
                     error_500_start_ts = int(time.time())
                     error_500_counter = 1
+                    # A streak below its threshold prints nothing at all, which reads as a run that stopped working
+                    verbose_notice("Last.fm returned a temporary service error, so automatic retries are active")
                 else:
                     error_500_counter += 1
 
@@ -5747,6 +5863,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 if not error_network_issue_start_ts:
                     error_network_issue_start_ts = int(time.time())
                     error_network_issue_counter = 1
+                    verbose_notice("The Last.fm request could not complete, so automatic retries are active")
                 else:
                     error_network_issue_counter += 1
 
@@ -5799,10 +5916,21 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
         else:
             check_interval = LASTFM_CHECK_INTERVAL
 
-        debug_print(f"Sleeping for {check_interval}s before next check")
+        check_count += 1
+        debug_print("Completed check", check=f"#{check_count}", user=username, state="online" if lf_user_online else "offline", track=str(playing_track) if playing_track else None)
+        debug_print("Waiting for the next check", check=f"#{check_count}", interval=f"{check_interval}s", state="online" if lf_user_online else "offline")
         time.sleep(check_interval)
 
         new_track = None
+
+
+# Applies only the explicitly supplied --verbose and --debug flags so the command line always wins over the config file
+def apply_diagnostic_cli_flags(args):
+    global VERBOSE_MODE, DEBUG_MODE
+    if getattr(args, "verbose", None):
+        VERBOSE_MODE = True
+    if getattr(args, "debug_mode", None):
+        DEBUG_MODE = True
 
 
 # Applies validated one-run webhook command-line overrides to runtime settings
@@ -6151,8 +6279,8 @@ def doctor_check_email_notifications(report):
         if smtp_object is not None:
             try:
                 smtp_object.quit()
-            except Exception:
-                pass
+            except Exception as cleanup_error:
+                debug_swallowed_exception("SMTP session cleanup", cleanup_error)
     report.email_ready = True
     return [make_doctor_check("Notifications", "PASS", SMTP_READY_CHECK_LABEL, f"Alerts: {', '.join(enabled_categories)}. No email was sent during this passive check")]
 
@@ -6978,8 +7106,8 @@ def _wizard_verify_smtp(values, password):
         if smtp_object is not None:
             try:
                 smtp_object.quit()
-            except Exception:
-                pass
+            except Exception as cleanup_error:
+                debug_swallowed_exception("SMTP session cleanup", cleanup_error)
         globals().update(previous)
 
 
@@ -7322,9 +7450,9 @@ def _wizard_apply_saved_values(state, env_path=None):
         try:
             from dotenv import load_dotenv
             load_dotenv(str(env_path), override=True, interpolate=False)
-        except Exception:
+        except Exception as exc:
             # Reading the file back needs python-dotenv, so the entered values are applied directly below
-            pass
+            debug_swallowed_exception("Dotenv reload after save", exc)
     for secret in SECRET_KEYS:
         value = os.environ.get(secret)
         if value is not None:
@@ -7512,7 +7640,9 @@ def apply_cli_overrides(args):
 
     # Emitted once every layer has been applied, so a support transcript answers where each credential came from
     grouped_secrets = secrets_by_source()
-    debug_print("Secret sources: " + ("; ".join(f"{source}={', '.join(names)}" for source, names in grouped_secrets) if grouped_secrets else "none configured"))
+    # One line per source rather than one field per secret, since a secret name followed by = is what the redaction pass removes
+    for secret_source, secret_names in grouped_secrets or [("none", [])]:
+        debug_print("Secret sources", source=secret_source, names=" ".join(secret_names) or None)
 
     if SP_TOKENS_FILE:
         SP_TOKENS_FILE = os.path.expanduser(SP_TOKENS_FILE)
@@ -7619,7 +7749,7 @@ def apply_cli_overrides(args):
 
 # Runs the command-line interface
 def main():
-    global CLI_CONFIG_PATH, CONFIG_DISCOVERY_DISABLED, DOTENV_FILE, CLEAR_SCREEN, LIVENESS_REMINDER_SECONDS, LASTFM_USERNAME, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_PROFILE_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, PROFILE_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
+    global CLI_CONFIG_PATH, CONFIG_DISCOVERY_DISABLED, DOTENV_FILE, CLEAR_SCREEN, LIVENESS_REMINDER_SECONDS, LASTFM_USERNAME, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_PROFILE_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, PROFILE_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, VERBOSE_MODE, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
 
     if "--generate-config" in sys.argv and not any(flag in sys.argv for flag in SECRET_ACTION_FLAGS):
         config_content = CONFIG_BLOCK.strip("\n") + "\n"
@@ -7666,7 +7796,7 @@ def main():
         DEBUG_MODE = True
 
     if CLEAR_SCREEN and DEBUG_MODE:
-        debug_print("Terminal screen clear skipped because debug mode is active")
+        debug_print("Terminal screen clear", outcome="skipped", reason="debug mode is active")
 
     clear_screen(CLEAR_SCREEN and not keep_terminal_history() and not DEBUG_MODE)
 
@@ -8025,6 +8155,13 @@ def main():
         help="Disable logging to lastfm_monitor_<username>.log"
     )
     opts.add_argument(
+        "--verbose",
+        dest="verbose",
+        action="store_true",
+        default=None,
+        help="Print extra startup and runtime detail (overrides VERBOSE_MODE)"
+    )
+    opts.add_argument(
         "--debug",
         dest="debug_mode",
         action="store_true",
@@ -8035,9 +8172,8 @@ def main():
     args = parser.parse_args()
 
     # Applied before the config file so its own failures and the secret resolution traces are visible, then
-    # applied again afterwards so a saved DEBUG_MODE = False cannot erase what the command line asked for
-    if args.debug_mode is True:
-        DEBUG_MODE = True
+    # applied again afterwards so a saved VERBOSE_MODE or DEBUG_MODE of False cannot erase the command line
+    apply_diagnostic_cli_flags(args)
 
     if args.config_file:
         CONFIG_DISCOVERY_DISABLED = args.config_file.casefold() == "none"
@@ -8056,8 +8192,7 @@ def main():
         if not load_config_file(cfg_path):
             sys.exit(1)
 
-    if args.debug_mode is True:
-        DEBUG_MODE = True
+    apply_diagnostic_cli_flags(args)
 
     # Runs after the config file is read, so a saved LASTFM_USERNAME counts as a target
     if len(sys.argv) == 1 and not LASTFM_USERNAME:
@@ -8202,9 +8337,6 @@ def main():
         print_recovery_error(context="secret.missing", detail="LASTFM_API_SECRET (-w / --lastfm-secret) is empty or still the placeholder value")
         sys.exit(1)
 
-    if args.debug_mode is True:
-        DEBUG_MODE = True
-
     LASTFM_USERNAME_GLOBAL = args.username
 
     network = pylast.LastFMNetwork(LASTFM_API_KEY, LASTFM_API_SECRET)
@@ -8214,7 +8346,9 @@ def main():
         try:
             with open(CSV_FILE, 'a', newline='', buffering=1, encoding="utf-8") as _:
                 pass
+            debug_print("CSV destination check", path=CSV_FILE, outcome="OK")
         except Exception as e:
+            debug_print("CSV destination check", path=CSV_FILE, outcome="failed", error=f"{type(e).__name__}: {e}")
             print_recovery_error(e, context="file", detail=f"The CSV file '{CSV_FILE}' cannot be opened for writing")
             sys.exit(1)
 
@@ -8244,7 +8378,9 @@ def main():
                 for line in lines
                 if line.strip() and not line.strip().startswith("#")
             ]
+            debug_print("Monitored tracks read", path=MONITOR_LIST_FILE, tracks=len(lf_tracks), outcome="OK")
         except Exception as e:
+            debug_print("Monitored tracks read", path=MONITOR_LIST_FILE, outcome="failed", error=f"{type(e).__name__}: {e}")
             print_recovery_error(e, context="file", detail=f"The file with Last.fm tracks '{MONITOR_LIST_FILE}' cannot be opened")
             sys.exit(1)
     else:
@@ -8284,6 +8420,7 @@ def main():
         SONG_ON_LOOP_NOTIFICATION = False
         PROFILE_NOTIFICATION = False
         ERROR_NOTIFICATION = False
+        verbose_print("Email notifications are off because SMTP_HOST is still the shipped placeholder")
 
     print(f"* Last.fm polling intervals:\t[offline check: {display_time(LASTFM_CHECK_INTERVAL)}] [active check: {display_time(LASTFM_ACTIVE_CHECK_INTERVAL)}]\n*\t\t\t\t[inactivity: {display_time(LASTFM_INACTIVITY_CHECK)}]")
     if friends_check_enabled():
@@ -8311,7 +8448,11 @@ def main():
             print("* Spotify metadata backends:\tanonymous web player")
     print(f"* Configuration file:\t\t{cfg_path}")
     print(f"* Dotenv file:\t\t\t{env_path or 'None'}")
-    print(f"* Debug mode:\t\t\t{DEBUG_MODE}\n")
+    if VERBOSE_MODE or DEBUG_MODE:
+        print(f"* Verbose mode:\t\t\t{VERBOSE_MODE}")
+        print(f"* Debug mode:\t\t\t{DEBUG_MODE}\n")
+    else:
+        print("* More details:\t\t\tuse --verbose or --debug\n")
 
     # We define signal handlers only for Linux, Unix & MacOS since Windows has limited number of signals supported
     if platform.system() != 'Windows':
