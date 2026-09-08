@@ -632,6 +632,9 @@ LASTFM_API_REGISTRATION_URL = "https://www.last.fm/api/account/create"
 LASTFM_API_ACCOUNTS_URL = "https://www.last.fm/api/accounts"
 SPOTIFY_DASHBOARD_URL = "https://developer.spotify.com/dashboard"
 
+# Below this length a configured value is as likely to be an ordinary word as a credential, so replacing it would corrupt the text it appears in
+MIN_REDACTABLE_SECRET_LENGTH = 12
+
 # List of secret keys to load from env/config
 SECRET_KEYS = ("LASTFM_API_KEY", "LASTFM_API_SECRET", "SP_CLIENT_ID", "SP_CLIENT_SECRET", "SMTP_PASSWORD", "WEBHOOK_URL", "NTFY_ACCESS_TOKEN")
 
@@ -998,14 +1001,38 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
     return 0
 
 
-# Redacts configured private values and common secret parameters from diagnostic text
-def sanitize_sensitive_text(value: Any) -> str:
-    text = str(value)
+# Returns the private values worth replacing wherever they appear, skipping any too short to tell apart from an ordinary word
+def known_secret_values() -> List[str]:
+    values = []
     for key in SECRET_KEYS:
         secret = globals().get(key)
-        if isinstance(secret, str) and secret and not secret.startswith("your_"):
-            text = text.replace(secret, "<redacted>")
-    text = re.sub(r"(?i)([?&](?:api_key|api_sig|token|secret|password)=)[^&\s]+", r"\1<redacted>", text)
+        if isinstance(secret, str) and len(secret) >= MIN_REDACTABLE_SECRET_LENGTH and not secret.startswith("your_"):
+            values.append(secret)
+    if isinstance(WEBHOOK_HEADERS, dict):
+        for name, value in WEBHOOK_HEADERS.items():
+            if isinstance(name, str) and name.casefold() == "authorization" and isinstance(value, str) and len(value) >= MIN_REDACTABLE_SECRET_LENGTH:
+                values.append(value)
+    return values
+
+
+# Redacts configured private values and common credential shapes from diagnostic text
+def sanitize_error_text(value: Any) -> str:
+    text = str(value)
+    # Longest first, so a secret that contains another one is not left half replaced
+    for secret in sorted(known_secret_values(), key=len, reverse=True):
+        text = text.replace(secret, "<redacted>")
+    patterns = (
+        # A config parse error quotes the offending source line, which is how a password reaches the terminal and the log
+        (r"(?m)(\b(?:LASTFM_API_KEY|LASTFM_API_SECRET|SP_CLIENT_ID|SP_CLIENT_SECRET|SMTP_PASSWORD|WEBHOOK_URL|NTFY_ACCESS_TOKEN)\b\s*=\s*).*$", r"\1<redacted>"),
+        # spotipy authenticates the Spotify app with Basic while Spotify and ntfy both carry Bearer, so this tool sends two schemes
+        (r"(?i)(authorization['\"]?\s*[:=]\s*['\"]?(?:bearer|basic)\s+)[^\s,;'\"}]+", r"\1<redacted>"),
+        (r"(?i)(['\"]?(?:lastfm_api_key|lastfm_api_secret|sp_client_id|sp_client_secret|smtp_password|webhook_url|ntfy_access_token|access_token|refresh_token)['\"]?\s*[:=]\s*['\"]?)[^\s,;'\"}]+", r"\1<redacted>"),
+        # pylast signs each request with api_sig and sends api_key and the session key as parameters
+        (r"(?i)([?&](?:api_key|api_sig|sk|token|secret|password)=)[^&#\s]+", r"\1<redacted>"),
+        (r"(?i)https://(?:canary\.|ptb\.)?discord(?:app)?\.com/api(?:/v[0-9]+)?/webhooks/[0-9]+/[^\s'\"<>]+", "<redacted>"),
+    )
+    for pattern, replacement in patterns:
+        text = re.sub(pattern, replacement, text)
     return text
 
 
@@ -1043,7 +1070,7 @@ class RecoveryError(Exception):
 def make_recovery_advice(code, summary, fix, retryable, detail=""):
     if code not in RECOVERY_CODES:
         raise ValueError(f"Unsupported recovery code: {code}")
-    return RecoveryAdvice(code, sanitize_sensitive_text(summary), sanitize_sensitive_text(fix), bool(retryable), sanitize_sensitive_text(detail) if detail else "")
+    return RecoveryAdvice(code, sanitize_error_text(summary), sanitize_error_text(fix), bool(retryable), sanitize_error_text(detail) if detail else "")
 
 
 # Adds a directly relevant documentation link on its own line
@@ -1076,7 +1103,7 @@ def classify_recovery_error(error=None, context="runtime", detail=""):
     if isinstance(error, RecoveryError):
         return error.advice
     message = str(detail or error or "").lower()
-    safe_detail = sanitize_sensitive_text(detail or error) if (detail or error) else ""
+    safe_detail = sanitize_error_text(detail or error) if (detail or error) else ""
     lastfm_status = recovery_lastfm_status(error)
     http_status = recovery_http_status(error)
 
@@ -1175,7 +1202,7 @@ def render_recovery_error(error=None, context="runtime", debug=None, detail=""):
     lines = [f"* Error: {advice.summary}", f"To fix: {advice.fix}"]
     show_debug = DEBUG_MODE if debug is None else debug
     if show_debug and advice.detail:
-        lines.append(f"Technical detail: {sanitize_sensitive_text(advice.detail)}")
+        lines.append(f"Technical detail: {sanitize_error_text(advice.detail)}")
     return "\n".join(lines)
 
 
@@ -5177,7 +5204,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 print(f"* Error 50x ({error_500_counter}x times in the last {display_time((int(time.time()) - error_500_start_ts))}): '{e}'")
                 if webhook_event_enabled("error") and not webhook_sent:
                     m_subject = f"lastfm_monitor: Last.fm service error (user: {username})"
-                    m_body = f"Repeated Last.fm 50x errors: {sanitize_sensitive_text(e)}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                    m_body = f"Repeated Last.fm 50x errors: {sanitize_error_text(e)}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                     _, webhook_attempted = send_notification_channels("error", m_subject, m_body, webhook_enabled=True)
                     webhook_sent = webhook_sent or webhook_attempted
                 print_cur_ts("Timestamp:\t\t\t")
@@ -5188,7 +5215,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 print(f"* Error with network ({error_network_issue_counter}x times in the last {display_time((int(time.time()) - error_network_issue_start_ts))}): '{e}'")
                 if webhook_event_enabled("error") and not webhook_sent:
                     m_subject = f"lastfm_monitor: network error (user: {username})"
-                    m_body = f"Repeated network errors: {sanitize_sensitive_text(e)}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                    m_body = f"Repeated network errors: {sanitize_error_text(e)}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                     _, webhook_attempted = send_notification_channels("error", m_subject, m_body, webhook_enabled=True)
                     webhook_sent = webhook_sent or webhook_attempted
                 print_cur_ts("Timestamp:\t\t\t")
@@ -5204,7 +5231,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     error_webhook_enabled = webhook_event_enabled("error") and not webhook_sent
                     if error_email_enabled or error_webhook_enabled:
                         m_subject = f"lastfm_monitor: API key error! (user: {username})"
-                        safe_error = sanitize_sensitive_text(e)
+                        safe_error = sanitize_error_text(e)
                         m_body = f"API key might not be valid anymore: {safe_error}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                         m_body_html = f"<html><head></head><body>API key might not be valid anymore: {escape(safe_error)}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
                         email_attempted, webhook_attempted = send_notification_channels("error", m_subject, m_body, m_body_html, email_enabled=error_email_enabled, webhook_enabled=error_webhook_enabled)
@@ -5212,7 +5239,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         webhook_sent = webhook_sent or webhook_attempted
                 elif webhook_event_enabled("error") and not webhook_sent:
                     m_subject = f"lastfm_monitor: monitoring error (user: {username})"
-                    m_body = f"Monitoring error: {sanitize_sensitive_text(e)}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                    m_body = f"Monitoring error: {sanitize_error_text(e)}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                     _, webhook_attempted = send_notification_channels("error", m_subject, m_body, webhook_enabled=True)
                     webhook_sent = webhook_sent or webhook_attempted
                 print_cur_ts("Timestamp:\t\t\t")
