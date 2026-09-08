@@ -635,7 +635,7 @@ class FakeNetwork:
 
 
 # Runs the real monitoring loop on a fake clock advanced by each patched sleep and returns what it printed
-def drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles, check_interval=30, liveness=0, fail_after=None, fail_recover_after=None, error_factory=None, friends_fail_after=None, friends_recover_after=None, friends_failing_calls=None):
+def drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles, check_interval=30, liveness=0, fail_after=None, fail_recover_after=None, error_factory=None, friends_fail_after=None, friends_recover_after=None, friends_failing_calls=None, stub_notifications=True):
     if friends_failing_calls is not None:
         friends_fail_after = 0
 
@@ -660,7 +660,8 @@ def drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles, check_interval=30,
     monkeypatch.setattr(monitor, "TRACK_SONGS", False)
     monkeypatch.setattr(monitor, "get_track_info", lambda *a, **k: (0, None, ""))
     monkeypatch.setattr(monitor, "get_spotify_apple_genius_search_urls", lambda *a, **k: tuple([""] * 13))
-    monkeypatch.setattr(monitor, "send_notification_channels", lambda *a, **k: (False, False))
+    if stub_notifications:
+        monkeypatch.setattr(monitor, "send_notification_channels", lambda *a, **k: (False, False))
 
     if friends_fail_after is not None:
         friends_calls = count(1)
