@@ -641,7 +641,7 @@ class TestTheFrameAroundTheQuestions:
             "Create or view your Last.fm API key",
             "Use Spotify for track details?",
             "Watch for follower changes?",
-            "Write the normal per-user log file?",
+            "Write the normal per-target log file?",
             "Configure email notifications?",
             "Set up webhook alerts",
         ]:
