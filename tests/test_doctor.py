@@ -618,24 +618,26 @@ class TestTheRunAndItsVerdict:
         output = capsys.readouterr().out
         assert output.index("No files will be written") < output.index("Doctor")
 
-    # The report ends with the next action rather than leaving the reader to assemble the command
-    def test_the_next_steps_block_closes_a_passing_report(self, stubbed_checks, capsys):
+    # The block belongs to the command that asked for the report, so a wizard-driven run is not followed by a second copy
+    def test_the_run_itself_prints_no_next_steps_block(self, stubbed_checks, capsys):
         stubbed_checks["rows"] = [check("Environment", "PASS", "All good")]
         monitor.run_doctor(target_value="someuser")
+        assert "Next steps" not in capsys.readouterr().out
+
+    # The report ends with the next action rather than leaving the reader to assemble the command
+    def test_the_next_steps_block_closes_a_passing_report(self, capsys):
+        monitor.print_doctor_next_steps("someuser", 0)
         output = capsys.readouterr().out
         assert "Start monitoring:" in output
         assert "After Doctor passes" not in output
         assert monitor.render_command(["someuser"]) in output
 
-    def test_a_failing_report_still_prints_it_and_says_to_fix_first(self, stubbed_checks, capsys):
-        stubbed_checks["rows"] = [check("Environment", "FAIL", "Broken", advice=fix_advice())]
-        monitor.run_doctor(target_value="someuser")
-        output = capsys.readouterr().out
-        assert "After Doctor passes, start monitoring:" in output
+    def test_a_failing_report_still_prints_it_and_says_to_fix_first(self, capsys):
+        monitor.print_doctor_next_steps("someuser", 1)
+        assert "After Doctor passes, start monitoring:" in capsys.readouterr().out
 
-    def test_the_command_falls_back_to_a_placeholder_without_a_username(self, stubbed_checks, capsys):
-        stubbed_checks["rows"] = [check("Environment", "PASS", "All good")]
-        monitor.run_doctor()
+    def test_the_command_falls_back_to_a_placeholder_without_a_username(self, capsys):
+        monitor.print_doctor_next_steps()
         assert "<lastfm_username>" in capsys.readouterr().out
 
     # The verdict and the exit code have to describe the same run, delivery tests included
