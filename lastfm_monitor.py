@@ -6781,6 +6781,7 @@ def doctor_check_environment(version_info=None, spec_finder=None):
         ("dotenv", "python-dotenv", "Secrets can only come from environment variables or the configuration file", "Used only for reading secrets from a dotenv file"),
         ("spotipy", "spotipy", "The Spotify OAuth app metadata backend is unavailable, leaving the anonymous web player", "Used only for the Spotify OAuth app metadata backend"),
         ("bs4", "beautifulsoup4", "Follower, following and profile tracking cannot run", "Used only for follower, following and profile tracking"),
+        ("wcwidth", "wcwidth", "Screen truncation is disabled and lines are printed in full", "Used only to measure display width for screen truncation"),
     ]
     # The classic Command Prompt is the only place this library changes anything, so a machine it cannot
     # affect is not warned about a package it does not need
