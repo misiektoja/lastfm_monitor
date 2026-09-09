@@ -25,8 +25,10 @@ EXAMPLE_HEADINGS = ("Getting started", "Notifications", "Listening extras", "Inf
 
 # Copied verbatim from the sibling monitors, so two of these screens can be compared line by line
 SHARED_SENTENCES = {
+    "--setup": "Run the guided setup and write a ready-to-run configuration",
     "--doctor": "Run read-only preflight checks and report what is ready and what is not",
     "--set-webhook-url": "Save a Discord or ntfy webhook URL through a hidden prompt",
+    "--set-smtp-password": "Enter the SMTP password privately, check it against the mail server and save it to the dotenv file",
     "--send-test-email": "Send test email to verify SMTP settings",
     "--send-test-webhook": "Send one test webhook without starting monitoring",
 }
@@ -84,6 +86,11 @@ class TestExamples:
         block = help_screen[help_screen.index("Examples:"):]
         first = [line.strip() for line in block.splitlines() if line.startswith("  ")][:2]
         assert first == ["# Guided setup, recommended for the first run", "python3 lastfm_monitor.py --setup"]
+
+    # Verifies the one-line description carries the repository link the way the sibling monitors print it
+    def test_the_description_links_the_repository(self, help_screen):
+        header = help_screen.split("positional arguments:", 1)[0]
+        assert f"[ {monitor.PROJECT_URL}/ ]" in header
 
     def test_the_block_ends_with_the_guide(self, help_screen):
         assert help_screen.rstrip().endswith(f"Guide: {monitor.QUICK_START_GUIDE_URL}")
