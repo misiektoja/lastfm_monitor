@@ -7248,7 +7248,8 @@ def help_examples():
     prefix = render_command(include_paths=False)
     groups = (
         ("Getting started", (
-            ("Save the Last.fm API key and shared secret through hidden prompts", f"{prefix} --set-lastfm-credentials"),
+            ("Guided setup, recommended for the first run", f"{prefix} --setup"),
+            ("Or save the Last.fm API key and shared secret through hidden prompts", f"{prefix} --set-lastfm-credentials"),
             ("Check the setup before relying on it", f"{prefix} --doctor <lastfm_username>"),
             ("Start monitoring", f"{prefix} <lastfm_username>"),
         )),
