@@ -106,7 +106,12 @@ def run_main_to_the_loop(tmp_path, config_body="", arguments=()):
 class TestTheRowContract:
     def test_the_routing_flags_default_to_the_family_values(self):
         row = monitor.StartupSummaryRow("Target", "someuser")
-        assert (row.concise, row.full, row.log) == (False, True, True)
+        assert (row.concise, row.full) == (False, True)
+
+    # A third flag routing the log separately would let a row be shown and never written, so the log a bug
+    # report is made from would be missing a setting the reader was shown
+    def test_the_row_carries_no_routing_flag_beyond_the_two_views(self):
+        assert monitor.StartupSummaryRow._fields == ("label", "value", "concise", "full")
 
     # This is the check that found two overlong labels in a sibling after its own conversion
     def test_no_label_is_wider_than_the_column(self):
@@ -168,11 +173,10 @@ class TestTheRouting:
     def test_only_the_two_pointer_rows_are_concise_only(self):
         rows = monitor.build_startup_summary("someuser", "lastfm.conf", ".env", "lastfm.log")
         assert [row.label for row in rows if row.concise and not row.full] == ["Output", "More details"]
-        assert [row.label for row in rows if not row.log] == ["Output", "More details"]
 
     def test_every_other_row_reaches_the_full_view_and_the_log(self):
         rows = monitor.build_startup_summary("someuser", "lastfm.conf", ".env", "lastfm.log")
-        assert all(row.full and row.log for row in rows if row.label not in ("Output", "More details"))
+        assert all(row.full for row in rows if row.label not in ("Output", "More details"))
 
     # An optional feature is shown in the short view exactly while it is switched on
     @pytest.mark.parametrize("label, setting, on, off", [
