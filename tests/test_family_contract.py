@@ -70,6 +70,29 @@ class TestTheStartupBanner:
     BOX_WIDTH = 18
     WORDMARK_COLUMN = 21
 
+    # The geometry checks below pass for any drawing that fits the box, so the drawing itself is pinned here
+    def test_the_selected_art_is_unchanged(self):
+        assert monitor.STARTUP_BANNER == r"""
+ .---------------.    _              _      __
+|    _______     |   | |    __ _ ___| |_   / _|_ __ ___
+|   / _____ \    |   | |   / _` / __| __| | |_| '_ ` _ \
+|  | |  o  | |   |   | |__| (_| \__ \ |_ _|  _| | | | | |
+|   \_______/    |   |_____\__,_|___/\__(_)_| |_| |_| |_|
+ '---------------'
+                      __  __             _ _
+                     |  \/  | ___  _ __ (_) |_ ___  _ __
+                     | |\/| |/ _ \| '_ \| | __/ _ \| '__|
+                     | |  | | (_) | | | | | || (_) | |
+                     |_|  |_|\___/|_| |_|_|\__\___/|_|"""
+
+    # A console that cannot draw the character, a terminal narrower than the art and an editor that
+    # strips trailing spaces are three ways the banner reaches a user looking wrong
+    def test_the_art_is_ascii_bounded_and_free_of_trailing_whitespace(self):
+        monitor.STARTUP_BANNER.encode("ascii")
+        lines = monitor.STARTUP_BANNER.splitlines()
+        assert max(map(len, lines)) <= 90
+        assert all(line == line.rstrip() for line in lines)
+
     def test_the_glyph_sits_in_the_family_box(self):
         lines = monitor.STARTUP_BANNER.strip("\n").splitlines()
         assert lines[0].startswith(self.BOX_TOP)
