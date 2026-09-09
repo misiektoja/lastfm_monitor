@@ -7334,9 +7334,7 @@ def run_doctor(target_value=None, config_path=None, env_path=None, input_func=No
     print(render_doctor_sections(report))
     _doctor_offer_notification_tests(report, input_func=input_func)
     print(render_doctor_summary(report.checks))
-    exit_code = 1 if any(check.status == "FAIL" for check in report.checks) else 0
-    print_doctor_next_steps(target_value, exit_code)
-    return exit_code
+    return 1 if any(check.status == "FAIL" for check in report.checks) else 0
 
 
 # Reads a duration written the way people type one, returning whole seconds or None when it is not one
@@ -9115,7 +9113,10 @@ def main():
         sys.exit(run_setup_wizard(initial_target=args.username, config_file=args.config_file or cfg_path, env_file=args.env_file or env_path))
 
     if args.doctor:
-        sys.exit(run_doctor(target_value=args.username, config_path=cfg_path, env_path=env_path))
+        doctor_exit = run_doctor(target_value=args.username, config_path=cfg_path, env_path=env_path)
+        # Printed here rather than inside the run, so the wizard's own next steps are not followed by a second copy
+        print_doctor_next_steps(args.username, doctor_exit)
+        sys.exit(doctor_exit)
 
     # A target is optional only for the utility actions below. Checked after the dotenv file is resolved so the
     # command this prints carries the files this run was given, and before the credentials because the username
