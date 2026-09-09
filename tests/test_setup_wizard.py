@@ -207,6 +207,44 @@ class TestWhatSaveWrites:
         assert config.read_text(encoding="utf-8") == "LASTFM_CHECK_INTERVAL = 42\n"
 
 
+# The doctor run the wizard offers reads the same source map monitoring does, so a secret it just saved
+# must not be reported as one nothing supplied
+class TestTheSecretsTheWizardPutsInEffect:
+
+    def test_doctor_names_the_dotenv_file_the_wizard_just_wrote(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(monitor, "SECRET_SOURCES", {})
+        env_path = tmp_path / ".env"
+        env_path.write_text("LASTFM_API_KEY=written-key\nSMTP_PASSWORD=written-password\n", encoding="utf-8")
+        state = monitor.WizardSetupState(str(tmp_path / "lastfm_monitor.conf"), str(env_path), dict(monitor._config_template_defaults()))
+        state.secret_updates = {"LASTFM_API_KEY": "written-key", "SMTP_PASSWORD": "written-password"}
+
+        monitor._wizard_apply_saved_values(state, env_path=env_path)
+
+        assert monitor.secrets_by_source() == [("dotenv file", ["LASTFM_API_KEY", "SMTP_PASSWORD"])]
+        assert [row.label for row in monitor.doctor_secret_checks()] == ["Secrets loaded from the dotenv file"]
+
+    def test_a_secret_exported_before_the_run_is_not_credited_to_the_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(monitor, "SECRET_SOURCES", {})
+        monkeypatch.setenv("LASTFM_API_SECRET", "exported-secret")
+        env_path = tmp_path / ".env"
+        env_path.write_text("LASTFM_API_KEY=written-key\n", encoding="utf-8")
+        state = monitor.WizardSetupState(str(tmp_path / "lastfm_monitor.conf"), str(env_path), dict(monitor._config_template_defaults()))
+
+        monitor._wizard_apply_saved_values(state, env_path=env_path)
+
+        assert monitor.secrets_by_source() == [("dotenv file", ["LASTFM_API_KEY"]), ("environment", ["LASTFM_API_SECRET"])]
+
+    # Without python-dotenv the entered values are applied straight from the wizard, and they still have a home
+    def test_the_entered_values_are_credited_when_the_file_cannot_be_read_back(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(monitor, "SECRET_SOURCES", {})
+        state = monitor.WizardSetupState(str(tmp_path / "lastfm_monitor.conf"), str(tmp_path / ".env"), dict(monitor._config_template_defaults()))
+        state.secret_updates = {"WEBHOOK_URL": "https://example.test/hooks/written"}
+
+        monitor._wizard_apply_saved_values(state, env_path=None)
+
+        assert monitor.secrets_by_source() == [("dotenv file", ["WEBHOOK_URL"])]
+
+
 class TestPerSectionEditing:
 
     def test_one_section_is_changed_without_losing_the_others(self, wizard, tmp_path):
