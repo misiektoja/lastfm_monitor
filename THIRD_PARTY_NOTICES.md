@@ -23,6 +23,7 @@ These are not part of the distributed package.
 | Component | License | Use |
 | --- | --- | --- |
 | [pytest](https://pypi.org/project/pytest/) | MIT | Test suite |
+| [Hypothesis](https://pypi.org/project/hypothesis/) | MPL-2.0 | Property-based tests for the setup answer normalizers |
 | [PyYAML](https://pypi.org/project/PyYAML/) | MIT | Validating workflows and issue templates in the test suite |
 | [Ruff](https://pypi.org/project/ruff/) | MIT | Linting the module and the test suite |
 | [pip-audit](https://pypi.org/project/pip-audit/) | Apache-2.0 | Dependency vulnerability audit in the supply chain workflow |
