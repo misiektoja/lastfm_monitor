@@ -904,6 +904,23 @@ class TestTheDefaultsOnARerun:
 
         assert script.prompts == ["Set up webhook alerts (Discord, ntfy etc.)? [Y/n]: "]
 
+    @pytest.mark.parametrize("saved, hint, kept", [
+        # Switching Spotify on for the first time proposes the duration, which is most of the reason to switch it on
+        ({}, "[Y/n]", True),
+        ({"USE_TRACK_DURATION_FROM_SPOTIFY": True}, "[Y/n]", True),
+        ({"USE_TRACK_DURATION_FROM_SPOTIFY": False, "TRACK_SONGS": True}, "[y/N]", False),
+    ])
+    def test_the_duration_question_proposes_yes_until_it_has_been_answered(self, saved, hint, kept):
+        values = dict(monitor._config_template_defaults())
+        values.update(saved)
+        state = monitor.WizardSetupState("config", "env", values)
+        script = Script(["y", "", "", ""])
+
+        monitor._wizard_collect_spotify_section(state, input_func=script, getpass_func=Script([]))
+
+        assert script.prompts[1] == f"Take track duration from Spotify? Last.fm often lacks it or reports it wrong {hint}: "
+        assert state.config_values["USE_TRACK_DURATION_FROM_SPOTIFY"] is kept
+
     @pytest.mark.parametrize("saved, hint", [
         ({}, "[y/N]"),
         ({"ACTIVE_NOTIFICATION": True}, "[Y/n]"),
