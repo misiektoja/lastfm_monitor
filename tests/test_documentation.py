@@ -128,3 +128,11 @@ class TestGuideConstants:
     def test_each_guide_constant_is_read_somewhere(self, name):
         source = (PROJECT_ROOT / "lastfm_monitor.py").read_text(encoding="utf-8")
         assert len(re.findall(rf"\b{name}\b", source)) > 1, f"{name} is defined but never used"
+
+
+# Verifies the documented doctor sections are exactly the ones the report renders
+def test_the_documented_doctor_sections_match_the_code():
+    text = (DOCS_DIR / "troubleshooting.md").read_text(encoding="utf-8")
+
+    for section in lastfm_monitor.DOCTOR_SECTIONS:
+        assert f"**{section}**" in text, f"the {section} doctor section is not documented"
