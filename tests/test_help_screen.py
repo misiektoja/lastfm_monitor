@@ -79,6 +79,12 @@ class TestExamples:
         positions = [block.index(f"\n{heading}:\n") for heading in EXAMPLE_HEADINGS]
         assert positions == sorted(positions)
 
+    # Every sibling opens with the wizard, which is the one command a first-time reader can run without knowing anything
+    def test_the_wizard_is_the_first_example(self, help_screen):
+        block = help_screen[help_screen.index("Examples:"):]
+        first = [line.strip() for line in block.splitlines() if line.startswith("  ")][:2]
+        assert first == ["# Guided setup, recommended for the first run", "python3 lastfm_monitor.py --setup"]
+
     def test_the_block_ends_with_the_guide(self, help_screen):
         assert help_screen.rstrip().endswith(f"Guide: {monitor.QUICK_START_GUIDE_URL}")
 
