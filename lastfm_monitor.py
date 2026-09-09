@@ -7765,7 +7765,9 @@ def _wizard_collect_spotify_section(state, input_func=None, getpass_func=None):
     if not _wizard_ask_yes_no("Use Spotify for track details?", default=enabled, input_func=input_func):
         _wizard_disable_spotify(state)
         return
-    state.config_values["USE_TRACK_DURATION_FROM_SPOTIFY"] = _wizard_ask_yes_no("Take track duration from Spotify? Last.fm often lacks it or reports it wrong", default=bool(state.config_values.get("USE_TRACK_DURATION_FROM_SPOTIFY", True)), input_func=input_func)
+    # A fresh opt-in has no earlier answer to keep, and the duration is the main reason to reach for Spotify at all
+    duration_default = bool(state.config_values.get("USE_TRACK_DURATION_FROM_SPOTIFY")) if enabled else True
+    state.config_values["USE_TRACK_DURATION_FROM_SPOTIFY"] = _wizard_ask_yes_no("Take track duration from Spotify? Last.fm often lacks it or reports it wrong", default=duration_default, input_func=input_func)
     state.config_values["TRACK_SONGS"] = _wizard_ask_yes_no("Play each scrobbled track in your own Spotify client?", default=bool(state.config_values.get("TRACK_SONGS")), input_func=input_func)
     if not (state.config_values["USE_TRACK_DURATION_FROM_SPOTIFY"] or state.config_values["TRACK_SONGS"]):
         _wizard_disable_spotify(state)
