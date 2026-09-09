@@ -154,7 +154,7 @@ class TestTheReportShape:
         optional = [check for check in report.checks if check.label.startswith("Optional dependency") and check.status == "PASS"]
         assert optional
         for check in optional:
-            assert check.detail.startswith("Used only for"), f"{check.label} carries no detail"
+            assert check.detail.startswith("Used only "), f"{check.label} carries no detail"
 
     @pytest.mark.parametrize("statuses,sentence", [
         (("FAIL", "WARN"), "1 check(s) failed, 1 warning(s). Fix the failures above before relying on the tool."),

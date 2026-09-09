@@ -94,7 +94,7 @@ class TestTheEnvironmentSection:
         assert "Install it with: " in rows[1].advice.fix
 
     # A missing optional dependency costs one feature, which the loop still starts without
-    @pytest.mark.parametrize("module_name, package_name", [("dotenv", "python-dotenv"), ("spotipy", "spotipy"), ("bs4", "beautifulsoup4")])
+    @pytest.mark.parametrize("module_name, package_name", [("dotenv", "python-dotenv"), ("spotipy", "spotipy"), ("bs4", "beautifulsoup4"), ("wcwidth", "wcwidth")])
     def test_a_missing_optional_dependency_warns_and_says_what_is_unaffected(self, quiet_config, module_name, package_name):
         rows = monitor.doctor_check_environment(spec_finder=lambda name: None if name == module_name else object())
         warned = [row for row in rows if row.status == "WARN"]
