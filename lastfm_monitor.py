@@ -20,6 +20,19 @@ colorama (optional, only for coloured output in the classic Windows Command Prom
 
 VERSION = "2.7"
 
+STARTUP_BANNER = r"""
+ .---------------.    _              _      __
+|    _______    |   | |    __ _ ___| |_   / _|_ __ ___
+|   / _____ \   |   | |   / _` / __| __| | |_| '_ ` _ \
+|  | |  o  | |  |   | |__| (_| \__ \ |_ _|  _| | | | | |
+|   \_______/   |   |_____\__,_|___/\__(_)_| |_| |_| |_|
+ '---------------'
+                      __  __             _ _
+                     |  \/  | ___  _ __ (_) |_ ___  _ __
+                     | |\/| |/ _ \| '_ \| | __/ _ \| '__|
+                     | |  | | (_) | | | | | || (_) | |
+                     |_|  |_|\___/|_| |_|_|\__\___/|_|"""
+
 # ---------------------------
 # CONFIGURATION SECTION START
 # ---------------------------
@@ -1524,6 +1537,12 @@ KEEP_HISTORY_FLAGS = (*SECRET_ACTION_FLAGS, "--doctor", "--send-test-email", "--
 # Returns True when the running command is a one-shot whose output has to stay scrollable
 def keep_terminal_history():
     return any(flag in sys.argv for flag in KEEP_HISTORY_FLAGS)
+
+
+# Prints the ASCII startup banner with a separately aligned version
+def print_startup_banner():
+    print("\n".join(colorize("header", line) if line else line for line in STARTUP_BANNER.splitlines()))
+    print(colorize("info", f"{'':21}v{VERSION}") + "\n")
 
 
 # Converts absolute value of seconds to human readable format
@@ -8588,7 +8607,7 @@ def main():
 
     clear_screen(CLEAR_SCREEN and not keep_terminal_history() and not DEBUG_MODE)
 
-    print(colorize("header", f"Last.fm Monitoring Tool v{VERSION}") + "\n")
+    print_startup_banner()
 
     parser = argparse.ArgumentParser(
         prog=TOOL_NAME,
