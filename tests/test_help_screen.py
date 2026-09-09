@@ -65,6 +65,12 @@ class TestArgumentGroups:
         collapsed = " ".join(help_screen.split())
         assert f"{flag} {sentence}" in collapsed or f"{flag}, {sentence}" in collapsed
 
+    # The screen is the only place the width cap is announced, so a reader with wrapping lines can find it
+    def test_the_truncate_flag_is_offered(self, help_screen):
+        collapsed = " ".join(help_screen.split())
+        assert "--truncate N" in collapsed
+        assert "use 999 to auto-detect terminal width" in collapsed
+
     # The sentinel is only discoverable if the screen says it exists
     @pytest.mark.parametrize("flag", ["--config-file", "--env-file"])
     def test_both_file_flags_advertise_the_none_sentinel(self, flag, help_screen):

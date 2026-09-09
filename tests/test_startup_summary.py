@@ -2,6 +2,7 @@
 
 import ast
 import io
+import os
 import re
 import sys
 from pathlib import Path
@@ -29,6 +30,7 @@ SHARED_ROW_ORDER = (
     "Dotenv",
     "Liveness output",
     "CSV output",
+    "Terminal truncation",
     "Install method",
     "Secrets from dotenv",
     "Secrets from environment",
@@ -354,3 +356,59 @@ class TestTheLogAlwaysGetsTheFullView:
         monitor.emit_startup_summary(monitor.build_startup_summary("someuser"), show_full=False, stream=buffer)
         assert "* More details:" in buffer.getvalue()
         assert "* Install method:" not in buffer.getvalue()
+
+
+# The terminal width cap, which the log file is deliberately never subject to
+class TestTerminalTruncation:
+
+    # A colour code costs no columns, so styling never eats into the width the reader asked for
+    def test_it_measures_display_width_rather_than_escape_sequences(self):
+        pytest.importorskip("wcwidth")
+        truncated = monitor.truncate_string_per_line("\x1b[31m0123456789ABCDEF\x1b[0m", 10)
+        assert monitor.SGR_SEQUENCE_RE.sub("", truncated) == "0123456789"
+
+    # A CJK title costs two columns per character, which is the case a naive slice gets wrong
+    def test_a_double_width_character_costs_two_columns(self):
+        pytest.importorskip("wcwidth")
+        assert monitor.truncate_string_per_line("原神原神原神", 4) == "原神"
+
+    def test_every_line_is_measured_on_its_own(self):
+        pytest.importorskip("wcwidth")
+        assert monitor.truncate_string_per_line("abcdef\nabcdef", 3) == "abc\nabc"
+
+    # Without wcwidth there is no way to measure a column, so the text is left alone rather than mismeasured
+    def test_text_is_left_alone_when_the_optional_library_is_missing(self, monkeypatch):
+        monkeypatch.setitem(sys.modules, "wcwidth", None)
+        assert monitor.truncate_string_per_line("abcdef", 3) == "abcdef"
+
+    def test_the_command_line_width_wins_over_the_configured_one(self):
+        assert monitor.resolve_truncate_chars(80, 120, False) == 80
+        assert monitor.resolve_truncate_chars(None, 120, False) == 120
+
+    # Cutting a line nothing keeps a copy of would lose it, so a run without a log file keeps the full width
+    def test_it_is_off_when_logging_is_disabled(self):
+        assert monitor.resolve_truncate_chars(120, 120, True) == 0
+
+    def test_the_sentinel_expands_to_the_detected_terminal_width(self, monkeypatch, capsys):
+        monkeypatch.setattr(monitor.shutil, "get_terminal_size", lambda: os.terminal_size((132, 40)))
+        assert monitor.resolve_truncate_chars(999, 0, False) == 132
+        assert "132 characters" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("width, expected", [(0, "Disabled"), (40, "40 chars")])
+    def test_the_summary_names_the_width_in_effect(self, monkeypatch, width, expected):
+        monkeypatch.setattr(monitor, "TRUNCATE_CHARS", width)
+        row = next(row for row in monitor.build_startup_summary("someuser") if row.label == "Terminal truncation")
+        assert row.value == expected
+        assert row.concise is bool(width)
+
+    # The whole point of the setting: the screen is narrowed and the file still has the line in full
+    def test_the_log_file_keeps_the_line_the_terminal_had_cut(self, tmp_path, monkeypatch, capsys):
+        pytest.importorskip("wcwidth")
+        monkeypatch.setattr(monitor, "TRUNCATE_CHARS", 10)
+        log_path = tmp_path / "run.log"
+        logger = monitor.Logger(str(log_path))
+        logger.write("0123456789ABCDEF\n")
+        logger.logfile.close()
+
+        assert capsys.readouterr().out == "0123456789\n"
+        assert log_path.read_text(encoding="utf-8") == "0123456789ABCDEF\n"
