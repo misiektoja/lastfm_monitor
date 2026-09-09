@@ -385,6 +385,6 @@ While nothing changes, the tool prints one reminder that it is still running:
 Liveness check, timestamp:	Mon 08 Sep 2026, 09:15:05
 ```
 
-The reminder is timed in seconds, so it arrives at the same rate whether the user is listening or not. Set `LIVENESS_CHECK_INTERVAL` to change it (default: 43200, i.e. 12 hours), or to 0 to switch it off.
+The reminder is timed in seconds, so it arrives at the same rate whether the user is listening or not. Set `LIVENESS_CHECK_INTERVAL` to change it (default: 86400, i.e. 24 hours), or to 0 to switch it off.
 
 Anything the tool prints about the user restarts the countdown, so a busy run stays quiet.
