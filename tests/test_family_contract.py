@@ -56,28 +56,37 @@ SHARED_WIZARD_SENTENCES = (
 )
 
 
+# Returns the leftmost column holding a glyph anywhere in a block of banner rows
+def left_edge(rows):
+    return min(len(row) - len(row.lstrip(" ")) for row in rows if row.strip())
+
+
 # The startup banner every sibling opens with: a boxed glyph beside the tool name, the shared "Monitor"
 # wordmark under it and the version on its own line. Pinned here because the sibling sources are not
 # available to CI, so nothing else would notice the shape drifting away from the family
 class TestTheStartupBanner:
     BOX_TOP = " .---------------."
     BOX_BOTTOM = " '---------------'"
+    BOX_WIDTH = 18
+    WORDMARK_COLUMN = 21
 
     def test_the_glyph_sits_in_the_family_box(self):
         lines = monitor.STARTUP_BANNER.strip("\n").splitlines()
         assert lines[0].startswith(self.BOX_TOP)
         closing = next(index for index, line in enumerate(lines) if line.startswith(self.BOX_BOTTOM))
         for line in lines[1:closing]:
-            box = line[:17]
-            assert box.startswith("|") and box.endswith("|"), box
+            # The side walls have to stand under the corners of the border rows, not one column short of them
+            assert line[0] == "|" and line[self.BOX_WIDTH - 1] == "|", line[:self.BOX_WIDTH]
 
-    def test_the_wordmark_and_version_share_one_indent(self):
+    def test_both_wordmarks_start_in_the_same_column(self):
         lines = monitor.STARTUP_BANNER.strip("\n").splitlines()
         closing = next(index for index, line in enumerate(lines) if line.startswith(self.BOX_BOTTOM))
-        wordmark = lines[closing + 1:]
-        assert len(wordmark) == 5
-        assert all(line.startswith(" " * 21) for line in wordmark), wordmark
-        assert "|  \\/  | ___  _ __ (_) |_ ___  _ __" in wordmark[1]
+        beside_box = [" " * self.BOX_WIDTH + line[self.BOX_WIDTH:] for line in lines[:closing]]
+        below_box = lines[closing + 1:]
+        assert len(beside_box) == 5 and len(below_box) == 5
+        assert left_edge(beside_box) == self.WORDMARK_COLUMN, beside_box
+        assert left_edge(below_box) == self.WORDMARK_COLUMN, below_box
+        assert "|  \\/  | ___  _ __ (_) |_ ___  _ __" in below_box[1]
 
     def test_the_printer_puts_the_version_under_the_wordmark(self, capsys, monkeypatch):
         monkeypatch.setattr(monitor, "COLOR_ENABLED", False)
