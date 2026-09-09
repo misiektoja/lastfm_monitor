@@ -5,3 +5,6 @@ pyotp
 spotipy
 python-dotenv
 beautifulsoup4
+
+# Optional for display-width-aware terminal truncation (TRUNCATE_CHARS, --truncate)
+# wcwidth

@@ -414,6 +414,13 @@ DISABLE_LOGGING = False
 #   "Off"  - preserve Unicode separators in logs
 ASCII_LOG_SEPARATORS = "Auto"
 
+# Max characters per line when printing to screen to avoid line wrapping
+# Does not affect log file output
+# Set to 999 to auto-detect terminal width
+# Applies only when DISABLE_LOGGING is False
+# Can also be set via the --truncate flag
+TRUNCATE_CHARS = 0
+
 # Width of horizontal line
 HORIZONTAL_LINE = 113
 
@@ -649,6 +656,7 @@ DOTENV_FILE = ""
 LF_LOGFILE = ""
 DISABLE_LOGGING = False
 ASCII_LOG_SEPARATORS = "Auto"
+TRUNCATE_CHARS = 0
 HORIZONTAL_LINE = 0
 CLEAR_SCREEN = False
 COLORED_OUTPUT = False
@@ -1359,6 +1367,55 @@ def apply_color_to_text(text):
     return "".join(parts)
 
 
+# Truncates each line to a display width, expanding tabs and counting double-width characters correctly
+def truncate_string_per_line(message, truncate_width, tabsize=8):
+    try:
+        from wcwidth import wcwidth
+    except ImportError:
+        return message
+    truncated_lines = []
+    for line in message.split("\n"):
+        expanded_line = line.expandtabs(tabsize)
+        current_width = 0
+        truncated = []
+        position = 0
+        while position < len(expanded_line):
+            # A colour sequence is copied through free of charge, so styling never eats into the visible width
+            escape = SGR_SEQUENCE_RE.match(expanded_line, position)
+            if escape:
+                truncated.append(escape.group(0))
+                position = escape.end()
+                continue
+            char = expanded_line[position]
+            char_width = wcwidth(char)
+            if char_width is None or char_width < 0:
+                char_width = 0
+            if current_width + char_width > truncate_width:
+                break
+            truncated.append(char)
+            current_width += char_width
+            position += 1
+        truncated_lines.append("".join(truncated))
+    return "\n".join(truncated_lines)
+
+
+# Resolves CLI and configured truncation settings while expanding the terminal-width sentinel
+def resolve_truncate_chars(cli_value, configured_value, logging_disabled):
+    truncate_chars = configured_value if cli_value is None else cli_value
+    if logging_disabled:
+        return 0
+    if truncate_chars == 999:
+        terminal_size = shutil.get_terminal_size()
+        print(f"The detected terminal screen width is: {terminal_size.columns} characters\n")
+        return terminal_size.columns
+    return truncate_chars
+
+
+# Returns the text the terminal should be given, shortened to the configured width when one is set
+def for_terminal(message):
+    return truncate_string_per_line(message, TRUNCATE_CHARS) if TRUNCATE_CHARS else message
+
+
 # Wraps stdout while logging is disabled, so output is sanitized on the path that keeps no log file
 class TerminalStream(object):
     # Stores the wrapped terminal stream
@@ -1367,7 +1424,7 @@ class TerminalStream(object):
 
     # Writes one sanitized and coloured message to the terminal
     def write(self, message):
-        self.terminal.write(apply_color_to_text(sanitize_terminal_text(sanitize_error_text(message))))
+        self.terminal.write(apply_color_to_text(for_terminal(sanitize_terminal_text(sanitize_error_text(message)))))
         self.terminal.flush()
 
     # Writes one terminal-only message, which is every message this stream receives
@@ -1395,7 +1452,7 @@ class Logger(object):
 
     def write(self, message):
         safe_message = sanitize_terminal_text(sanitize_error_text(message))
-        self.terminal.write(apply_color_to_text(safe_message))
+        self.terminal.write(apply_color_to_text(for_terminal(safe_message)))
         # Colour codes are stripped so the log file stays plain text whatever the terminal was shown
         self.logfile.write(normalize_log_separators(ANSI_ESCAPE_RE.sub("", safe_message).expandtabs(8)))
         self.terminal.flush()
@@ -1403,7 +1460,7 @@ class Logger(object):
 
     # Writes one message only to the terminal, so a line that orients a reader at a screen stays out of the log
     def terminal_only(self, message):
-        self.terminal.write(apply_color_to_text(sanitize_terminal_text(sanitize_error_text(message))))
+        self.terminal.write(apply_color_to_text(for_terminal(sanitize_terminal_text(sanitize_error_text(message)))))
         self.terminal.flush()
 
     # Writes one message only to the log, so the file keeps the full view whichever one the terminal was shown
@@ -7213,6 +7270,7 @@ def build_startup_summary(target=None, config_path=None, env_path=None, log_path
         StartupSummaryRow("CSV output", CSV_FILE or "Disabled", concise=bool(CSV_FILE)),
         StartupSummaryRow("Monitored-track alerts", MONITOR_LIST_FILE or "Disabled", concise=bool(MONITOR_LIST_FILE)),
         StartupSummaryRow("Status file", resolve_status_file(target) if target else "None"),
+        StartupSummaryRow("Terminal truncation", f"{TRUNCATE_CHARS} chars" if TRUNCATE_CHARS else "Disabled", concise=bool(TRUNCATE_CHARS)),
         StartupSummaryRow("Install method", install_method_display_name()),
         StartupSummaryRow("Secrets from dotenv", ", ".join(grouped_secrets.get("dotenv file", [])) or "None"),
         StartupSummaryRow("Secrets from environment", ", ".join(grouped_secrets.get("environment", [])) or "None"),
@@ -8559,7 +8617,7 @@ def apply_cli_overrides(args):
 
 # Runs the command-line interface
 def main():
-    global CLI_CONFIG_PATH, CONFIG_DISCOVERY_DISABLED, DOTENV_FILE, CLEAR_SCREEN, COLORED_OUTPUT, COLOR_THEME, LIVENESS_REMINDER_SECONDS, LASTFM_USERNAME, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_PROFILE_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, PROFILE_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, VERBOSE_MODE, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
+    global CLI_CONFIG_PATH, CONFIG_DISCOVERY_DISABLED, DOTENV_FILE, CLEAR_SCREEN, COLORED_OUTPUT, COLOR_THEME, LIVENESS_REMINDER_SECONDS, LASTFM_USERNAME, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_PROFILE_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, PROFILE_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, VERBOSE_MODE, DEBUG_MODE, TRUNCATE_CHARS, LASTFM_USERNAME_GLOBAL
 
     if "--generate-config" in sys.argv and not any(flag in sys.argv for flag in SECRET_ACTION_FLAGS):
         config_content = CONFIG_BLOCK.strip("\n") + "\n"
@@ -8978,6 +9036,13 @@ def main():
         help="Disable coloured output in the terminal"
     )
     opts.add_argument(
+        "--truncate",
+        dest="truncate",
+        metavar="N",
+        type=int,
+        help="Max characters per screen line (not log), use 999 to auto-detect terminal width, ignored if -d is set"
+    )
+    opts.add_argument(
         "--verbose",
         dest="verbose",
         action="store_true",
@@ -9223,6 +9288,8 @@ def main():
     except ValueError as e:
         print(f"* Error: {e}")
         sys.exit(1)
+
+    TRUNCATE_CHARS = resolve_truncate_chars(args.truncate, TRUNCATE_CHARS, DISABLE_LOGGING)
 
     if not DISABLE_LOGGING:
         # The same helper the doctor reports from, so the reported destination is the one the run writes to
