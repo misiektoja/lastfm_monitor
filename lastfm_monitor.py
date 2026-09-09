@@ -8250,9 +8250,14 @@ def _wizard_apply_saved_values(state, env_path=None):
     # Config values first: they carry the unset placeholders for every secret, which would otherwise
     # overwrite the secrets applied below and make doctor report a working setup as unconfigured
     globals().update(state.config_values)
+    for secret in SECRET_KEYS:
+        record_secret_source(secret, "config file")
+    saved_in_dotenv = frozenset()
     if env_path:
         try:
-            from dotenv import load_dotenv
+            from dotenv import dotenv_values, load_dotenv
+            # Read before the load, because it is the only way to tell a value the file supplied from one already exported
+            saved_in_dotenv = frozenset(name for name in dotenv_values(str(env_path)) if name in SECRET_KEYS)
             load_dotenv(str(env_path), override=True, interpolate=False)
         except Exception as exc:
             # Reading the file back needs python-dotenv, so the entered values are applied directly below
@@ -8261,10 +8266,12 @@ def _wizard_apply_saved_values(state, env_path=None):
         value = os.environ.get(secret)
         if value is not None:
             globals()[secret] = value
+            record_secret_source(secret, "dotenv file" if secret in saved_in_dotenv else "environment")
     # Secrets exported before startup keep winning here, exactly as they will when monitoring runs
     for key, value in state.secret_updates.items():
         if os.environ.get(key) is None and value:
             globals()[key] = value
+            record_secret_source(key, "dotenv file")
 
 
 # Builds the exact local command that starts this monitor, used when setup offers to launch it
