@@ -23,7 +23,7 @@ Authentication
 * `[FAIL]` monitoring cannot start until it is fixed
 * `[SKIP]` the check did not run, usually because an earlier one failed
 
-The report covers the Python version and the libraries in use, the configuration and dotenv files in effect, where each secret came from, every file the run will write, the connectivity endpoint, the Last.fm credentials, the Spotify metadata backend when track duration or playback is on, the monitored profile and both notification channels.
+The report groups its rows into **Environment** for the Python version and the libraries in use, **Configuration** for the configuration and dotenv files in effect, where each secret came from and every file the run will write, **Authentication** for the Last.fm credentials, **Spotify metadata** for the metadata backend when track duration or playback is on, **Connectivity** for the endpoint the tool checks before each run, **Target** for the monitored profile and **Notifications** for both alert channels. A section with nothing to report is left out.
 
 Only a `[FAIL]` changes the exit code, which is `1` when anything failed and `0` otherwise, so the command can gate a deployment. The report ends with the command that starts monitoring using the same configuration and dotenv files you passed to doctor.
 
