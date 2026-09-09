@@ -56,6 +56,41 @@ SHARED_WIZARD_SENTENCES = (
 )
 
 
+# The startup banner every sibling opens with: a boxed glyph beside the tool name, the shared "Monitor"
+# wordmark under it and the version on its own line. Pinned here because the sibling sources are not
+# available to CI, so nothing else would notice the shape drifting away from the family
+class TestTheStartupBanner:
+    BOX_TOP = " .---------------."
+    BOX_BOTTOM = " '---------------'"
+
+    def test_the_glyph_sits_in_the_family_box(self):
+        lines = monitor.STARTUP_BANNER.strip("\n").splitlines()
+        assert lines[0].startswith(self.BOX_TOP)
+        closing = next(index for index, line in enumerate(lines) if line.startswith(self.BOX_BOTTOM))
+        for line in lines[1:closing]:
+            box = line[:17]
+            assert box.startswith("|") and box.endswith("|"), box
+
+    def test_the_wordmark_and_version_share_one_indent(self):
+        lines = monitor.STARTUP_BANNER.strip("\n").splitlines()
+        closing = next(index for index, line in enumerate(lines) if line.startswith(self.BOX_BOTTOM))
+        wordmark = lines[closing + 1:]
+        assert len(wordmark) == 5
+        assert all(line.startswith(" " * 21) for line in wordmark), wordmark
+        assert "|  \\/  | ___  _ __ (_) |_ ___  _ __" in wordmark[1]
+
+    def test_the_printer_puts_the_version_under_the_wordmark(self, capsys, monkeypatch):
+        monkeypatch.setattr(monitor, "COLOR_ENABLED", False)
+
+        monitor.print_startup_banner()
+
+        printed = capsys.readouterr().out.splitlines()
+        banner_lines = monitor.STARTUP_BANNER.splitlines()
+        assert printed[:len(banner_lines)] == banner_lines
+        assert printed[-2] == f"{'':21}v{monitor.VERSION}"
+        assert printed[-1] == ""
+
+
 class TestTheStatusMarkers:
     def test_only_four_markers_exist(self):
         assert tuple(monitor.DOCTOR_MARK_STYLES) == SHARED_MARKERS

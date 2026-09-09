@@ -97,7 +97,8 @@ class TestExamples:
         assert all(command.startswith("python3 lastfm_monitor.py ") for command in commands)
 
     def test_the_banner_is_printed_once(self, help_screen):
-        assert len(re.findall(r"Last\.fm Monitoring Tool v", help_screen)) == 1
+        assert help_screen.count(monitor.STARTUP_BANNER.strip("\n").splitlines()[-1]) == 1
+        assert len(re.findall(r"^ {21}v\d", help_screen, re.MULTILINE)) == 1
 
 
 class TestExampleRenderer:
