@@ -696,6 +696,21 @@ TOOL_NAME = "lastfm_monitor"
 # Default name for the optional config file
 DEFAULT_CONFIG_FILENAME = "lastfm_monitor.conf"
 
+# List of secret keys to load from env/config
+SECRET_KEYS = ("LASTFM_API_KEY", "LASTFM_API_SECRET", "SP_CLIENT_ID", "SP_CLIENT_SECRET", "SMTP_PASSWORD", "WEBHOOK_URL", "NTFY_ACCESS_TOKEN")
+
+# Where each secret's effective value came from, recorded as precedence is applied rather than reconstructed afterwards
+SECRET_SOURCES = {}
+
+# The sources a secret can resolve from, in the order precedence applies them
+SECRET_SOURCE_ORDER = ("config file", "dotenv file", "environment", "command line")
+
+# Secrets whose length the provider issues, so reporting it discloses nothing a pasted support transcript should not carry
+FIXED_LENGTH_SECRET_KEYS = ("LASTFM_API_KEY", "LASTFM_API_SECRET", "SP_CLIENT_ID", "SP_CLIENT_SECRET")
+
+# Below this length a configured value is as likely to be an ordinary word as a credential, so replacing it would corrupt the text it appears in
+MIN_REDACTABLE_SECRET_LENGTH = 12
+
 # Documentation links, kept as constants so messages, help text and the guides they point at cannot drift apart
 PROJECT_URL = "https://github.com/misiektoja/lastfm_monitor"
 DOCS_BASE_URL = "https://misiektoja.github.io/lastfm_monitor"
@@ -707,10 +722,10 @@ PRIVACY_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/#user-privacy-settings
 CONFIG_FILE_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#configuration-file"
 SECRETS_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#storing-secrets"
 SMTP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#smtp-settings"
+WEBHOOK_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#webhook-settings"
 TLS_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#tls-verification"
 USAGE_GUIDE_URL = f"{DOCS_BASE_URL}/usage/#monitoring-mode"
 SPOTIFY_APP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#optional-spotify-oauth-app-setup"
-WEBHOOK_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#webhook-settings"
 DOCTOR_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#doctor-preflight"
 
 # A preflight check waits on the user, so it uses a shorter timeout than a delivery in the monitoring loop
@@ -732,12 +747,6 @@ SMTP_READY_CHECK_LABEL = "SMTP connection and login succeeded"
 WEBHOOK_READY_CHECK_LABEL = "Webhook URL, headers and alert choices look valid"
 EMAIL_UNUSABLE_CHECK_LABEL = "Email alerts are enabled but unusable"
 
-# Without these there is no email channel at all, which is a different question from what one delivery needs
-MAIL_DESTINATION_SETTINGS = ("SMTP_HOST", "SENDER_EMAIL", "RECEIVER_EMAIL")
-MAIL_SIGN_IN_SETTINGS = ("SMTP_HOST", "SMTP_USER", "SENDER_EMAIL", "RECEIVER_EMAIL")
-# Every send signs in first, so a delivery needs the password as well
-MAIL_DELIVERY_SETTINGS = ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "SENDER_EMAIL", "RECEIVER_EMAIL")
-
 # Pages where the user creates or views the credentials this tool reads
 LASTFM_API_REGISTRATION_URL = "https://www.last.fm/api/account/create"
 LASTFM_API_ACCOUNTS_URL = "https://www.last.fm/api/accounts"
@@ -753,24 +762,6 @@ SECRET_ACTION_FLAGS = ("--set-webhook-url", "--set-lastfm-credentials", "--set-s
 INSTALL_METHOD_PYPI = "pip"
 INSTALL_METHOD_SCRIPT = "manual"
 INSTALL_METHOD_ENV_VAR = "LASTFM_MONITOR_INSTALL_METHOD"
-
-# Set once when --config-file selects the 'none' sentinel, so no caller falls back to the search path
-CONFIG_DISCOVERY_DISABLED = False
-
-# Where each secret's effective value came from, recorded as precedence is applied rather than reconstructed afterwards
-SECRET_SOURCES = {}
-
-# The sources a secret can resolve from, in the order precedence applies them
-SECRET_SOURCE_ORDER = ("config file", "dotenv file", "environment", "command line")
-
-# Secrets whose length the provider issues, so reporting it discloses nothing a pasted support transcript should not carry
-FIXED_LENGTH_SECRET_KEYS = ("LASTFM_API_KEY", "LASTFM_API_SECRET", "SP_CLIENT_ID", "SP_CLIENT_SECRET")
-
-# Below this length a configured value is as likely to be an ordinary word as a credential, so replacing it would corrupt the text it appears in
-MIN_REDACTABLE_SECRET_LENGTH = 12
-
-# List of secret keys to load from env/config
-SECRET_KEYS = ("LASTFM_API_KEY", "LASTFM_API_SECRET", "SP_CLIENT_ID", "SP_CLIENT_SECRET", "SMTP_PASSWORD", "WEBHOOK_URL", "NTFY_ACCESS_TOKEN")
 
 # Strings removed from track names for generating proper Genius search URLs
 re_search_str = r'remaster|extended|original mix|remix|rework|vocal mix|original soundtrack|radio( |-)edit|\(feat\.|( \(.*version\))|( - .*version)'
@@ -809,6 +800,9 @@ stdout_bck = None
 csvfieldnames = ['Date', 'Artist', 'Track', 'Album']
 
 CLI_CONFIG_PATH = None
+
+# Set once when --config-file selects the 'none' sentinel, so no caller falls back to the search path
+CONFIG_DISCOVERY_DISABLED = False
 
 # to solve the issue: 'SyntaxError: f-string expression part cannot include a backslash'
 nl_ch = "\n"
@@ -1912,6 +1906,11 @@ def make_recovery_advice(code, summary, fix, retryable, detail=""):
     return RecoveryAdvice(code, sanitize_error_text(summary), sanitize_error_text(fix), bool(retryable), sanitize_error_text(detail) if detail else "")
 
 
+# Adds a directly relevant documentation link on its own line
+def recovery_fix_with_guide(fix, guide_url):
+    return f"{fix}\nGuide: {guide_url}"
+
+
 # Returns the advice a cancelled secret command reports, worded the same way by every one-shot secret command
 def secret_entry_cancelled_advice(subject, flag, guide_url):
     return make_recovery_advice("secret.entry", f"{subject[:1].upper()}{subject[1:]} setup was cancelled and the dotenv file was not changed", recovery_fix_with_guide(f"Run {render_command([flag])} again when you have the value ready", guide_url), False)
@@ -1921,11 +1920,6 @@ def secret_entry_cancelled_advice(subject, flag, guide_url):
 def secret_replacement_declined_advice(subject, flag, guide_url, plural=False):
     kept = "were left as they are" if plural else "was left as it is"
     return make_recovery_advice("secret.entry", f"The saved {subject} {kept} and the dotenv file was not changed", recovery_fix_with_guide(f"Run {render_command([flag])} again and answer y to replace the saved value", guide_url), False)
-
-
-# Adds a directly relevant documentation link on its own line
-def recovery_fix_with_guide(fix, guide_url):
-    return f"{fix}\nGuide: {guide_url}"
 
 
 # Returns the HTTP status carried by an error, when it has one
@@ -2074,12 +2068,6 @@ def print_recovery_error(error=None, context="runtime", debug=None, detail=""):
     return advice
 
 
-# Reports that nothing changed, so a quiet run still says it is alive on the liveness cadence
-def print_liveness_banner(message):
-    print(f"* {sanitize_error_text(message)}")
-    print_cur_ts("Liveness check, timestamp:\t")
-
-
 # Renders one monitoring failure as the shared report line, carrying the retry schedule and optionally the fix
 def render_monitor_recovery(advice, retry_note="", with_fix=True, label="Error"):
     lines = [f"* {label}: {advice.summary}" + (f" ({retry_note})" if retry_note else "")]
@@ -2094,18 +2082,6 @@ def render_monitor_recovery(advice, retry_note="", with_fix=True, label="Error")
 def print_monitor_recovery(error, context, tracker, retry_note="", label="Error"):
     advice = classify_recovery_error(error, context)
     print(render_monitor_recovery(advice, retry_note, tracker is None or tracker.should_render(advice), label))
-
-
-# Reports a lasting failure on the liveness cadence, so a broken run still says it is alive without repeating itself
-def print_outage_liveness(target, advice, since):
-    print(f"* Monitoring degraded for {target}. {advice.summary} since {get_date_from_ts(since)}")
-    print_cur_ts("Liveness check, timestamp:\t")
-
-
-# Reports that a failure cleared, since a throttled failure no longer stops printing when it is over
-def print_outage_recovery(target, lasted):
-    print(f"* Monitoring recovered for {target} after {display_time(max(1, lasted))}")
-    print_cur_ts("Timestamp:\t\t\t")
 
 
 # Tracks one failure category over time, so a lasting outage is reported once instead of on every check
@@ -2145,6 +2121,24 @@ class OutageReporter:
         return lasted
 
 
+# Reports that nothing changed, so a quiet run still says it is alive on the liveness cadence
+def print_liveness_banner(message):
+    print(f"* {sanitize_error_text(message)}")
+    print_cur_ts("Liveness check, timestamp:\t")
+
+
+# Reports a lasting failure on the liveness cadence, so a broken run still says it is alive without repeating itself
+def print_outage_liveness(target, advice, since):
+    print(f"* Monitoring degraded for {target}. {advice.summary} since {get_date_from_ts(since)}")
+    print_cur_ts("Liveness check, timestamp:\t")
+
+
+# Reports that a failure cleared, since a throttled failure no longer stops printing when it is over
+def print_outage_recovery(target, lasted):
+    print(f"* Monitoring recovered for {target} after {display_time(max(1, lasted))}")
+    print_cur_ts("Timestamp:\t\t\t")
+
+
 # Tracks the last uninterrupted recovery category so a long outage cannot repeat the same hint every cycle
 class RecoveryHintTracker:
     # Starts with no category, so the first failure of any kind always renders its hint
@@ -2175,6 +2169,18 @@ def validate_webhook_url(url: Any = None) -> bool:
     return parsed.scheme.casefold() == "https" and bool(parsed.hostname) and not parsed.username and not parsed.password and bool(parsed.path.strip("/"))
 
 
+# Accepts a complete webhook URL or expands a bare ntfy.sh topic name into one
+def normalize_ntfy_topic_url(value: Any = None) -> str:
+    if not isinstance(value, str):
+        return ""
+    normalized = value.strip()
+    if validate_webhook_url(normalized):
+        return normalized
+    if re.fullmatch(r"[-_A-Za-z0-9]{1,64}", normalized):
+        return f"https://ntfy.sh/{normalized}"
+    return ""
+
+
 # Returns the normalized configured webhook provider or an empty string when unsupported
 def normalized_webhook_provider(provider: Any = None) -> str:
     selected_provider = WEBHOOK_PROVIDER if provider is None else provider
@@ -2188,18 +2194,6 @@ def normalized_webhook_provider(provider: Any = None) -> str:
 def webhook_provider_display_name(provider: Any = None) -> str:
     normalized = normalized_webhook_provider(provider)
     return {"discord": "Discord", "ntfy": "ntfy"}.get(normalized, normalized or "an unset provider")
-
-
-# Accepts a complete webhook URL or expands a bare ntfy.sh topic name into one
-def normalize_ntfy_topic_url(value: Any = None) -> str:
-    if not isinstance(value, str):
-        return ""
-    normalized = value.strip()
-    if validate_webhook_url(normalized):
-        return normalized
-    if re.fullmatch(r"[-_A-Za-z0-9]{1,64}", normalized):
-        return f"https://ntfy.sh/{normalized}"
-    return ""
 
 
 # Detects Discord and public ntfy webhook providers from distinctive URL shapes
@@ -4738,6 +4732,13 @@ def _run_set_private_values(option_name: str, prompts: List[Tuple[str, str]], en
     print(f"* Updated private settings file: {destination}")
     print(f"* Saved: {', '.join(updates)}")
     return str(destination)
+
+
+# Without these there is no email channel at all, which is a different question from what one delivery needs
+MAIL_DESTINATION_SETTINGS = ("SMTP_HOST", "SENDER_EMAIL", "RECEIVER_EMAIL")
+MAIL_SIGN_IN_SETTINGS = ("SMTP_HOST", "SMTP_USER", "SENDER_EMAIL", "RECEIVER_EMAIL")
+# Every send signs in first, so a delivery needs the password as well
+MAIL_DELIVERY_SETTINGS = ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "SENDER_EMAIL", "RECEIVER_EMAIL")
 
 
 # Returns the named mail settings that are still unset, so every caller reports the same missing ones
