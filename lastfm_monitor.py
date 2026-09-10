@@ -1767,6 +1767,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         debug_print("Email delivery", host=SMTP_HOST, port=SMTP_PORT, recipient=RECEIVER_EMAIL, outcome="failed", error=f"{type(e).__name__}: {e}")
         print_recovery_error(e, context="email")
         return 1
+    verbose_print(f"Email delivered to {RECEIVER_EMAIL}: {subject}")
     return 0
 
 
@@ -2580,6 +2581,7 @@ def send_webhook(title: str, description: str, notification_type: str = "song", 
                 response = post_webhook_request(json=discord_payload, headers=request_headers)
             attempt_label = f"#{attempt + 1}/{WEBHOOK_MAX_ATTEMPTS}"
             if 200 <= response.status_code <= 299:
+                verbose_print(f"Webhook delivered through {provider}: {webhook_values['title']}")
                 debug_print("Webhook delivery", provider=provider, host=webhook_destination_host(), attempt=attempt_label, status=response.status_code, outcome="OK")
                 return 0
             retryable = response.status_code == 429 or 500 <= response.status_code <= 599
