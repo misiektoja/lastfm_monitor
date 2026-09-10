@@ -1969,14 +1969,14 @@ def recovery_fix_with_guide(fix, guide_url):
 
 
 # Returns the advice a cancelled secret command reports, worded the same way by every one-shot secret command
-def secret_entry_cancelled_advice(subject, flag, guide_url):
-    return make_recovery_advice("secret.entry", f"{subject[:1].upper()}{subject[1:]} setup was cancelled and the dotenv file was not changed", recovery_fix_with_guide(f"Run {render_command([flag])} again when you have the value ready", guide_url), False)
+def secret_entry_cancelled_advice(subject, flag, guide_url, plural=False):
+    return make_recovery_advice("secret.entry", f"{subject[:1].upper()}{subject[1:]} setup was cancelled and the dotenv file was not changed", recovery_fix_with_guide(f"Run {render_command([flag])} again when you have the {'values' if plural else 'value'} ready", guide_url), False)
 
 
 # Returns the advice a declined secret replacement reports, since the saved value stands and asking again changes nothing
 def secret_replacement_declined_advice(subject, flag, guide_url, plural=False):
     kept = "were left as they are" if plural else "was left as it is"
-    return make_recovery_advice("secret.entry", f"The saved {subject} {kept} and the dotenv file was not changed", recovery_fix_with_guide(f"Run {render_command([flag])} again and answer y to replace the saved value", guide_url), False)
+    return make_recovery_advice("secret.entry", f"The saved {subject} {kept} and the dotenv file was not changed", recovery_fix_with_guide(f"Run {render_command([flag])} again and answer y to replace the saved {'values' if plural else 'value'}", guide_url), False)
 
 
 # Returns the HTTP status carried by an error, when it has one
@@ -4764,7 +4764,7 @@ def _run_set_private_values(option_name: str, prompts: List[Tuple[str, str]], en
         except (EOFError, KeyboardInterrupt):
             # Ctrl+C echoes nothing, so without this the error would continue the prompt line
             print()
-            raise RecoveryError(secret_entry_cancelled_advice(subject, option_name, guide_url)) from None
+            raise RecoveryError(secret_entry_cancelled_advice(subject, option_name, guide_url, plural=plural)) from None
         if not confirmed:
             raise RecoveryError(secret_replacement_declined_advice(subject, option_name, guide_url, plural=plural))
     for line in guidance or []:
@@ -4779,7 +4779,7 @@ def _run_set_private_values(option_name: str, prompts: List[Tuple[str, str]], en
             updates[key] = value
     except (EOFError, KeyboardInterrupt):
         print()
-        raise RecoveryError(secret_entry_cancelled_advice(subject, option_name, guide_url)) from None
+        raise RecoveryError(secret_entry_cancelled_advice(subject, option_name, guide_url, plural=plural)) from None
     try:
         update_dotenv_file(destination, updates)
     except PrivateSettingsError:
