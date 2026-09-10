@@ -259,7 +259,7 @@ class TestTwoAnswers:
         advice = raised.value.advice
         kept = "were left as they are" if plural else "was left as it is"
         assert advice.summary == f"The saved {subject} {kept} and the dotenv file was not changed"
-        assert "answer y to replace the saved value" in advice.fix
+        assert f"answer y to replace the saved {'values' if plural else 'value'}" in advice.fix
         assert advice.code == "secret.entry"
 
     # All seven tools read the interrupt here as an n, which answers a keypress with advice to answer it again
@@ -271,7 +271,7 @@ class TestTwoAnswers:
             getattr(monitor, runner)(env_file=destination, interactive=True, input_func=interrupted, getpass_func=lambda prompt: pytest.fail("asked for the value"))
         advice = raised.value.advice
         assert advice.summary == f"{subject[:1].upper()}{subject[1:]} setup was cancelled and the dotenv file was not changed"
-        assert "when you have the value ready" in advice.fix
+        assert f"when you have the {'values' if plural else 'value'} ready" in advice.fix
 
     @pytest.mark.parametrize("runner, flag, key, subject, plural", REPLACEABLE_COMMANDS)
     def test_an_interrupt_at_the_hidden_prompt_is_a_cancel(self, tmp_path, configured_mail, runner, flag, key, subject, plural):
