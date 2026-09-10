@@ -455,6 +455,32 @@ class TestEveryDeliveryIsTraced:
         assert "outcome=failed" in printed
         assert "OSError" in printed
 
+    def test_a_delivered_email_names_where_it_went_in_verbose(self, verbose_on, monkeypatch, capsys):
+        class Session:
+            def sendmail(self, sender, receiver, message):
+                pass
+
+            def quit(self):
+                pass
+
+        monkeypatch.setattr(monitor, "SMTP_HOST", "mail.example.com")
+        monkeypatch.setattr(monitor, "SMTP_PORT", 587)
+        monkeypatch.setattr(monitor, "SMTP_USER", "someuser")
+        monkeypatch.setattr(monitor, "SMTP_PASSWORD", "not-a-real-password")
+        monkeypatch.setattr(monitor, "SENDER_EMAIL", "from@example.com")
+        monkeypatch.setattr(monitor, "RECEIVER_EMAIL", "to@example.com")
+        monkeypatch.setattr(monitor, "smtp_connect_and_login", lambda use_ssl, smtp_timeout=15: Session())
+        assert monitor.send_email("Now playing", "Body", "", False) == 0
+        assert "* Email delivered to to@example.com: Now playing" in capsys.readouterr().out
+
+    def test_a_delivered_webhook_names_the_provider_and_the_alert_in_verbose(self, verbose_on, monkeypatch, capsys):
+        monkeypatch.setattr(monitor, "WEBHOOK_ENABLED", True)
+        monkeypatch.setattr(monitor, "WEBHOOK_URL", "https://example.com/hooks/abc")
+        monkeypatch.setattr(monitor, "WEBHOOK_PROVIDER", "discord")
+        monkeypatch.setattr(monitor, "post_webhook_request", lambda **kwargs: FakeResponse(204))
+        assert monitor.send_webhook("Now playing", "Description", "song", force=True) == 0
+        assert "* Webhook delivered through discord: Now playing" in capsys.readouterr().out
+
     def test_every_webhook_attempt_names_its_status_and_the_retry_delay(self, debug_on, monkeypatch, capsys):
         monkeypatch.setattr(monitor, "WEBHOOK_ENABLED", True)
         monkeypatch.setattr(monitor, "WEBHOOK_URL", "https://example.com/hooks/abc")
