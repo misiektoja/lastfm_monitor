@@ -3,6 +3,7 @@
 import ast
 import re
 import sys
+from html import escape
 from itertools import count
 from pathlib import Path
 
@@ -924,7 +925,7 @@ def recording_channels(monkeypatch, outcomes):
     calls = []
 
     def record(notification_type, subject, body, body_html="", email_enabled=False, webhook_enabled=None, **kwargs):
-        calls.append({"type": notification_type, "subject": subject, "body": body, "email": bool(email_enabled), "webhook": bool(webhook_enabled)})
+        calls.append({"type": notification_type, "subject": subject, "body": body, "body_html": body_html, "email": bool(email_enabled), "webhook": bool(webhook_enabled)})
         return outcomes[min(len(calls), len(outcomes)) - 1]
 
     monkeypatch.setattr(monitor, "ERROR_NOTIFICATION", True)
@@ -962,6 +963,18 @@ class TestAMonitoringFailureAlertsBothChannels:
         assert errors[0]["subject"] == "lastfm_monitor: monitoring error (user: someuser)"
         assert "The Last.fm API is temporarily unavailable" in errors[0]["body"]
         assert "To fix:" in errors[0]["body"]
+
+    # The guide link sits under the fix in both bodies, since HTML renders the newline the fix carries as a space
+    def test_the_guide_link_keeps_its_own_line_in_the_html_body(self, monkeypatch, tmp_path, capsys):
+        calls = recording_channels(monkeypatch, [(True, True)])
+        drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=8, liveness=3600, fail_after=2, stub_notifications=False)
+        error = next(call for call in calls if call["type"] == "error")
+        text_lines = error["body"].splitlines()
+        html_lines = error["body_html"].removeprefix("<html><head></head><body>").removesuffix("</body></html>").split("<br>")
+        fix_index = next(index for index, line in enumerate(text_lines) if line.startswith("To fix: "))
+        assert text_lines[fix_index + 1].startswith("Guide: https://")
+        assert html_lines[fix_index] == escape(text_lines[fix_index])
+        assert html_lines[fix_index + 1] == text_lines[fix_index + 1]
 
     # A failure that changes category is a different failure, so it earns each channel a new alert
     def test_a_changed_failure_category_earns_a_new_alert(self, monkeypatch, tmp_path, capsys):

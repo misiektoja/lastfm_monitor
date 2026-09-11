@@ -1983,6 +1983,11 @@ def recovery_fix_with_guide(fix, guide_url):
     return f"{fix}\nGuide: {guide_url}"
 
 
+# Escapes text for an HTML email body and keeps its line breaks, which HTML would otherwise collapse into spaces
+def html_text(text):
+    return escape(text).replace("\n", "<br>")
+
+
 # Returns the advice an optional library that is missing carries, naming what the run loses and how to install it
 def missing_dependency_advice(package, effect, alternative=""):
     return make_recovery_advice("dependency.missing", f"{effect} because the optional '{package}' library is missing", recovery_fix_with_guide(f"Install it with: {install_dependency_command(package)}" + (f". {alternative}" if alternative else ""), INSTALL_GUIDE_URL), False)
@@ -3882,8 +3887,8 @@ def notify_friends_changes(username, changes, skip_initial_line=False):
                 previous_value = field_change['previous'] or "(empty)"
                 current_value = field_change['current'] or "(empty)"
                 body_parts.extend([f"{labels[field]} changed:", f"Previous: {previous_value}", f"Current: {current_value}"])
-                previous_html = escape(previous_value).replace('\n', '<br>')
-                current_html = escape(current_value).replace('\n', '<br>')
+                previous_html = html_text(previous_value)
+                current_html = html_text(current_value)
                 html_parts.extend([f"<b>{labels[field]} changed:</b><br>", f"Previous: {previous_html}<br>", f"Current: {current_html}<br>"])
                 rendered_fields.append(field)
             body_parts.append("")
@@ -6688,7 +6693,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 else:
                     m_subject = f"lastfm_monitor: monitoring error (user: {username})"
                 m_body = f"{advice.summary}{nl_ch}{nl_ch}To fix: {advice.fix}{nl_ch}{nl_ch}Last.fm Monitor will retry in {display_time(sleep_interval)}.{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                m_body_html = f"<html><head></head><body>{escape(advice.summary)}<br><br>To fix: {escape(advice.fix)}<br><br>Last.fm Monitor will retry in {escape(display_time(sleep_interval))}.{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                m_body_html = f"<html><head></head><body>{html_text(advice.summary)}<br><br>To fix: {html_text(advice.fix)}<br><br>Last.fm Monitor will retry in {escape(display_time(sleep_interval))}.{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
                 email_delivered, webhook_delivered = send_notification_channels("error", m_subject, m_body, m_body_html, email_enabled=error_email_enabled, webhook_enabled=error_webhook_enabled)
                 error_email_sent = error_email_sent or email_delivered
                 error_webhook_sent = error_webhook_sent or webhook_delivered
