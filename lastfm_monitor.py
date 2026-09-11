@@ -806,6 +806,8 @@ SPOTIFY_WEB_TOKEN_EXPIRY_WINDOW = 60
 
 # Seconds rather than checks, because an active user is polled on a different interval than an inactive one
 LIVENESS_REMINDER_SECONDS = LIVENESS_CHECK_INTERVAL if LIVENESS_CHECK_INTERVAL > 0 else 0
+# How long a failure the tool can retry away must last before it is alerted, a failure it cannot is alerted at once
+ERROR_ALERT_AFTER_SECONDS = 120  # 2 minutes, the checks here run every few seconds
 
 stdout_bck = None
 csvfieldnames = ['Date', 'Artist', 'Track', 'Album']
@@ -6676,8 +6678,10 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 reported = True
 
             # Attempted on every failing check rather than only on the report, so a channel that failed is tried again
-            error_email_enabled = ERROR_NOTIFICATION and not error_email_sent
-            error_webhook_enabled = webhook_event_enabled("error") and not error_webhook_sent
+            # A failure the tool can retry away is alerted once the outage has lasted ERROR_ALERT_AFTER_SECONDS, one it cannot at once
+            alert_due = not advice.retryable or int(time.time()) - outage.since >= ERROR_ALERT_AFTER_SECONDS
+            error_email_enabled = alert_due and ERROR_NOTIFICATION and not error_email_sent
+            error_webhook_enabled = alert_due and webhook_event_enabled("error") and not error_webhook_sent
             if error_email_enabled or error_webhook_enabled:
                 if advice.code == "auth.api_key_invalid":
                     m_subject = f"lastfm_monitor: API key error! (user: {username})"

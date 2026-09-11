@@ -142,6 +142,8 @@ To disable sending an email on errors (enabled by default):
 lastfm_monitor <lastfm_username> -e
 ```
 
+An error alert goes out once the same failure has lasted **2 minutes**, since the checks here run every few seconds, so a short outage or one lost request reaches nobody, while a failure that cannot clear on its own, such as a rejected API key, is alerted at once. Each kind of failure alerts once per channel, a channel that could not deliver is tried again on the next failing check and a run that recovered alerts again when it fails later. The same rule governs the webhook error alert.
+
 To be notified when a user's followers change:
 - set `FOLLOWERS_NOTIFICATION` to `True`
 - or use the `--notify-followers` flag

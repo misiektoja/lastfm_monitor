@@ -916,7 +916,7 @@ class TestARecoveryIsNewsOnlyIfTheFailureWas:
 
 # Raises one failure category for the first run of failing checks and another one after it
 def two_category_failure(call):
-    return RuntimeError("HTTP code 500 from Last.fm") if call <= 5 else RuntimeError("The read operation timed out")
+    return RuntimeError("HTTP code 500 from Last.fm") if call <= 8 else RuntimeError("The read operation timed out")
 
 
 # Records every alert the loop hands to the delivery helper and answers with the outcome each call is given
@@ -935,6 +935,24 @@ def recording_channels(monkeypatch, outcomes):
 
 
 class TestAMonitoringFailureAlertsBothChannels:
+    # A failure the tool can retry away is alerted only once the outage has lasted the alert delay, so a blip of a
+    # few checks reaches nobody while a real outage still does
+    @pytest.mark.parametrize("cycles,expected", [(5, []), (6, [(True, True)])])
+    def test_a_retryable_failure_is_alerted_once_the_outage_has_lasted(self, monkeypatch, tmp_path, capsys, cycles, expected):
+        calls = recording_channels(monkeypatch, [(True, True)])
+        # The startup snapshot takes two calls, so the loop fails from its first check and thirty seconds apart
+        # the fifth failing check is the first to reach two minutes
+        drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=cycles, liveness=3600, fail_after=2, stub_notifications=False)
+        errors = [call for call in calls if call["type"] == "error"]
+        assert [(call["email"], call["webhook"]) for call in errors] == expected
+
+    # A failure nothing here can retry away is alerted on the first check, since waiting would change nothing
+    def test_a_failure_that_cannot_clear_itself_is_alerted_at_once(self, monkeypatch, tmp_path, capsys):
+        calls = recording_channels(monkeypatch, [(True, True)])
+        drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=3, liveness=3600, fail_after=2, error_factory=lambda call: RuntimeError("Invalid API key - You must be granted a valid key by last.fm"), stub_notifications=False)
+        errors = [call for call in calls if call["type"] == "error"]
+        assert [call["subject"] for call in errors] == ["lastfm_monitor: API key error! (user: someuser)"]
+
     # An outage used to reach the webhook but not email, which only heard about a rejected API key
     def test_any_failure_alerts_both_channels_once(self, monkeypatch, tmp_path, capsys):
         calls = recording_channels(monkeypatch, [(True, True)])
@@ -948,7 +966,7 @@ class TestAMonitoringFailureAlertsBothChannels:
     # A failure that changes category is a different failure, so it earns each channel a new alert
     def test_a_changed_failure_category_earns_a_new_alert(self, monkeypatch, tmp_path, capsys):
         calls = recording_channels(monkeypatch, [(True, True)])
-        drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=12, liveness=3600, fail_after=1, error_factory=two_category_failure, stub_notifications=False)
+        drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=14, liveness=3600, fail_after=1, error_factory=two_category_failure, stub_notifications=False)
         errors = [call for call in calls if call["type"] == "error"]
         assert len(errors) == 2
         assert "temporarily unavailable" in errors[0]["body"]
@@ -968,12 +986,12 @@ class TestAMonitoringFailureAlertsBothChannels:
         real_fetch = monitor.lastfm_get_recent_tracks
 
         def twice_failing_fetch(*args, **kwargs):
-            if next(fetches) in (3, 4, 7, 8):
+            if next(fetches) in (3, 4, 5, 6, 7, 10, 11, 12, 13, 14):
                 raise RuntimeError("HTTP code 500 from Last.fm")
             return real_fetch(*args, **kwargs)
 
         monkeypatch.setattr(monitor, "lastfm_get_recent_tracks", twice_failing_fetch)
-        drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=12, liveness=3600, stub_notifications=False)
+        drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=13, liveness=3600, stub_notifications=False)
         errors = [call for call in calls if call["type"] == "error"]
         assert [(call["email"], call["webhook"]) for call in errors] == [(True, True), (True, True)]
 
