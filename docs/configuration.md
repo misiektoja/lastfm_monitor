@@ -276,7 +276,9 @@ A forgotten `export` can shadow the file invisibly, so `--debug` names each secr
 
 ```text
 [DEBUG 12:00:00] Secret resolution: name=LASTFM_API_KEY, source=environment, value=set, chars=32
-[DEBUG 12:00:00] Secret sources: SMTP_PASSWORD=dotenv file, LASTFM_API_KEY=environment
+[DEBUG 12:00:00] Secret resolution: name=SMTP_PASSWORD, source=dotenv file, value=set
+[DEBUG 12:00:00] Secret sources: source=dotenv file, names=SMTP_PASSWORD
+[DEBUG 12:00:00] Secret sources: source=environment, names=LASTFM_API_KEY
 ```
 
 A secret still holding its `your_...` placeholder counts as unset and is left out. Lengths appear only for the secrets whose length the provider issues, never for a password you chose.
