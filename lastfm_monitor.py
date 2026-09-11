@@ -1867,7 +1867,8 @@ def doctor_value_is_set(value: Any) -> bool:
 
 
 # Returns the diagnostic fields describing one secret, adding the length only for keys whose length the provider issues
-def secret_fields(value: Any, name: str = "") -> Dict[str, Any]: return {"value": "set" if doctor_value_is_set(value) else "not set", "chars": len(str(value).strip()) if name in FIXED_LENGTH_SECRET_KEYS and doctor_value_is_set(value) else None}
+def secret_fields(value: Any, name: str = "") -> Dict[str, Any]:
+    return {"value": "set" if doctor_value_is_set(value) else "not set", "chars": len(str(value).strip()) if name in FIXED_LENGTH_SECRET_KEYS and doctor_value_is_set(value) else None}
 
 
 # Records where one secret resolved from and traces it, so a later layer overwrites the earlier answer instead of adding to it
@@ -1972,7 +1973,8 @@ def recovery_fix_with_guide(fix, guide_url):
 
 
 # Returns the advice an optional library that is missing carries, naming what the run loses and how to install it
-def missing_dependency_advice(package, effect, alternative=""): return make_recovery_advice("dependency.missing", f"{effect} because the optional '{package}' library is missing", recovery_fix_with_guide(f"Install it with: {install_dependency_command(package)}" + (f". {alternative}" if alternative else ""), INSTALL_GUIDE_URL), False)
+def missing_dependency_advice(package, effect, alternative=""):
+    return make_recovery_advice("dependency.missing", f"{effect} because the optional '{package}' library is missing", recovery_fix_with_guide(f"Install it with: {install_dependency_command(package)}" + (f". {alternative}" if alternative else ""), INSTALL_GUIDE_URL), False)
 
 
 # Returns the advice a cancelled secret command reports, worded the same way by every one-shot secret command
@@ -2026,9 +2028,10 @@ def is_too_many_open_files(error):
             return True
     return False
 
-# Returns the next step for a failure no rule recognized, since a run already printing the technical cause cannot be told to re-run for it
-def unknown_failure_fix(): return "Open an issue with this output if the failure continues" if DEBUG_MODE else "Re-run with --debug to see the technical cause"
 
+# Returns the next step for a failure no rule recognized, since a run already printing the technical cause cannot be told to re-run for it
+def unknown_failure_fix():
+    return "Open an issue with this output if the failure continues" if DEBUG_MODE else "Re-run with --debug to see the technical cause"
 
 
 # Maps one exception plus its status and calling context to stable recovery advice
@@ -8520,6 +8523,7 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
         sys.stdout.flush()
         return _wizard_launch_monitor(launch_arguments)
     return 0
+
 
 # Names one parsed argument the way the user could have typed it, since an argparse destination is not
 # always a flag: --debug is stored as debug_mode and a positional has no flag at all
