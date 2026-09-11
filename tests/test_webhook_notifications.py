@@ -212,6 +212,17 @@ class TestSecretReload:
         assert monitor.WEBHOOK_PROVIDER == "ntfy"
         assert "* Updated webhook provider to ntfy" in capsys.readouterr().out
 
+    # A reload trace says which secret arrived and whether the new value is set, never any part of the value
+    def test_the_reload_traces_the_secret_without_showing_it(self, reloadable, capsys, monkeypatch):
+        monkeypatch.setattr(monitor, "DEBUG_MODE", True)
+        reloadable.write_text(f'WEBHOOK_URL="{NTFY_DESTINATION}"\n', encoding="utf-8")
+
+        monitor.reload_secrets_signal_handler(monitor.signal.SIGHUP, None)
+
+        output = capsys.readouterr().out
+        assert f"Secret reload: name=WEBHOOK_URL, path={reloadable}, value=set" in output
+        assert "a-private-topic" not in output.split("Secret reload:", 1)[1].splitlines()[0]
+
     # The stored value is casefolded for comparisons, which is not how the service spells itself
     def test_the_message_uses_the_service_spelling(self, reloadable, capsys, monkeypatch):
         monkeypatch.setattr(monitor, "WEBHOOK_URL", NTFY_DESTINATION)

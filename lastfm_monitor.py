@@ -2933,6 +2933,7 @@ def reload_secrets_signal_handler(sig, frame):
                 if secret == "WEBHOOK_URL":
                     webhook_url_changed = True
                 record_secret_source(secret, "dotenv file")
+                debug_print("Secret reload", name=secret, path=env_path, value=secret_fingerprint(val, secret))
                 print(f"* Reloaded {secret} from {env_path}")
     if oauth_credentials_changed:
         SP_OAUTH_MEMORY_CACHE_HANDLER = None
@@ -5136,18 +5137,6 @@ def load_config_file(config_path, namespace=None, report_errors=True):
         print_recovery_error(context="config", detail=detail)
         print("* Config files are read as data. Only documented SETTING = value lines with plain literal values are accepted.")
     return False
-
-
-# Resolves an executable path by checking if it's a valid file or searching in $PATH
-def resolve_executable(path):
-    if os.path.isfile(path) and os.access(path, os.X_OK):
-        return path
-
-    found = shutil.which(path)
-    if found:
-        return found
-
-    raise FileNotFoundError(f"Could not find executable '{path}'")
 
 
 # Resolves Spotify track metadata first then falls back to Last.fm duration
