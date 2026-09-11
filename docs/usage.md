@@ -376,6 +376,8 @@ As Windows supports limited number of signals, this functionality is available o
 
 You can use [GRC](https://github.com/garabik/grc) to color logs.
 
+The bundled recipe follows the same colors as the live output. It also covers the other monitors in the family, so one copy in `~/.grc/` colors every tool's logs.
+
 Add to your GRC config (`~/.grc/grc.conf`):
 
 ```
