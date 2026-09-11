@@ -62,17 +62,32 @@ class TestThePlaceholderPredicate:
 
 class TestSecretFingerprint:
     def test_an_unset_secret_reports_only_that(self):
-        assert monitor.secret_fingerprint("your_lastfm_api_key", "LASTFM_API_KEY") == "not set"
+        assert monitor.secret_fields("your_lastfm_api_key", "LASTFM_API_KEY") == {"value": "not set", "chars": None}
 
     # The provider issues these lengths, so reporting one discloses nothing the user chose
     @pytest.mark.parametrize("key", monitor.FIXED_LENGTH_SECRET_KEYS)
     def test_a_provider_issued_secret_reports_its_length(self, key):
-        assert monitor.secret_fingerprint(REAL_KEY, key) == "set, 32 chars"
+        assert monitor.secret_fields(REAL_KEY, key) == {"value": "set", "chars": 32}
 
     # A user-chosen password's length is a real disclosure in output that gets pasted into public bug reports
     @pytest.mark.parametrize("key", [key for key in monitor.SECRET_KEYS if key not in monitor.FIXED_LENGTH_SECRET_KEYS])
     def test_a_user_chosen_secret_reports_presence_only(self, key):
-        assert monitor.secret_fingerprint("hunter2-and-then-some", key) == "set"
+        assert monitor.secret_fields("hunter2-and-then-some", key) == {"value": "set", "chars": None}
+
+    # The diagnostic line is documented as comma-separated key=value fields, so no field value may carry a comma
+    @pytest.mark.parametrize("key", monitor.SECRET_KEYS)
+    def test_no_secret_field_value_carries_a_comma(self, key):
+        assert all("," not in str(value) for value in monitor.secret_fields(REAL_KEY, key).values())
+
+    # The length belongs to the trace as its own field, so a reader can split the line on ", " and get pairs
+    def test_the_trace_splits_into_key_value_pairs(self, monkeypatch, capsys):
+        monkeypatch.setattr(monitor, "DEBUG_MODE", True)
+        monkeypatch.setattr(monitor, "LASTFM_API_KEY", REAL_KEY)
+
+        monitor.record_secret_source("LASTFM_API_KEY", "environment")
+
+        rendered = capsys.readouterr().out.strip().split("Secret resolution: ", 1)[1]
+        assert dict(field.split("=", 1) for field in rendered.split(", ")) == {"name": "LASTFM_API_KEY", "source": "environment", "value": "set", "chars": "32"}
 
 
 class TestRecordingTheSource:

@@ -886,7 +886,7 @@ import contextlib
 import functools
 import shutil
 from pathlib import Path
-from typing import Any, Callable, List, Optional, Tuple, cast
+from typing import Any, Callable, Dict, List, Optional, Tuple, cast
 import base64
 import hashlib
 import hmac
@@ -1866,11 +1866,8 @@ def doctor_value_is_set(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip()) and not value.strip().startswith("your_")
 
 
-# Reports whether a secret is present, with its length only for the ones whose length the provider fixes
-def secret_fingerprint(value: Any, name: str) -> str:
-    if not doctor_value_is_set(value):
-        return "not set"
-    return f"set, {len(str(value).strip())} chars" if name in FIXED_LENGTH_SECRET_KEYS else "set"
+# Returns the diagnostic fields describing one secret, adding the length only for keys whose length the provider issues
+def secret_fields(value: Any, name: str = "") -> Dict[str, Any]: return {"value": "set" if doctor_value_is_set(value) else "not set", "chars": len(str(value).strip()) if name in FIXED_LENGTH_SECRET_KEYS and doctor_value_is_set(value) else None}
 
 
 # Records where one secret resolved from and traces it, so a later layer overwrites the earlier answer instead of adding to it
@@ -1883,7 +1880,7 @@ def record_secret_source(name: str, source: str, value: Any = None) -> None:
         SECRET_SOURCES.pop(name, None)
         return
     SECRET_SOURCES[name] = source
-    debug_print("Secret resolution", name=name, source=source, value="set", chars=len(str(resolved).strip()) if name in FIXED_LENGTH_SECRET_KEYS else None)
+    debug_print("Secret resolution", name=name, source=source, **secret_fields(resolved, name))
 
 
 # Groups the configured secret names by the source each value actually came from, never by value
@@ -2971,7 +2968,7 @@ def reload_secrets_signal_handler(sig, frame):
                 if secret == "WEBHOOK_URL":
                     webhook_url_changed = True
                 record_secret_source(secret, "dotenv file")
-                debug_print("Secret reload", name=secret, path=env_path, value=secret_fingerprint(val, secret))
+                debug_print("Secret reload", name=secret, path=env_path, **secret_fields(val, secret))
                 print(f"* Reloaded {secret} from {env_path}")
     if oauth_credentials_changed:
         SP_OAUTH_MEMORY_CACHE_HANDLER = None
