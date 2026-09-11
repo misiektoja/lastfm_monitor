@@ -150,6 +150,30 @@ class TestWhatSaveWrites:
         assert monitor.load_config_file(str(tmp_path / "lastfm_monitor.conf"), namespace=namespace) is True
         assert namespace["LASTFM_USERNAME"] == "someuser"
 
+    # A wizard that changed nothing about the webhook used to collapse the shipped template into one 270-character line
+    def test_the_written_configuration_keeps_the_templates_own_lines(self, wizard, tmp_path):
+        wizard(full_run_answers())
+
+        written = (tmp_path / "lastfm_monitor.conf").read_text(encoding="utf-8")
+        assert written.count("\nWEBHOOK_TEMPLATE = {\n") == 1
+        assert "WEBHOOK_TEMPLATE = {'" not in written
+
+    # Verifies a setting still holding the shipped default keeps the template's own lines rather than a collapsed repr
+    def test_an_unchanged_setting_keeps_the_template_formatting(self):
+        rendered = monitor.generate_config_with_current_values(dict(monitor._config_template_defaults()))
+
+        assert rendered.count("\nWEBHOOK_TEMPLATE = {\n") == 1
+        assert "WEBHOOK_TEMPLATE = {'" not in rendered
+
+    # Verifies a changed setting is rewritten in place, replacing every line of the value it stood for
+    def test_a_changed_setting_replaces_the_whole_template_value(self):
+        values = dict(monitor._config_template_defaults())
+        values["WEBHOOK_TEMPLATE"] = {"content": "one line"}
+        rendered = monitor.generate_config_with_current_values(values)
+
+        assert "WEBHOOK_TEMPLATE = {'content': 'one line'}\n" in rendered
+        assert monitor.parse_config_content(rendered)["WEBHOOK_TEMPLATE"] == {"content": "one line"}
+
     # A secret in the configuration would be world readable and would sit in its backup as well
     def test_the_secrets_go_to_the_dotenv_file_only(self, wizard, tmp_path):
         wizard(full_run_answers(), secrets=("live-api-key", "live-api-secret"))
