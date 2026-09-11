@@ -1,5 +1,6 @@
 """Install detection and the commands the tool prints for it, including the paths a printed command has to carry."""
 
+import inspect
 import ast
 import re
 import shlex
@@ -142,3 +143,19 @@ class TestNoCommandBypassesTheRenderer:
         assert HARDCODED_COMMAND.search("verify with 'lastfm_monitor --send-test-webhook'")
         assert HARDCODED_COMMAND.search("run python3 lastfm_monitor.py --doctor")
         assert not HARDCODED_COMMAND.search("https://github.com/misiektoja/lastfm_monitor")
+
+
+# Verifies the printed-command renderer takes the family's two shared parameters before any tool-specific one
+def test_the_command_renderer_shares_one_contract():
+    parameters = list(inspect.signature(monitor.render_command).parameters.values())
+    assert [parameter.name for parameter in parameters[:2]] == ["arguments", "include_paths"]
+    assert [parameter.default for parameter in parameters[:2]] == [None, True]
+    # A tool-specific extra is keyword-only, so a positional call copied from a sibling cannot bind to it
+    assert all(parameter.kind is inspect.Parameter.KEYWORD_ONLY for parameter in parameters[2:])
+
+
+# Verifies the renderer with no arguments prints the bare command, which is what the help screen puts before each example
+def test_the_renderer_with_no_arguments_prints_the_bare_command():
+    prefix = monitor.render_command(include_paths=False)
+    assert prefix and not prefix.endswith(" ")
+    assert monitor.render_command(["--doctor"], include_paths=False) == f"{prefix} --doctor"

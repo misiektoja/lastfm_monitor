@@ -1841,7 +1841,7 @@ def command_writes_dotenv(arguments=()) -> bool:
 
 
 # Returns a copy-pasteable command line for the detected install method, carrying the config and dotenv files this run was given
-def render_command(arguments=None, include_paths: bool = True, config_path=None, env_path=None) -> str:
+def render_command(arguments=None, include_paths: bool = True, *, config_path=None, env_path=None) -> str:
     parts = list(install_command_prefix())
     parts.extend(str(argument) for argument in (arguments or []))
     # An explicitly passed path is always rendered, while include_paths only governs falling back to the active ones
