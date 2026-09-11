@@ -2,6 +2,7 @@
 
 import ast
 import inspect
+import sys
 from pathlib import Path
 
 import pylast
@@ -348,3 +349,55 @@ class TestRecoveryHintTracker:
         tracker.should_render(outage)
         tracker.reset()
         assert tracker.should_render(outage) is True
+
+
+class TestTheOneShotRefusals:
+    @pytest.fixture(autouse=True)
+    # Startup assigns module globals, so the settings every later test reads are restored afterwards
+    def restored_settings(self):
+        snapshot = {name: value for name, value in vars(monitor).items() if isinstance(value, (str, int, float, bool, type(None)))}
+        yield
+        for name, value in snapshot.items():
+            setattr(monitor, name, value)
+
+    # Verifies a malformed credential pair says what shape the value has to take instead of naming the settings
+    def test_a_malformed_spotify_credential_pair_names_the_expected_shape(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(monitor.sys, "argv", ["lastfm_monitor", "someuser", "-z", "onlyid", "--config-file", "none", "--env-file", "none"])
+
+        with pytest.raises(SystemExit):
+            monitor.main()
+
+        printed = capsys.readouterr().out
+        assert "* Error: -z / --spotify-creds is not in the expected format" in printed
+        assert "To fix: Pass the client id and the client secret as one value separated by a colon" in printed
+        assert f"Guide: {monitor.SPOTIFY_APP_GUIDE_URL}" in printed
+
+    # Verifies an optional dependency the enabled feature needs is reported with the command that installs it
+    def test_a_missing_optional_dependency_names_the_install_command(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setitem(sys.modules, "bs4", None)
+        monkeypatch.setattr(monitor, "friends_check_enabled", lambda: True)
+        monkeypatch.setattr(monitor.sys, "argv", ["lastfm_monitor", "someuser", "--config-file", "none", "--env-file", "none", "-u", "key", "-w", "secret"])
+
+        with pytest.raises(SystemExit):
+            monitor.main()
+
+        printed = capsys.readouterr().out
+        assert "* Error: Friend and profile tracking needs beautifulsoup4, which is not installed" in printed
+        assert "To fix: Install it with: " in printed
+        assert f"Guide: {monitor.INSTALL_GUIDE_URL}" in printed
+
+    # Verifies an unusable separator mode names the three values it accepts rather than repeating the raised text alone
+    def test_an_unusable_separator_mode_names_the_accepted_values(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(monitor, "ASCII_LOG_SEPARATORS", "Maybe")
+        monkeypatch.setattr(monitor.sys, "argv", ["lastfm_monitor", "someuser", "--config-file", "none", "--env-file", "none", "-u", "key", "-w", "secret"])
+
+        with pytest.raises(SystemExit):
+            monitor.main()
+
+        printed = capsys.readouterr().out
+        assert "* Error: ASCII_LOG_SEPARATORS must be" in printed
+        assert 'To fix: Set ASCII_LOG_SEPARATORS to "Auto", "On" or "Off"' in printed
+        assert f"Guide: {monitor.TERMINAL_GUIDE_URL}" in printed

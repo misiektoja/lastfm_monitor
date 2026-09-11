@@ -890,7 +890,7 @@ class TestARecoveryIsNewsOnlyIfTheFailureWas:
         monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
         monkeypatch.setattr(monitor, "DEBUG_MODE", False)
         transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=6, friends_fail_after=1, friends_recover_after=4)
-        assert "Error confirming friend/profile state (attempt 3)" in transcript
+        assert "Cannot confirm the friend and profile state (attempt 3)" in transcript
         assert transcript.count("* Friends/profile check is available again") == 1
 
     # Whatever verbose stops printing, debug still has to carry, or a support transcript loses the recovery
@@ -905,7 +905,7 @@ class TestARecoveryIsNewsOnlyIfTheFailureWas:
         monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
         monkeypatch.setattr(monitor, "DEBUG_MODE", False)
         transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=9, friends_failing_calls={2, 3, 4, 6, 7})
-        assert transcript.count("Error confirming friend/profile state (attempt 3)") == 1
+        assert transcript.count("Cannot confirm the friend and profile state (attempt 3)") == 1
         assert transcript.count("* Friends/profile check is available again") == 1
 
     def test_a_run_that_never_failed_says_nothing_about_recovering(self, verbose_on, monkeypatch, tmp_path, capsys):

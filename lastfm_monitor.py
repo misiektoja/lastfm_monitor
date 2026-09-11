@@ -733,6 +733,7 @@ SMTP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#smtp-settings"
 WEBHOOK_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#webhook-settings"
 TLS_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#tls-verification"
 USAGE_GUIDE_URL = f"{DOCS_BASE_URL}/usage/#monitoring-mode"
+TERMINAL_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#terminal-output"
 SPOTIFY_APP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#optional-spotify-oauth-app-setup"
 DOCTOR_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#doctor-preflight"
 
@@ -5808,7 +5809,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             retry_interval = FRIENDS_RETRY_INTERVAL
                             friends_next_check_ts = current_ts + retry_interval
                             friends_failure_announced = True
-                            print(f"* Error during friend/profile check: {e}")
+                            print_recovery_error(e, detail=f"Cannot confirm the friend and profile state: {e}")
                             print(f"* Preserving confirmation streak ({friends_streak}/{FRIENDS_CHANGE_COUNTER}) despite error; will retry in {display_time(retry_interval)}")
                             print_cur_ts("Timestamp:\t\t\t")
                         else:
@@ -5818,7 +5819,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             # Throttling: Alert on threshold, then every 10 attempts
                             if current_error_streak == FRIENDS_CHANGE_COUNTER or (current_error_streak > FRIENDS_CHANGE_COUNTER and (current_error_streak - FRIENDS_CHANGE_COUNTER) % 10 == 0):
                                 friends_failure_announced = True
-                                print(f"* Error confirming friend/profile state (attempt {current_error_streak}): {e}")
+                                print_recovery_error(e, detail=f"Cannot confirm the friend and profile state (attempt {current_error_streak}): {e}")
                                 print_cur_ts("Timestamp:\t\t\t")
 
                             retry_interval = FRIENDS_RETRY_INTERVAL
@@ -5878,7 +5879,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                                 if csv_file_name:
                                     write_csv_entry(csv_file_name, datetime.fromtimestamp(int(t.timestamp)), str(t.track.artist), str(t.track.title), str(t.album))
                     except Exception as e:
-                        print(f"* Error: {e}")
+                        print_recovery_error(e, detail=f"Cannot list the tracks played while the tool was offline: {e}")
 
                     if i > 0 and (OFFLINE_ENTRIES_NOTIFICATION or webhook_event_enabled("offline_entries")):
                         if added_entries_list:
@@ -6110,7 +6111,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                                         p += 1
                                         duplicate_entries = True
                         except Exception as e:
-                            print(f"* Error: {e}")
+                            print_recovery_error(e, detail=f"Cannot re-read the recent tracks to check for duplicates: {e}")
                         if duplicate_entries:
                             private_mode = f"\n\nDuplicate entries ({p}) found, possible private mode ({get_range_of_dates_from_tss(lf_active_ts_last_old, lf_track_ts_start, short=True)})"
                             private_mode_html = f"<br><br>Duplicate entries ({p}) found, possible <b>private mode</b> (<b>{get_range_of_dates_from_tss(lf_active_ts_last_old, lf_track_ts_start, short=True)}</b>)"
@@ -8502,7 +8503,7 @@ def apply_cli_overrides(args):
     if args.spotify_creds:
         SP_CLIENT_ID, separator, SP_CLIENT_SECRET = args.spotify_creds.partition(":")
         if not separator or not SP_CLIENT_ID or not SP_CLIENT_SECRET:
-            print("* Error: -z / --spotify-creds has invalid format - use SP_CLIENT_ID:SP_CLIENT_SECRET")
+            print_recovery_error(RecoveryError(make_recovery_advice("config.invalid", "-z / --spotify-creds is not in the expected format", recovery_fix_with_guide("Pass the client id and the client secret as one value separated by a colon", SPOTIFY_APP_GUIDE_URL), False)))
             sys.exit(1)
         record_secret_source("SP_CLIENT_ID", "command line")
         record_secret_source("SP_CLIENT_SECRET", "command line")
@@ -9287,7 +9288,7 @@ def main():
     try:
         ascii_log_separators_enabled()
     except ValueError as e:
-        print(f"* Error: {e}")
+        print_recovery_error(RecoveryError(make_recovery_advice("config.invalid", str(e), recovery_fix_with_guide('Set ASCII_LOG_SEPARATORS to "Auto", "On" or "Off"', TERMINAL_GUIDE_URL), False)))
         sys.exit(1)
 
     TRUNCATE_CHARS = resolve_truncate_chars(args.truncate, TRUNCATE_CHARS, DISABLE_LOGGING)
@@ -9309,8 +9310,7 @@ def main():
             # Imported only to check availability and report a friendly install command when it is missing
             import bs4  # type: ignore  # noqa: F401
         except ImportError:
-            print("* Error: beautifulsoup4 is required for friend and profile tracking")
-            print("* Install it with: pip install beautifulsoup4")
+            print_recovery_error(RecoveryError(make_recovery_advice("dependency.missing", "Friend and profile tracking needs beautifulsoup4, which is not installed", recovery_fix_with_guide(f"Install it with: {install_dependency_command('beautifulsoup4')}", INSTALL_GUIDE_URL), False)))
             sys.exit(1)
 
     if SMTP_HOST.startswith("your_smtp_server_"):
