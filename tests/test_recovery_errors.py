@@ -228,8 +228,8 @@ class TestRendering:
         assert "Technical detail" not in rendered
 
     def test_the_technical_cause_appears_only_in_debug(self):
-        error = pylast.WSError(None, "6", "User not found")
-        assert "Technical detail: User not found" in monitor.render_recovery_error(error, debug=True)
+        error = pylast.WSError(None, "10", "Invalid API key")
+        assert "Technical detail: Invalid API key" in monitor.render_recovery_error(error, debug=True)
         assert "Technical detail" not in monitor.render_recovery_error(error, debug=False)
 
     def test_a_guide_link_sits_on_its_own_line(self):
@@ -605,3 +605,23 @@ def test_the_tracker_suppresses_only_the_repeated_fix(capsys):
     printed = capsys.readouterr().out
     assert printed.count("* Error: ") == 2
     assert printed.count("To fix: ") == 1
+
+
+# A detail that only repeats the summary spends a line saying nothing, so the block drops it and keeps a real one
+def test_a_detail_repeating_the_summary_is_dropped():
+    repeated = monitor.make_recovery_advice("unknown", "the same sentence twice", "a fix", False, "the same sentence twice")
+    differing = monitor.make_recovery_advice("unknown", "the summary", "a fix", False, "the raw cause")
+
+    assert "Technical detail:" not in monitor.render_recovery_advice(repeated, debug=True)
+    assert "Technical detail: the raw cause" in monitor.render_recovery_advice(differing, debug=True)
+
+
+# A run that already prints the technical cause cannot be told to re-run for it
+def test_the_unrecognized_failure_fix_follows_the_diagnostic_mode(monkeypatch):
+    monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+    plain = monitor.classify_recovery_error(Exception("a wholly unfamiliar failure"), "runtime").fix
+    monkeypatch.setattr(monitor, "DEBUG_MODE", True)
+    debugging = monitor.classify_recovery_error(Exception("a wholly unfamiliar failure"), "runtime").fix
+
+    assert "--debug" in plain
+    assert "--debug" not in debugging
