@@ -1797,7 +1797,7 @@ def apply_tls_verification_setting() -> None:
     if not VERIFY_SSL:
         # Silenced only once the config file has been read, so the shipped default never decides this
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        print_monitor_recovery(RecoveryError(make_recovery_advice("config.insecure", "TLS certificate verification is off, so an intercepted connection cannot be told apart from the real service", recovery_fix_with_guide("Set VERIFY_SSL back to True unless this network intercepts TLS with its own certificate authority", TLS_GUIDE_URL), False)), "runtime", None, label="Warning")
+        print_recovery_advice(make_recovery_advice("config.insecure", "TLS certificate verification is off, so an intercepted connection cannot be told apart from the real service", recovery_fix_with_guide("Set VERIFY_SSL back to True unless this network intercepts TLS with its own certificate authority", TLS_GUIDE_URL), False), label="Warning")
         print()
 
 
@@ -2144,37 +2144,19 @@ def classify_recovery_error(error=None, context="runtime", detail=""):
     return advice("unknown", safe_detail or "The request could not be completed", "Re-run with --debug to see the technical cause", True, DIAGNOSTICS_GUIDE_URL)
 
 
-# Renders one structured failure as the shared Error, To fix and optional Technical detail block
-def render_recovery_error(error=None, context="runtime", debug=None, detail=""):
-    advice = classify_recovery_error(error, context, detail)
-    lines = [f"* Error: {advice.summary}", f"To fix: {advice.fix}"]
-    show_debug = DEBUG_MODE if debug is None else debug
-    if show_debug and advice.detail:
-        lines.append(f"Technical detail: {sanitize_error_text(advice.detail)}")
-    return "\n".join(lines)
-
-
-# Prints one structured recovery error and returns its stable advice
-def print_recovery_error(error=None, context="runtime", debug=None, detail=""):
-    advice = classify_recovery_error(error, context, detail)
-    print(render_recovery_error(RecoveryError(advice), debug=debug))
-    return advice
-
-
-# Renders one monitoring failure as the shared report line, carrying the retry schedule and optionally the fix
-def render_monitor_recovery(advice, retry_note="", with_fix=True, label="Error"):
+# Renders one built advice as the shared Error, To fix and optional Technical detail block
+def render_recovery_advice(advice, debug=None, retry_note="", with_fix=True, label="Error"):
     lines = [f"* {label}: {advice.summary}" + (f" ({retry_note})" if retry_note else "")]
     if with_fix:
         lines.append(f"To fix: {advice.fix}")
-        if DEBUG_MODE and advice.detail:
+        if (DEBUG_MODE if debug is None else debug) and advice.detail:
             lines.append(f"Technical detail: {sanitize_error_text(advice.detail)}")
     return "\n".join(lines)
 
 
-# Prints one monitoring failure, repeating the fix only when the failure category changes
-def print_monitor_recovery(error, context, tracker, retry_note="", label="Error"):
-    advice = classify_recovery_error(error, context)
-    print(render_monitor_recovery(advice, retry_note, tracker is None or tracker.should_render(advice), label))
+# Classifies one failure and renders it through the shared recovery block
+def render_recovery_error(error=None, context="runtime", debug=None, detail="", retry_note="", with_fix=True, label="Error"):
+    return render_recovery_advice(classify_recovery_error(error, context, detail), debug, retry_note, with_fix, label)
 
 
 # Tracks one failure category over time, so a lasting outage is reported once instead of on every check
@@ -2248,6 +2230,17 @@ class RecoveryHintTracker:
     # Clears suppression after a successful cycle, so a recurrence is reported again
     def reset(self):
         self.last_code = None
+
+
+# Prints one built advice through the shared recovery block and returns it
+def print_recovery_advice(advice, debug=None, retry_note="", with_fix=True, label="Error", tracker=None):
+    print(render_recovery_advice(advice, debug, retry_note, with_fix and (tracker is None or tracker.should_render(advice)), label))
+    return advice
+
+
+# Classifies one failure, prints it through the shared recovery block and returns its stable advice
+def print_recovery_error(error=None, context="runtime", debug=None, detail="", retry_note="", with_fix=True, label="Error", tracker=None):
+    return print_recovery_advice(classify_recovery_error(error, context, detail), debug, retry_note, with_fix, label, tracker)
 
 
 # Returns whether a webhook URL is a complete private HTTPS link
@@ -2953,7 +2946,7 @@ def reload_secrets_signal_handler(sig, frame):
                 print("* No .env file found, skipping env-var reload")
         except ImportError:
             env_path = None
-            print_monitor_recovery(RecoveryError(missing_dependency_advice("python-dotenv", "The env-var reload was skipped")), "runtime", None, label="Warning")
+            print_recovery_advice(missing_dependency_advice("python-dotenv", "The env-var reload was skipped"), label="Warning")
 
     oauth_credentials_changed = False
     webhook_url_changed = False
@@ -6624,13 +6617,13 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             # With the liveness banner off the aggregated 50x and network summaries keep their old cadence
             if outage_outcome == "repeat":
                 if error_500_start_ts and (error_500_counter >= ERROR_500_NUMBER_LIMIT and (int(time.time()) - error_500_start_ts) >= ERROR_500_TIME_LIMIT):
-                    print_monitor_recovery(e, "runtime", recovery_hint_tracker, retry_note, f"Error 50x ({error_500_counter}x times in the last {display_time((int(time.time()) - error_500_start_ts))})")
+                    print_recovery_error(e, "runtime", retry_note=retry_note, label=f"Error 50x ({error_500_counter}x times in the last {display_time((int(time.time()) - error_500_start_ts))})", tracker=recovery_hint_tracker)
                     reported = True
                     error_500_start_ts = 0
                     error_500_counter = 0
 
                 elif error_network_issue_start_ts and (error_network_issue_counter >= ERROR_NETWORK_ISSUES_NUMBER_LIMIT and (int(time.time()) - error_network_issue_start_ts) >= ERROR_NETWORK_ISSUES_TIME_LIMIT):
-                    print_monitor_recovery(e, "runtime", recovery_hint_tracker, retry_note, f"Error with network ({error_network_issue_counter}x times in the last {display_time((int(time.time()) - error_network_issue_start_ts))})")
+                    print_recovery_error(e, "runtime", retry_note=retry_note, label=f"Error with network ({error_network_issue_counter}x times in the last {display_time((int(time.time()) - error_network_issue_start_ts))})", tracker=recovery_hint_tracker)
                     reported = True
                     error_network_issue_start_ts = 0
                     error_network_issue_counter = 0
@@ -6643,7 +6636,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 alive_since = int(time.time())
 
             elif report_in_full:
-                print_monitor_recovery(e, "runtime", recovery_hint_tracker, retry_note)
+                print_recovery_error(e, "runtime", retry_note=retry_note, tracker=recovery_hint_tracker)
                 reported = True
 
             # Attempted on every failing check rather than only on the report, so a channel that failed is tried again
@@ -9191,7 +9184,7 @@ def main():
         except ImportError:
             env_path = DOTENV_FILE if DOTENV_FILE else None
             if env_path:
-                print_monitor_recovery(RecoveryError(missing_dependency_advice("python-dotenv", f"The dotenv file '{env_path}' was not loaded", "Or export the secrets as environment variables")), "runtime", None, label="Warning")
+                print_recovery_advice(missing_dependency_advice("python-dotenv", f"The dotenv file '{env_path}' was not loaded", "Or export the secrets as environment variables"), label="Warning")
 
     # Environment variables are a documented alternative to a dotenv file, so they apply even when no file was loaded
     for secret in SECRET_KEYS:
