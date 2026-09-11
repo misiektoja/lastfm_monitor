@@ -2072,6 +2072,9 @@ def classify_recovery_error(error=None, context="runtime", detail=""):
     if context == "file.exists":
         return advice("file.exists", safe_detail or "The destination file already exists", f"Re-run with --force to replace it after a timestamped backup, or write to a different path with '{render_command(['--generate-config', '<new-file>'], include_paths=False)}'", False, CONFIG_FILE_GUIDE_URL)
 
+    if context == "file.unwritable":
+        return advice("file.unwritable", safe_detail or "A file the tool keeps could not be written", "Check that the directory exists and is writable, or choose another path", False)
+
     if context == "file":
         if any(term in message for term in ("cannot load", "cannot be opened", "unreadable", "not valid utf-8", "no such file", "cannot be read")):
             return advice("file.unreadable", safe_detail or "A file the tool keeps could not be read", "Check the path and its permissions, or delete the file so it is recreated", False)
@@ -3873,7 +3876,7 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
         if csv_file_name:
             init_csv_file(csv_file_name)
     except Exception as e:
-        print(f"* Error: {e}")
+        print_recovery_error(e, context="file.unwritable")
 
     # Helper function to shorten strings in the middle
     def _shorten_middle(s, max_len, ellipsis="..."):
@@ -3927,7 +3930,7 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
             if csv_file_name:
                 write_csv_entry(csv_file_name, datetime.fromtimestamp(timestamp), artist, title, album)
         except Exception as e:
-            print(f"* Error: {e}")
+            print_recovery_error(e, context="file.unwritable")
 
     # Calculate column widths based on terminal size
     try:
@@ -5267,7 +5270,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
         if csv_file_name:
             init_csv_file(csv_file_name)
     except Exception as e:
-        print(f"* Error: {e}")
+        print_recovery_error(e, context="file.unwritable")
 
     lastfm_last_activity_file = resolve_status_file(username)
     last_activity_read = []
@@ -5366,7 +5369,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 if csv_file_name:
                     write_csv_entry(csv_file_name, datetime.fromtimestamp(int(lf_track_ts_start)), artist, track, album)
             except Exception as e:
-                print(f"* Error: {e}")
+                print_recovery_error(e, context="file.unwritable")
 
             duration_m_body = ""
             duration_m_body_html = ""
@@ -5530,7 +5533,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 if csv_file_name:
                     write_csv_entry(csv_file_name, datetime.fromtimestamp(int(lf_track_ts_start)), artist, track, album)
             except Exception as e:
-                print(f"* Error: {e}")
+                print_recovery_error(e, context="file.unwritable")
 
             duration_m_body = ""
             duration_m_body_html = ""
@@ -6311,7 +6314,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         if csv_file_name:
                             write_csv_entry(csv_file_name, datetime.fromtimestamp(int(lf_track_ts_start)), artist, track, album)
                     except Exception as e:
-                        print(f"* Error: {e}")
+                        print_recovery_error(e, context="file.unwritable")
                     if listened_songs:
                         if lf_track_ts_start == lf_active_ts_start:
                             print(f"\nSongs Played:\t\t\t{listened_songs}")
@@ -9244,7 +9247,7 @@ def main():
             debug_print("CSV destination check", path=CSV_FILE, outcome="OK")
         except Exception as e:
             debug_print("CSV destination check", path=CSV_FILE, outcome="failed", error=f"{type(e).__name__}: {e}")
-            print_recovery_error(e, context="file", detail=f"The CSV file '{CSV_FILE}' cannot be opened for writing")
+            print_recovery_error(e, context="file.unwritable", detail=f"The CSV file '{CSV_FILE}' cannot be opened for writing")
             sys.exit(1)
 
     if args.list_recent:

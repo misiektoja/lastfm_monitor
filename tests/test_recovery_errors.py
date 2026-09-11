@@ -12,8 +12,17 @@ import lastfm_monitor as monitor
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-# Contexts the classifier routes on, so a typo in a call site cannot fall through to the runtime branch unnoticed
-KNOWN_CONTEXTS = frozenset({"runtime", "config", "set_lastfm_credentials", "set_spotify_credentials", "set_webhook_url", "target.missing", "secret.missing", "connectivity", "email", "webhook", "file", "file.exists"})
+# Returns the contexts the classifier branches on, so a typo in a call site cannot fall through to the runtime branch unnoticed
+def routed_contexts():
+    tree = ast.parse(inspect.getsource(monitor.classify_recovery_error))
+    contexts = {"runtime"}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Compare) or not isinstance(node.left, ast.Name) or node.left.id != "context":
+            continue
+        for comparator in node.comparators:
+            values = comparator.elts if isinstance(comparator, (ast.Tuple, ast.List, ast.Set)) else [comparator]
+            contexts.update(value.value for value in values if isinstance(value, ast.Constant) and isinstance(value.value, str))
+    return contexts
 
 
 # Returns the recovery codes the classifier can actually return, read from the branches themselves
@@ -94,7 +103,7 @@ class TestTheClosedCodeSet:
     def test_every_call_site_names_a_context_the_classifier_routes_on(self):
         contexts = call_site_contexts()
         assert contexts, "print_recovery_error is never called"
-        unknown = sorted(set(contexts) - KNOWN_CONTEXTS)
+        unknown = sorted(set(contexts) - routed_contexts())
         assert unknown == [], f"call sites pass contexts nothing routes on: {unknown}"
 
 
@@ -184,6 +193,29 @@ class TestContextRouting:
         assert advice.code == "unknown"
         assert advice.fix
 
+
+    # A write failure often names a missing file, which must not be mistaken for a file the tool could not read
+    @pytest.mark.parametrize("detail", ["Could not initialize CSV file '/x/y.csv': [Errno 2] No such file or directory", "The CSV file '/x/y.csv' cannot be opened for writing"])
+    def test_a_write_failure_is_never_reported_as_unreadable(self, detail):
+        advice = monitor.classify_recovery_error(context="file.unwritable", detail=detail)
+        assert advice.code == "file.unwritable"
+        assert advice.fix == "Check that the directory exists and is writable, or choose another path"
+
+    # Verifies a failed CSV write reports through the recovery block, since the monitoring loop carries on past it
+    def test_no_csv_write_failure_prints_its_own_line(self):
+        csv_writers = {"init_csv_file", "write_csv_entry"}
+        offenders = []
+        guarded = 0
+        for node in ast.walk(ast.parse((PROJECT_ROOT / "lastfm_monitor.py").read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.Try) or (node.body[-1].end_lineno or node.body[0].lineno) - node.body[0].lineno > 6:
+                continue
+            if not any(isinstance(inner, ast.Call) and getattr(inner.func, "id", "") in csv_writers for statement in node.body for inner in ast.walk(statement)):
+                continue
+            guarded += 1
+            offenders.extend(f"line {statement.lineno}" for handler in node.handlers for statement in handler.body if isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call) and getattr(statement.value.func, "id", "") == "print")
+
+        assert guarded >= 6, f"only {guarded} CSV writes are guarded, so this no longer covers them"
+        assert not offenders, "CSV write failures reported outside the recovery block:\n" + "\n".join(offenders)
 
 class TestRendering:
     def test_every_failure_renders_an_error_line_and_a_fix_line(self):
