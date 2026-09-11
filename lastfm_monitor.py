@@ -1795,7 +1795,8 @@ def apply_tls_verification_setting() -> None:
     if not VERIFY_SSL:
         # Silenced only once the config file has been read, so the shipped default never decides this
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        print(f"* Warning: TLS certificate verification is off, so an intercepted connection cannot be told apart from the real service\nGuide: {TLS_GUIDE_URL}\n")
+        print_monitor_recovery(RecoveryError(make_recovery_advice("config.insecure", "TLS certificate verification is off, so an intercepted connection cannot be told apart from the real service", recovery_fix_with_guide("Set VERIFY_SSL back to True unless this network intercepts TLS with its own certificate authority", TLS_GUIDE_URL), False)), "runtime", None, label="Warning")
+        print()
 
 
 # Returns how the tool was started, either as the installed console script or as a downloaded standalone script
@@ -1968,6 +1969,10 @@ def make_recovery_advice(code, summary, fix, retryable, detail=""):
 # Adds a directly relevant documentation link on its own line
 def recovery_fix_with_guide(fix, guide_url):
     return f"{fix}\nGuide: {guide_url}"
+
+
+# Returns the advice an optional library that is missing carries, naming what the run loses and how to install it
+def missing_dependency_advice(package, effect, alternative=""): return make_recovery_advice("dependency.missing", f"{effect} because the optional '{package}' library is missing", recovery_fix_with_guide(f"Install it with: {install_dependency_command(package)}" + (f". {alternative}" if alternative else ""), INSTALL_GUIDE_URL), False)
 
 
 # Returns the advice a cancelled secret command reports, worded the same way by every one-shot secret command
@@ -2922,7 +2927,7 @@ def reload_secrets_signal_handler(sig, frame):
                 print("* No .env file found, skipping env-var reload")
         except ImportError:
             env_path = None
-            print("* python-dotenv not installed, skipping env-var reload")
+            print_monitor_recovery(RecoveryError(missing_dependency_advice("python-dotenv", "The env-var reload was skipped")), "runtime", None, label="Warning")
 
     oauth_credentials_changed = False
     webhook_url_changed = False
@@ -3167,7 +3172,7 @@ def save_last_activity_state(path, last_activity):
         debug_print("Last activity write", path=path, entries=len(last_activity), outcome="OK")
     except Exception as e:
         debug_print("Last activity write", path=path, outcome="failed", error=f"{type(e).__name__}: {e}")
-        print(f"* Cannot save last status to '{path}' file: {e}")
+        print_recovery_error(e, context="file.unwritable", detail=f"Cannot save the last status to '{path}' file: {e}")
 
 
 # Returns the track the user is playing right now, or None when nothing is playing
@@ -3461,7 +3466,7 @@ def load_friends_state(username, friends_type):
                 return saved_users
         except Exception as e:
             debug_print("Friends state load", path=filename, type=friends_type, outcome="failed", error=f"{type(e).__name__}: {e}")
-            print(f"* Warning: Cannot load {friends_type} state from '{filename}': {e}")
+            print_recovery_error(e, context="file", detail=f"Cannot load the {friends_type} state from '{filename}': {e}")
             return set()
     debug_print("Friends state load", path=filename, type=friends_type, outcome="skipped", reason="no saved state")
     return set()
@@ -3480,7 +3485,7 @@ def save_friends_state(username, friends_type, users_set):
         debug_print("Friends state write", path=filename, type=friends_type, users=len(users_set), outcome="OK")
     except Exception as e:
         debug_print("Friends state write", path=filename, type=friends_type, outcome="failed", error=f"{type(e).__name__}: {e}")
-        print(f"* Warning: Cannot save {friends_type} state to '{filename}': {e}")
+        print_recovery_error(e, context="file.unwritable", detail=f"Cannot save the {friends_type} state to '{filename}': {e}")
 
 
 # Loads the saved profile fields used as the comparison baseline
@@ -3498,7 +3503,7 @@ def load_profile_state(username):
         return saved_profile
     except Exception as e:
         debug_print("Profile state load", path=filename, outcome="failed", error=f"{type(e).__name__}: {e}")
-        print(f"* Warning: Cannot load profile state from '{filename}': {e}")
+        print_recovery_error(e, context="file", detail=f"Cannot load the profile state from '{filename}': {e}")
         return {}
 
 
@@ -3513,7 +3518,7 @@ def save_profile_state(username, profile):
         debug_print("Profile state write", path=filename, fields=len(profile), outcome="OK")
     except Exception as e:
         debug_print("Profile state write", path=filename, outcome="failed", error=f"{type(e).__name__}: {e}")
-        print(f"* Warning: Cannot save profile state to '{filename}': {e}")
+        print_recovery_error(e, context="file.unwritable", detail=f"Cannot save the profile state to '{filename}': {e}")
 
 
 # Returns whether at least one friend or profile field is enabled for the shared timer
@@ -5691,7 +5696,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 # No changes detected during baseline build
                 print_cur_ts("\nTimestamp:\t\t\t")
         except Exception as e:
-            print(f"* Warning: Initial friends/profile check failed: {e}")
+            print_recovery_error(e, detail=f"Cannot complete the initial friend and profile check: {e}")
             print_cur_ts("\nTimestamp:\t\t\t")
 
         friends_check_last_ts = int(time.time())
@@ -5810,7 +5815,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             friends_next_check_ts = current_ts + retry_interval
                             friends_failure_announced = True
                             print_recovery_error(e, detail=f"Cannot confirm the friend and profile state: {e}")
-                            print(f"* Preserving confirmation streak ({friends_streak}/{FRIENDS_CHANGE_COUNTER}) despite error; will retry in {display_time(retry_interval)}")
+                            print(f"* Keeping the confirmation streak ({friends_streak}/{FRIENDS_CHANGE_COUNTER}); will retry in {display_time(retry_interval)}")
                             print_cur_ts("Timestamp:\t\t\t")
                         else:
                             # Error streak logic (negative streak)
@@ -9160,7 +9165,7 @@ def main():
         except ImportError:
             env_path = DOTENV_FILE if DOTENV_FILE else None
             if env_path:
-                print(f"* Warning: Cannot load dotenv file '{env_path}' because 'python-dotenv' is not installed\n\nTo install it, run:\n    pip install python-dotenv\n\nOnce installed, re-run this tool\n\nGuide: {INSTALL_GUIDE_URL}\n")
+                print_monitor_recovery(RecoveryError(missing_dependency_advice("python-dotenv", f"The dotenv file '{env_path}' was not loaded", "Or export the secrets as environment variables")), "runtime", None, label="Warning")
 
     # Environment variables are a documented alternative to a dotenv file, so they apply even when no file was loaded
     for secret in SECRET_KEYS:
