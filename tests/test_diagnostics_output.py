@@ -781,7 +781,8 @@ class TestARunThatIsRetryingSaysSo:
         transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=4, liveness=3600, fail_after=2).splitlines()
         index = next(number for number, line in enumerate(transcript) if line.startswith("* Error:"))
         assert transcript[index + 1].startswith("To fix: ")
-        assert transcript[index + 2].startswith("Timestamp:")
+        assert transcript[index + 2].startswith("Guide: ")
+        assert transcript[index + 3].startswith("Timestamp:")
 
     def test_the_same_failure_names_the_cycle_and_the_cause_in_debug(self, debug_on, monkeypatch, tmp_path, capsys):
         transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=4, fail_after=2)

@@ -736,6 +736,8 @@ USAGE_GUIDE_URL = f"{DOCS_BASE_URL}/usage/#monitoring-mode"
 TERMINAL_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#terminal-output"
 SPOTIFY_APP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#optional-spotify-oauth-app-setup"
 DOCTOR_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#doctor-preflight"
+DIAGNOSTICS_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#debug-output"
+INTERVALS_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#check-intervals"
 
 # A preflight check waits on the user, so it uses a shorter timeout than a delivery in the monitoring loop
 DOCTOR_SMTP_TIMEOUT = 5
@@ -2051,7 +2053,8 @@ def classify_recovery_error(error=None, context="runtime", detail=""):
         return advice("secret.missing", safe_detail or "A required Last.fm credential is missing", f"Save the API key and shared secret with '{render_command(['--set-lastfm-credentials'])}'", False, LASTFM_API_GUIDE_URL)
 
     if context == "connectivity":
-        # Classified from the error, because the detail names the endpoint rather than the failure
+        # Classified from the error, because the detail names the endpoint rather than the failure. No guide,
+        # since no page covers this check and the doctor report already ends with the troubleshooting link
         cause = str(error or "").lower()
         if "timed out" in cause or "timeout" in cause:
             return advice("network.timeout", "The connectivity endpoint did not answer in time", "Check network, DNS, proxy and CHECK_INTERNET_URL settings", True)
@@ -2079,12 +2082,12 @@ def classify_recovery_error(error=None, context="runtime", detail=""):
         return advice("file.exists", safe_detail or "The destination file already exists", f"Re-run with --force to replace it after a timestamped backup, or write to a different path with '{render_command(['--generate-config', '<new-file>'], include_paths=False)}'", False, CONFIG_FILE_GUIDE_URL)
 
     if context == "file.unwritable":
-        return advice("file.unwritable", safe_detail or "A file the tool keeps could not be written", "Check that the directory exists and is writable, or choose another path", False)
+        return advice("file.unwritable", safe_detail or "A file the tool keeps could not be written", "Check that the directory exists and is writable, or choose another path", False, DIAGNOSTICS_GUIDE_URL)
 
     if context == "file":
         if any(term in message for term in ("cannot load", "cannot be opened", "unreadable", "not valid utf-8", "no such file", "cannot be read")):
-            return advice("file.unreadable", safe_detail or "A file the tool keeps could not be read", "Check the path and its permissions, or delete the file so it is recreated", False)
-        return advice("file.unwritable", safe_detail or "A file the tool keeps could not be written", "Check that the directory exists and is writable, or choose another path", False)
+            return advice("file.unreadable", safe_detail or "A file the tool keeps could not be read", "Check the path and its permissions, or delete the file so it is recreated", False, DIAGNOSTICS_GUIDE_URL)
+        return advice("file.unwritable", safe_detail or "A file the tool keeps could not be written", "Check that the directory exists and is writable, or choose another path", False, DIAGNOSTICS_GUIDE_URL)
 
     # Runtime, which is the monitoring loop, the listing mode and every Last.fm call either of them makes.
     # The pylast status is checked first, because Last.fm answers HTTP 200 with a numeric error code in the body.
@@ -2093,14 +2096,14 @@ def classify_recovery_error(error=None, context="runtime", detail=""):
     if lastfm_status in (10, 13, 26):
         return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", f"Save a working pair with '{render_command(['--set-lastfm-credentials'])}'", False, LASTFM_API_GUIDE_URL)
     if lastfm_status == 29:
-        return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. Increase the check intervals if this repeats", True)
+        return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. Increase the check intervals if this repeats", True, INTERVALS_GUIDE_URL)
     if lastfm_status in (6, 7):
         return advice("target.not_found", safe_detail or "Last.fm has no user with that name", "Check the username, since a deleted or renamed account cannot be monitored", False, USAGE_GUIDE_URL)
     if lastfm_status in (8, 11, 16) or (lastfm_status is not None and lastfm_status >= 500):
-        return advice("lastfm.unavailable", "The Last.fm API is temporarily unavailable", "This is usually a Last.fm outage. The tool will keep retrying", True)
+        return advice("lastfm.unavailable", "The Last.fm API is temporarily unavailable", "This is usually a Last.fm outage. The tool will keep retrying", True, DIAGNOSTICS_GUIDE_URL)
 
     if http_status == 429 or "http code 429" in message or "429 client" in message or "rate limit" in message or "too many requests" in message:
-        return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. Increase the check intervals if this repeats", True)
+        return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. Increase the check intervals if this repeats", True, INTERVALS_GUIDE_URL)
     if "invalid api key" in message or "api key suspended" in message or "invalid method signature" in message:
         return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", f"Save a working pair with '{render_command(['--set-lastfm-credentials'])}'", False, LASTFM_API_GUIDE_URL)
     if "user required to be logged in" in message:
@@ -2108,14 +2111,14 @@ def classify_recovery_error(error=None, context="runtime", detail=""):
     if "user not found" in message or "no user with that name" in message or http_status == 404:
         return advice("target.not_found", safe_detail or "Last.fm has no user with that name", "Check the username, since a deleted or renamed account cannot be monitored", False, USAGE_GUIDE_URL)
     if (http_status is not None and http_status >= 500) or re.search(r"http code 5\d\d", message) or "temporarily unavailable" in message or "service unavailable" in message or "bad gateway" in message:
-        return advice("lastfm.unavailable", "The Last.fm API is temporarily unavailable", "This is usually a Last.fm outage. The tool will keep retrying", True)
+        return advice("lastfm.unavailable", "The Last.fm API is temporarily unavailable", "This is usually a Last.fm outage. The tool will keep retrying", True, DIAGNOSTICS_GUIDE_URL)
     if "timed out" in message or "timeout" in message:
-        return advice("network.timeout", "The Last.fm request timed out", "Check connectivity. The tool will keep retrying", True)
+        return advice("network.timeout", "The Last.fm request timed out", "Check connectivity. The tool will keep retrying", True, DIAGNOSTICS_GUIDE_URL)
     if any(term in message for term in ("connection", "name resolution", "failed to resolve", "network is unreachable", "no connectivity", "family not supported", "aborted")):
-        return advice("network.unavailable", "Last.fm could not be reached", "Check connectivity, DNS and any proxy. The tool will keep retrying", True)
+        return advice("network.unavailable", "Last.fm could not be reached", "Check connectivity, DNS and any proxy. The tool will keep retrying", True, DIAGNOSTICS_GUIDE_URL)
     if "invalid" in message and "username" in message:
         return advice("target.invalid", safe_detail or "That is not a usable Last.fm username", f"Pass the {LASTFM_TARGET_FORMS}", False, USAGE_GUIDE_URL)
-    return advice("unknown", safe_detail or "The request could not be completed", "Re-run with --debug to see the technical cause", True)
+    return advice("unknown", safe_detail or "The request could not be completed", "Re-run with --debug to see the technical cause", True, DIAGNOSTICS_GUIDE_URL)
 
 
 # Renders one structured failure as the shared Error, To fix and optional Technical detail block
