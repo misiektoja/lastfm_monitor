@@ -527,3 +527,19 @@ def test_the_guide_guard_still_inspects_the_source():
 
     assert len(inspected) > 40
     assert all(any(marker in summary for _, summary in bare) for marker in GUIDELESS_ADVICE), "an allowlisted summary stopped matching a builder"
+
+
+# Verifies a local file descriptor limit is reported as itself rather than as a failure of the call that hit it
+def test_a_file_descriptor_limit_is_not_reported_as_a_service_failure():
+    try:
+        try:
+            raise OSError(24, "Too many open files")
+        except OSError as inner:
+            raise RuntimeError("the Last.fm request failed") from inner
+    except RuntimeError as error:
+        advice = monitor.classify_recovery_error(error)
+
+    assert advice.code == "resource.exhausted"
+    assert advice.retryable is False
+    assert "not a Last.fm problem" in advice.summary
+    assert "ulimit -n 4096" in advice.fix
