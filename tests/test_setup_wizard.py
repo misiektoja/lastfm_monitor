@@ -363,6 +363,14 @@ class TestTheRefusals:
         assert "Guide:" in result.stdout
         assert list(tmp_path.iterdir()) == []
 
+    # The dotenv file the wizard is about to write is its destination, so naming one that is absent is not a problem
+    def test_setup_is_not_warned_that_the_dotenv_file_it_writes_is_missing(self, tmp_path):
+        arguments = [sys.executable, str(PROJECT_ROOT / "lastfm_monitor.py"), "--setup", "--config-file", str(tmp_path / "absent.conf"), "--env-file", str(tmp_path / "absent.env")]
+        result = subprocess.run(arguments, capture_output=True, text=True, cwd=tmp_path, stdin=subprocess.DEVNULL)
+
+        assert "does not exist" not in result.stdout + result.stderr
+        assert "The setup wizard needs an interactive terminal (TTY)." in result.stdout
+
     @pytest.mark.parametrize("config_file, env_file, expected", [
         ("none", None, "nowhere to write the configuration"),
         (None, "none", "nowhere to write the secrets"),

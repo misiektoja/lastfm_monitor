@@ -1833,7 +1833,7 @@ def quote_command_argument(argument: Any) -> str:
 
 # True when a command writes the dotenv file itself, so it refuses an --env-file that switches dotenv loading off
 def command_writes_dotenv(arguments=()) -> bool:
-    return any(str(argument).startswith("--set-") for argument in arguments)
+    return any(str(argument) == "--setup" or str(argument).startswith("--set-") for argument in arguments)
 
 
 # Returns a copy-pasteable command line for the detected install method, carrying the config and dotenv files this run was given
@@ -9155,8 +9155,8 @@ def main():
             # The SIGHUP reload still overrides, because there the edited file is exactly what must take effect.
             if DOTENV_FILE:
                 env_path = DOTENV_FILE
-                # Setup writes that file, so naming one that is not there yet is its destination, not a problem
-                if not os.path.isfile(env_path) and not args.setup:
+                # A command that is about to write that file is naming its destination, not a missing file
+                if not os.path.isfile(env_path) and not command_writes_dotenv(sys.argv[1:]):
                     print(f"* Warning: dotenv file '{env_path}' does not exist\n")
                 else:
                     load_dotenv(env_path, override=False, interpolate=False)
