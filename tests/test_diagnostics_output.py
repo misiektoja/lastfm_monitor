@@ -729,11 +729,23 @@ class TestEveryCompletedCheckIsTraced:
         assert "check=#4" in completed[3]
         assert "user=someuser" in completed[0]
         assert "state=offline" in completed[0]
+        assert "outcome=OK" in completed[0]
 
     def test_the_wait_between_checks_names_its_interval(self, debug_on, monkeypatch, tmp_path, capsys):
         transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=2, check_interval=45)
         assert "Waiting for the next check" in transcript
         assert "interval=45s" in transcript
+        assert "reason=the user is offline" in transcript
+
+    # The failure handler and the healthy path share one completed-check line, so without a result the trace
+    # reads the same either way and the wait after a failure looks like an ordinary polling pause
+    def test_a_failed_cycle_reports_its_result_and_names_what_the_wait_is_for(self, debug_on, monkeypatch, tmp_path, capsys):
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=4, liveness=3600, fail_after=2)
+        completed = [line for line in transcript.splitlines() if "Completed check" in line]
+
+        assert "outcome=OK" in completed[0]
+        assert "outcome=failed" in completed[-1]
+        assert "reason=the last check failed" in transcript
 
     # On a 30-second interval a per-check verbose line is 120 identical lines an hour, so it belongs in debug
     def test_a_quiet_run_prints_nothing_periodic_in_verbose(self, verbose_on, monkeypatch, tmp_path, capsys):

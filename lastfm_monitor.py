@@ -5713,6 +5713,10 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
     while True:
         try:
+            # Reported by the completed-check trace at the end of this iteration, which one failure handler shares
+            # with the healthy path, so the trace says which of the two ran
+            check_outcome = "OK"
+
             # Check for friend or profile changes if enabled and interval has passed
             if friends_check_enabled() and FRIENDS_CHECK_INTERVAL > 0:
                 current_ts = int(time.time())
@@ -6568,6 +6572,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
         except Exception as e:
 
             debug_print("Monitoring cycle", check=f"#{check_count + 1}", user=username, outcome="failed", error=f"{type(e).__name__}: {e}")
+            check_outcome = "failed"
 
             advice = classify_recovery_error(e, context="runtime")
             sleep_interval = LASTFM_ACTIVE_CHECK_INTERVAL if lf_user_online else LASTFM_CHECK_INTERVAL
@@ -6645,8 +6650,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
         close_pending_notice_block()
 
         check_count += 1
-        debug_print("Completed check", check=f"#{check_count}", user=username, state="online" if lf_user_online else "offline", track=str(playing_track) if playing_track else None)
-        debug_print("Waiting for the next check", check=f"#{check_count}", interval=f"{check_interval}s", state="online" if lf_user_online else "offline")
+        wait_reason = "the last check failed" if check_outcome == "failed" else ("the user is online" if lf_user_online else "the user is offline")
+        debug_print("Completed check", check=f"#{check_count}", user=username, outcome=check_outcome, state="online" if lf_user_online else "offline", track=str(playing_track) if playing_track else None)
+        debug_print("Waiting for the next check", check=f"#{check_count}", interval=f"{check_interval}s", reason=wait_reason, state="online" if lf_user_online else "offline")
         time.sleep(check_interval)
 
         new_track = None
