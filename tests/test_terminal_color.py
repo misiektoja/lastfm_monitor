@@ -535,3 +535,12 @@ class TestTheDocumentedTheme:
             documented |= set(re.findall(r"`([a-z_]+)`", row.split("|")[1]))
         assert sorted(set(monitor.DEFAULT_COLOR_THEME) - documented) == []
         assert sorted(documented - set(monitor.DEFAULT_COLOR_THEME)) == []
+
+
+# Verifies the TLS row colours its state word, the one setting whose off state weakens a security property
+def test_the_tls_row_colours_its_state(colored):
+    on_row = monitor._colorize_line("* TLS verification:             On")
+    off_row = monitor._colorize_line("* TLS verification:             Off, server certificates are not checked")
+
+    assert on_row == f"* TLS verification:             {colored['boolean_true']}On{monitor.ANSI_RESET}"
+    assert off_row == f"* TLS verification:             {colored['boolean_false']}Off{monitor.ANSI_RESET}, server certificates are not checked"
