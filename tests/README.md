@@ -78,6 +78,11 @@ or changing one.
   leaked global affects whatever runs next.
 * Replace Last.fm calls and notification delivery with test doubles.
 * Never use a real Last.fm API key and secret, SMTP password or webhook URL.
+* Write a fake credential so a secret scanner can tell it is fake. Keep the length
+  the code reports, 32 characters for the API key and secret, then use a word
+  naming the setting and pad the rest with zeros, as in
+  `lastfmapikey00000000000000000000`. A random-looking value is reported as a
+  leaked credential by the scan CI runs over the full history.
 
 A change to the monitoring loop, authentication or Last.fm data handling is not
 verified by this suite alone. Exercise it against a real account and say so in the
