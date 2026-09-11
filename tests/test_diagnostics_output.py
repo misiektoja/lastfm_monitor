@@ -919,6 +919,65 @@ def two_category_failure(call):
     return RuntimeError("HTTP code 500 from Last.fm") if call <= 5 else RuntimeError("The read operation timed out")
 
 
+# Records every alert the loop hands to the delivery helper and answers with the outcome each call is given
+def recording_channels(monkeypatch, outcomes):
+    calls = []
+
+    def record(notification_type, subject, body, body_html="", email_enabled=False, webhook_enabled=None, **kwargs):
+        calls.append({"type": notification_type, "subject": subject, "body": body, "email": bool(email_enabled), "webhook": bool(webhook_enabled)})
+        return outcomes[min(len(calls), len(outcomes)) - 1]
+
+    monkeypatch.setattr(monitor, "ERROR_NOTIFICATION", True)
+    monkeypatch.setattr(monitor, "WEBHOOK_ENABLED", True)
+    monkeypatch.setattr(monitor, "WEBHOOK_ERROR_NOTIFICATION", True)
+    monkeypatch.setattr(monitor, "send_notification_channels", record)
+    return calls
+
+
+class TestAMonitoringFailureAlertsBothChannels:
+    # An outage used to reach the webhook but not email, which only heard about a rejected API key
+    def test_any_failure_alerts_both_channels_once(self, monkeypatch, tmp_path, capsys):
+        calls = recording_channels(monkeypatch, [(True, True)])
+        drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=8, liveness=3600, fail_after=2, stub_notifications=False)
+        errors = [call for call in calls if call["type"] == "error"]
+        assert [(call["email"], call["webhook"]) for call in errors] == [(True, True)]
+        assert errors[0]["subject"] == "lastfm_monitor: monitoring error (user: someuser)"
+        assert "The Last.fm API is temporarily unavailable" in errors[0]["body"]
+        assert "To fix:" in errors[0]["body"]
+
+    # A failure that changes category is a different failure, so it earns each channel a new alert
+    def test_a_changed_failure_category_earns_a_new_alert(self, monkeypatch, tmp_path, capsys):
+        calls = recording_channels(monkeypatch, [(True, True)])
+        drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=12, liveness=3600, fail_after=1, error_factory=two_category_failure, stub_notifications=False)
+        errors = [call for call in calls if call["type"] == "error"]
+        assert len(errors) == 2
+        assert "temporarily unavailable" in errors[0]["body"]
+        assert "timed out" in errors[1]["body"]
+
+    # Each channel is tracked on its own, so the one that failed is retried while the one that landed is left alone
+    def test_a_failed_channel_is_retried_and_a_delivered_one_is_not(self, monkeypatch, tmp_path, capsys):
+        calls = recording_channels(monkeypatch, [(True, False), (False, True)])
+        drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=8, liveness=3600, fail_after=2, stub_notifications=False)
+        errors = [call for call in calls if call["type"] == "error"]
+        assert [(call["email"], call["webhook"]) for call in errors] == [(True, True), (False, True)]
+
+    # A run that recovered and fails again is in a new outage, which deserves its own alert
+    def test_a_new_outage_after_a_recovery_alerts_again(self, monkeypatch, tmp_path, capsys):
+        calls = recording_channels(monkeypatch, [(True, True)])
+        fetches = count(1)
+        real_fetch = monitor.lastfm_get_recent_tracks
+
+        def twice_failing_fetch(*args, **kwargs):
+            if next(fetches) in (3, 4, 7, 8):
+                raise RuntimeError("HTTP code 500 from Last.fm")
+            return real_fetch(*args, **kwargs)
+
+        monkeypatch.setattr(monitor, "lastfm_get_recent_tracks", twice_failing_fetch)
+        drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=12, liveness=3600, stub_notifications=False)
+        errors = [call for call in calls if call["type"] == "error"]
+        assert [(call["email"], call["webhook"]) for call in errors] == [(True, True), (True, True)]
+
+
 class TestALastingFailureIsReportedOnce:
     # At a 30 second interval a two day outage used to be 5760 identical blocks
     def test_the_same_failure_does_not_repeat_while_it_lasts(self, monkeypatch, tmp_path, capsys):

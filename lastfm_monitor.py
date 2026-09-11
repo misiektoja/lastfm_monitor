@@ -5649,6 +5649,10 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
     email_sent = False
     webhook_sent = False
+    # The error alert is tracked apart from the event alerts, once per channel and per failure category
+    error_email_sent = False
+    error_webhook_sent = False
+    error_delivery_code = None
 
     tracks_upper = {t.upper() for t in tracks}
 
@@ -5864,6 +5868,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             if outage_lasted is not None:
                 print_outage_recovery(username, outage_lasted)
                 alive_since = int(time.time())
+            error_email_sent = False
+            error_webhook_sent = False
+            error_delivery_code = None
             recovery_hint_tracker.reset()
             # Handle case where user still has no tracks
             if not recent_tracks or len(recent_tracks) == 0:
@@ -6601,6 +6608,11 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             advice = classify_recovery_error(e, context="runtime")
             sleep_interval = LASTFM_ACTIVE_CHECK_INTERVAL if lf_user_online else LASTFM_CHECK_INTERVAL
             retry_note = f"retrying in {display_time(sleep_interval)}"
+            # A failure that changes category is a different failure, so each channel earns a new alert for it
+            if advice.code != error_delivery_code:
+                error_email_sent = False
+                error_webhook_sent = False
+                error_delivery_code = advice.code
 
             if advice.code == "lastfm.unavailable":
                 if not error_500_start_ts:
@@ -6647,8 +6659,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 reported = True
 
             # Attempted on every failing check rather than only on the report, so a channel that failed is tried again
-            error_email_enabled = ERROR_NOTIFICATION and not email_sent and advice.code == "auth.api_key_invalid"
-            error_webhook_enabled = webhook_event_enabled("error") and not webhook_sent
+            error_email_enabled = ERROR_NOTIFICATION and not error_email_sent
+            error_webhook_enabled = webhook_event_enabled("error") and not error_webhook_sent
             if error_email_enabled or error_webhook_enabled:
                 if advice.code == "auth.api_key_invalid":
                     m_subject = f"lastfm_monitor: API key error! (user: {username})"
@@ -6657,8 +6669,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 m_body = f"{advice.summary}{nl_ch}{nl_ch}To fix: {advice.fix}{nl_ch}{nl_ch}Last.fm Monitor will retry in {display_time(sleep_interval)}.{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                 m_body_html = f"<html><head></head><body>{escape(advice.summary)}<br><br>To fix: {escape(advice.fix)}<br><br>Last.fm Monitor will retry in {escape(display_time(sleep_interval))}.{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
                 email_delivered, webhook_delivered = send_notification_channels("error", m_subject, m_body, m_body_html, email_enabled=error_email_enabled, webhook_enabled=error_webhook_enabled)
-                email_sent = email_sent or email_delivered
-                webhook_sent = webhook_sent or webhook_delivered
+                error_email_sent = error_email_sent or email_delivered
+                error_webhook_sent = error_webhook_sent or webhook_delivered
                 reported = True
 
             # One trailer for whatever this check printed, since a retry can be the only thing on the screen
