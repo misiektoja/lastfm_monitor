@@ -1427,6 +1427,11 @@ def apply_color_to_text(text):
     return "".join(parts)
 
 
+# Colours every link in a line, for the screens printed before the output stream colouriser is installed
+def colorize_links(text):
+    return _sub_outside_color(_URL_RE, lambda mo: colorize("link", mo.group(0)), text)
+
+
 # Truncates each line to a display width, expanding tabs and counting double-width characters correctly
 def truncate_string_per_line(message, truncate_width, tabsize=8):
     try:
@@ -5104,7 +5109,7 @@ def run_set_smtp_password(env_file=None, interactive=None, input_func=None, getp
         if not confirmed:
             raise RecoveryError(secret_replacement_declined_advice("SMTP password", "--set-smtp-password", SMTP_GUIDE_URL))
     print(f"* The password is checked by signing in to {SMTP_HOST} as {SMTP_USER}. Nothing is sent")
-    print(f"* Guide: {SMTP_GUIDE_URL}")
+    print(colorize_links(f"* Guide: {SMTP_GUIDE_URL}"))
     hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
     try:
         smtp_password = str(read_secret_interactively(hidden_prompt, "Enter the SMTP password (input hidden): ")).strip()
@@ -5147,8 +5152,8 @@ def run_set_webhook_url(env_file=None, interactive=None, input_func=None, getpas
         if not confirmed:
             raise RecoveryError(secret_replacement_declined_advice("webhook URL", "--set-webhook-url", WEBHOOK_GUIDE_URL))
     print("* Discord: Edit Channel -> Integrations -> Webhooks -> New Webhook -> Copy Webhook URL")
-    print("* ntfy: the complete topic URL, such as https://ntfy.sh/your-private-topic")
-    print(f"* Guide: {WEBHOOK_GUIDE_URL}")
+    print(colorize_links("* ntfy: the complete topic URL, such as https://ntfy.sh/your-private-topic"))
+    print(colorize_links(f"* Guide: {WEBHOOK_GUIDE_URL}"))
     hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
     try:
         webhook_url = read_secret_interactively(hidden_prompt, "Paste the Discord or ntfy webhook URL (input hidden): ").strip()
@@ -7279,11 +7284,6 @@ def doctor_check_webhook_notifications(report):
     return [make_doctor_check("Notifications", "PASS", f"{WEBHOOK_READY_CHECK_LABEL} for {webhook_provider_display_name()}", f"Alerts: {', '.join(selected_categories)}. The private link was not displayed. No webhook was sent during this passive check")]
 
 
-# Colours every link in a doctor detail line, since the report is printed before the line colouriser is installed
-def _colorize_doctor_links(text):
-    return _sub_outside_color(_URL_RE, lambda mo: colorize("link", mo.group(0)), text)
-
-
 # Renders one doctor result marker in the colour its status calls for
 def render_doctor_marker(status):
     return colorize(DOCTOR_MARK_STYLES.get(status, "info"), f"[{status}]")
@@ -7309,7 +7309,7 @@ def render_doctor_sections(report):
         for check in section_checks:
             lines.append(f"{render_doctor_marker(check.status)} {check.label}")
             if check.detail:
-                lines.append(f"  {_colorize_doctor_links(check.detail)}")
+                lines.append(f"  {colorize_links(check.detail)}")
             if check.status != "PASS" and check.advice is not None:
                 # The fix carries its own guide line, so each line is indented and styled on its own rather
                 # than leaving one colour sequence open across the newline
@@ -8044,8 +8044,8 @@ def _wizard_verify_lastfm_credentials(api_key, api_secret):
 
 # Asks for the Last.fm API key and shared secret as one credential and checks the pair against Last.fm
 def _wizard_collect_auth_section(state, input_func=None, getpass_func=None, validator=None):
-    print(f"Create or view your Last.fm API key and shared secret: {LASTFM_API_REGISTRATION_URL}")
-    print(f"Credentials of an application you already registered: {LASTFM_API_ACCOUNTS_URL}")
+    print(colorize_links(f"Create or view your Last.fm API key and shared secret: {LASTFM_API_REGISTRATION_URL}"))
+    print(colorize_links(f"Credentials of an application you already registered: {LASTFM_API_ACCOUNTS_URL}"))
     configured = all(doctor_value_is_set(state.config_values.get(name)) or _wizard_existing_secret(name, state.env_path) for name in ("LASTFM_API_KEY", "LASTFM_API_SECRET"))
     # The key and the secret are one credential, so the replace question covers the pair rather than each value
     if configured and not _wizard_ask_yes_no("Replace the Last.fm API credentials already configured?", default=False, input_func=input_func):
@@ -8099,7 +8099,7 @@ def _wizard_collect_spotify_section(state, input_func=None, getpass_func=None):
     if not (state.config_values["USE_TRACK_DURATION_FROM_SPOTIFY"] or state.config_values["TRACK_SONGS"]):
         _wizard_disable_spotify(state)
         return
-    print(f"  Without app credentials the anonymous Spotify web player supplies the metadata. Create an app at {SPOTIFY_DASHBOARD_URL}")
+    print(colorize_links(f"  Without app credentials the anonymous Spotify web player supplies the metadata. Create an app at {SPOTIFY_DASHBOARD_URL}"))
     configured = all(doctor_value_is_set(state.config_values.get(name)) or _wizard_existing_secret(name, state.env_path) for name in ("SP_CLIENT_ID", "SP_CLIENT_SECRET"))
     question = "Replace the Spotify app credentials already configured?" if configured else "Add Spotify app credentials? They are optional and are tried before the anonymous backend"
     if not _wizard_ask_yes_no(question, default=False, input_func=input_func):
@@ -8632,7 +8632,7 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
     if not terminal_is_interactive:
         print("The setup wizard needs an interactive terminal (TTY).")
         print("Run --setup from an interactive shell or use --generate-config and edit the files manually.")
-        print(f"Guide: {QUICK_START_GUIDE_URL}")
+        print(colorize_links(f"Guide: {QUICK_START_GUIDE_URL}"))
         return 1
 
     try:
@@ -8726,7 +8726,7 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
     _wizard_print_command("Check setup again:", render_command(["--doctor"] + target_arguments, config_path=str(state.config_path), env_path=env_argument))
     start_label = "After Doctor passes, start monitoring:" if doctor_exit not in (None, 0) else "Start monitoring:"
     _wizard_print_command(start_label, render_command(target_arguments, config_path=str(state.config_path), env_path=env_argument))
-    print(f"Guide: {QUICK_START_GUIDE_URL}\n")
+    print(colorize_links(f"Guide: {QUICK_START_GUIDE_URL}\n"))
 
     try:
         # Only a doctor run that passed proves the saved setup can monitor, so the launch offer waits for it
