@@ -47,6 +47,7 @@ class SpotifyWebBackendTests(unittest.TestCase):
         monitor.SP_CLIENT_SECRET = ""
         monitor.SP_TOKENS_FILE = ""
         monitor.SP_OAUTH_MEMORY_CACHE_HANDLER = None
+        monitor.SP_OAUTH_SEARCH_COOLDOWNS.clear()
         monitor.SP_CACHED_WEB_ACCESS_TOKEN = None
         monitor.SP_WEB_ACCESS_TOKEN_EXPIRES_AT = 0
         monitor.SP_CACHED_WEB_CLIENT_ID = ""

@@ -78,6 +78,7 @@ python -m pytest -m e2e
 | `test_startup_summary_channels.py` | Summary rows naming the webhook provider, the mail server, the masked recipient, the delivery confirmations and the runtime |
 | `test_untrusted_text.py` | Text arriving from Last.fm: terminal control sequences stripped at every writer and markup escaped in email bodies |
 | `test_terminal_color.py` | Coloured output: the theme and its template block, which colour lands on which token, the single colour pass through the writers and the plain log file |
+| `test_spotify_oauth_recovery.py` | Rejected search attempts, one-time token refresh and app-specific cooldowns |
 | `test_spotify_web_backend.py` | TOTP generation and config override, anonymous token handling and caching |
 | `test_tls_verification.py` | The TLS verification switch, the call sites that read it and the library sessions it reaches |
 | `test_webhook_notifications.py` | Webhook settings coverage, startup rollups, URL validation and independent event switches |

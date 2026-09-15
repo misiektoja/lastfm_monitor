@@ -783,6 +783,8 @@ FUNCTION_TIMEOUT = 5  # 5 seconds
 
 # Reuses Spotipy's in-memory OAuth cache when no cache file is configured
 SP_OAUTH_MEMORY_CACHE_HANDLER = None
+SP_OAUTH_SEARCH_COOLDOWNS = {}
+SPOTIFY_OAUTH_SEARCH_RECHECK_SECONDS = 300
 
 # Spotify Web API endpoint used for OAuth app track search
 SPOTIFY_OAUTH_SEARCH_URL = "https://api.spotify.com/v1/search"
@@ -4715,7 +4717,7 @@ def spotify_oauth_app_configured():
 
 
 # Returns an expiration-aware Spotify OAuth app token through Spotipy's cache handler
-def spotify_get_access_token(sp_client_id, sp_client_secret, validate_credentials=False):
+def spotify_get_access_token(sp_client_id, sp_client_secret, validate_credentials=False, force_refresh=False):
     global SP_OAUTH_MEMORY_CACHE_HANDLER
     try:
         from spotipy.cache_handler import CacheFileHandler, MemoryCacheHandler
@@ -4737,7 +4739,7 @@ def spotify_get_access_token(sp_client_id, sp_client_secret, validate_credential
 
     # Spotipy accepts a Session here and only falls back to building its own when this is a bool, which its annotation does not express
     auth_manager = SpotifyClientCredentials(client_id=sp_client_id, client_secret=sp_client_secret, requests_timeout=FUNCTION_TIMEOUT, cache_handler=cache_handler, requests_session=SPOTIFY_SESSION)  # pyright: ignore[reportArgumentType]
-    access_token = auth_manager.get_access_token(as_dict=False)
+    access_token = auth_manager.get_access_token(as_dict=False, check_cache=False) if force_refresh else auth_manager.get_access_token(as_dict=False)
     if not access_token:
         raise RuntimeError("Spotify OAuth app token response was empty")
     debug_print("Spotify OAuth app token", cache=cache_description, token_len=len(access_token), outcome="OK")
@@ -5140,10 +5142,12 @@ def spotify_search_song_trackid_duration_oauth(access_token, artist, track, albu
     for strategy, search_query in dict.fromkeys(strategies):
         try:
             track_items = spotify_oauth_search_track_items(access_token, search_query, strategy)
+        except req.HTTPError:
+            raise
         except (req.RequestException, RuntimeError, TypeError, ValueError) as error:
             exit_if_out_of_file_descriptors(error)
             debug_print("Spotify OAuth app search", strategy=strategy, outcome="failed", error=f"{type(error).__name__}: {error}")
-            continue
+            break
         sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(track_items, artist, track, cleaned_track=track_cleaned or None, original_album=album)
         if sp_track_uri_id:
             debug_print("Spotify OAuth app metadata match", track_id=sp_track_uri_id, duration=f"{sp_track_duration}s", outcome="OK")
@@ -5186,21 +5190,56 @@ def spotify_search_song_trackid_duration(artist, track, album=""):
     return None, 0
 
 
-# Resolves Spotify metadata through OAuth app search then anonymous web-player search
+# Returns the app search cooldown without shortening a valid Retry-After delay
+def spotify_oauth_search_cooldown(response):
+    if response is None or response.status_code != 429:
+        return float(SPOTIFY_OAUTH_SEARCH_RECHECK_SECONDS)
+    raw = response.headers.get("Retry-After", "")
+    try:
+        delay = float(raw)
+    except (TypeError, ValueError):
+        try:
+            delay = parsedate_to_datetime(raw).timestamp() - time.time()
+        except (TypeError, ValueError, OverflowError):
+            return 60.0
+    return max(1.0, delay) if finite_number(delay) else 60.0
+
+
+# Resolves Spotify metadata through available OAuth app search then anonymous web-player search
 def spotify_resolve_track_metadata(artist, track, album=""):
     sp_track_uri_id = None
     sp_track_duration = 0
 
-    if spotify_oauth_app_configured():
-        try:
-            access_token = spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET)
-            sp_track_uri_id, sp_track_duration = spotify_search_song_trackid_duration_oauth(access_token, artist, track, album)
-            debug_print("Spotify OAuth app metadata", track_id=sp_track_uri_id, duration=f"{sp_track_duration}s", outcome="OK")
-        except Exception as error:
-            if is_too_many_open_files(error):
-                print_recovery_advice(classify_recovery_error(error))
-                raise SystemExit(1)
-            debug_print("Spotify OAuth app metadata", outcome="failed", error=f"{type(error).__name__}: {error}")
+    if spotify_oauth_app_configured() and time.monotonic() >= SP_OAUTH_SEARCH_COOLDOWNS.get(SP_CLIENT_ID, 0):
+        for attempt in range(2):
+            try:
+                access_token = spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET, force_refresh=True) if attempt else spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET)
+                sp_track_uri_id, sp_track_duration = spotify_search_song_trackid_duration_oauth(access_token, artist, track, album)
+                SP_OAUTH_SEARCH_COOLDOWNS.pop(SP_CLIENT_ID, None)
+                debug_print("Spotify OAuth app metadata", track_id=sp_track_uri_id, duration=f"{sp_track_duration}s", outcome="OK")
+                break
+            except req.HTTPError as error:
+                status = error.response.status_code if error.response is not None else None
+                if status == 401 and attempt == 0:
+                    debug_print("Spotify OAuth app metadata", status=status, outcome="degraded", recovery="refresh token")
+                    continue
+                if status in {401, 403, 429}:
+                    delay = spotify_oauth_search_cooldown(error.response)
+                    now = time.monotonic()
+                    for client_id, until in list(SP_OAUTH_SEARCH_COOLDOWNS.items()):
+                        if until <= now:
+                            SP_OAUTH_SEARCH_COOLDOWNS.pop(client_id, None)
+                    SP_OAUTH_SEARCH_COOLDOWNS[SP_CLIENT_ID] = now + delay
+                    debug_print("Spotify OAuth app metadata", status=status, retry_after=delay, fallback="anonymous web player")
+                else:
+                    debug_print("Spotify OAuth app metadata", outcome="failed", error=f"{type(error).__name__}: {error}")
+                break
+            except Exception as error:
+                if is_too_many_open_files(error):
+                    print_recovery_advice(classify_recovery_error(error))
+                    raise SystemExit(1)
+                debug_print("Spotify OAuth app metadata", outcome="failed", error=f"{type(error).__name__}: {error}")
+                break
 
     if not sp_track_uri_id or sp_track_duration <= 0:
         try:

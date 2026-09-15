@@ -130,6 +130,8 @@ If you store `SP_CLIENT_ID` and `SP_CLIENT_SECRET` in a dotenv file, you can upd
 
 The OAuth backend relies on Spotipy's expiration-aware Client Credentials cache. It does not call a separate Web API endpoint to validate tokens. If credentials are absent, token retrieval fails or OAuth search returns incomplete metadata, the anonymous backend runs automatically.
 
+A rejected OAuth search stops alternate-query attempts. A 401 refreshes the token once. A 403 or a second 401 pauses searches for that app for five minutes. A 429 pauses them for the full `Retry-After` interval, or 60 seconds when that header is unusable. Track lookups use the anonymous web backend during these pauses. A successful request with no suitable match can still try alternate queries.
+
 The tool fetches Spotify server time before generating the required v61 TOTP parameters. It caches the anonymous token until its expiration window and discovers the current persisted-query hashes from the active web-player bundle. An HTTP 401 refreshes the token once. A rejected persisted query refreshes its hash once.
 
 The v61 version and cipher bytes ship as the `SPOTIFY_TOTP_VERSION` and `SPOTIFY_TOTP_SECRET_CIPHER_BYTES` config options. If Spotify rotates the secret you can update them from the config file using the [spotify_monitor_secret_grabber](https://github.com/misiektoja/spotify_monitor/blob/dev/debug/spotify_monitor_secret_grabber.py) tool without a code change.
