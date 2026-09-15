@@ -280,7 +280,7 @@ The same secret can be set in several places. The later source in this list wins
 3. an exported environment variable
 4. a command-line argument such as `-u`, `-w`, `-z` or `--webhook-url`
 
-An exported variable therefore beats the dotenv file, which is what `python-dotenv`, systemd, Docker and a one-off `LASTFM_API_KEY=... lastfm_monitor ...` all assume. The exception is reloading with `SIGHUP`, where the edited dotenv file is exactly what has to take effect and so it wins.
+A nonempty exported secret takes priority over the dotenv file at startup and after `SIGHUP`. An explicit command-line value has the highest priority.
 
 A forgotten `export` can shadow the file invisibly, so `--debug` names each secret and the source it resolved from, never the value:
 
@@ -297,12 +297,9 @@ Secret commands update the selected value without changing other dotenv settings
 
 ### Reloading secrets and backup contents
 
-On systems with SIGHUP, reloading applies changes from the selected dotenv file. Removing a file-owned
-assignment restores its independently configured fallback or clears the value when no fallback exists.
-A read or parsing failure keeps the last usable credentials and reports how to correct the file.
-An explicit reload can override a startup export with a value present in the file.
+On macOS, Linux and Unix, `SIGHUP` reloads file-supplied secrets. Command-line values take priority, followed by nonempty environment values exported before startup, dotenv entries and configuration fallbacks. Change an argument or export and restart to replace those values. Removing a file entry uses the next available source or clears the secret. An unreadable or invalid file leaves working credentials unchanged. Empty exports are ignored. An empty dotenv entry overrides the configuration.
 
-Setup keeps the saved `DOTENV_FILE` unless you choose another path with `--env-file`. When you move it, review the private settings before saving. Kept credentials are copied to the new destination and the old file stays intact. Values already in the new dotenv file take precedence unless you replace them. At startup, a nonempty exported secret overrides the dotenv file. A dotenv value, including an empty one, overrides the configuration.
+Setup keeps the saved `DOTENV_FILE` unless you pass `--env-file PATH`. If you change files, setup asks you to review credentials again. Existing values in the new file, including empty values, stay unless you replace them. Retained credentials fill missing entries when you save. The old file stays intact.
 
 Setup moves retained credentials from older configuration files into the selected dotenv file unless that file already defines the same key. It leaves the original configuration in place if it cannot preserve those credentials. Setup creates a timestamped configuration backup with inline secrets removed. General `--generate-config` backups can contain inline credentials. Replaced dotenv secrets are not backed up.
 

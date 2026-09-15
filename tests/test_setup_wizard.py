@@ -1106,3 +1106,9 @@ def test_a_declined_replacement_checks_the_password_that_is_kept(tmp_path, monke
 
     assert checked == ["saved-in-file"]
     assert "SMTP_PASSWORD" not in state.secret_updates
+
+
+@pytest.fixture(autouse=True)
+# Starts each setup scenario without file ownership left by another test
+def isolated_dotenv_ownership(monkeypatch):
+    monkeypatch.setattr(monitor, "DOTENV_RELOAD_STATE", {})
