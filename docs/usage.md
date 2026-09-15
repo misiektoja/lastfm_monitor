@@ -1,5 +1,20 @@
 # Usage
 
+<a id="command-format"></a>
+## Command Format by Installation Method
+
+Examples use the PyPI command. For a downloaded script, run commands from the directory containing `lastfm_monitor.py` and keep the same arguments:
+
+| Installation | Command |
+| --- | --- |
+| PyPI or pipx | `lastfm_monitor [OPTIONS]` |
+| Manual script on macOS or Linux | `python3 lastfm_monitor.py [OPTIONS]` |
+| Manual script on Windows | `python lastfm_monitor.py [OPTIONS]` |
+
+For example, `lastfm_monitor --setup` becomes `python3 lastfm_monitor.py --setup` on macOS or Linux. Use `python` on Windows. Replace placeholders such as `<lastfm_username>` with a Last.fm username.
+
+For first-time configuration, follow [Setup & First Run](setup-and-first-run.md). Use [Doctor Preflight](troubleshooting.md#doctor-preflight) to check a setup before monitoring.
+
 ## Monitoring Mode
 
 To monitor specific user activity, just type Last.fm username as a command-line argument (`lastfm_username` in the example below):

@@ -1,13 +1,12 @@
 # Setup & First Run
 
-## Quick Start
+## Before You Start
 
-Run the tool with no arguments to see the commands to start from, and to be offered the guided setup:
+Install the tool using [Installation](installation.md). You will need a Last.fm username and the [Last.fm API key and shared secret](#lastfm-api-key-and-shared-secret). The wizard collects credentials through hidden prompts.
 
-```sh
-lastfm_monitor
-```
+Open a terminal in the directory where you want to keep the configuration and monitoring output. Later commands should use that directory or explicitly select the same `--config-file` and `--env-file` paths. Manual installations use the [command equivalents](usage.md#command-format).
 
+<a id="setup-wizard"></a>
 ## Guided Setup
 
 The wizard asks a few questions and writes a ready-to-run configuration:
@@ -38,16 +37,20 @@ lastfm_monitor --setup --config-file ~/lastfm_monitor.conf --env-file ~/.env-las
 
 The wizard needs an interactive terminal. In a script or a container use `--generate-config` and edit the files instead.
 
-- Grab your [Last.fm API Key and Shared Secret](#lastfm-api-key-and-shared-secret) and track the `lastfm_username` music activities:
+## Quick Start
+
+Save your [Last.fm API Key and Shared Secret](#lastfm-api-key-and-shared-secret) and track the `lastfm_username` music activities:
 
 ```sh
-lastfm_monitor <lastfm_username> -u "your_lastfm_api_key" -w "your_lastfm_api_secret"
+lastfm_monitor --set-lastfm-credentials
+lastfm_monitor <lastfm_username>
 ```
 
 Or if you installed [manually](installation.md#manual-installation):
 
 ```sh
-python3 lastfm_monitor.py <lastfm_username> -u "your_lastfm_api_key" -w "your_lastfm_api_secret"
+python3 lastfm_monitor.py --set-lastfm-credentials
+python3 lastfm_monitor.py <lastfm_username>
 ```
 
 To get the list of all supported command-line arguments / flags:
@@ -93,3 +96,7 @@ The user should go to [Last.fm Privacy Settings](https://www.last.fm/settings/pr
 The **Hide recent listening information** setting should be disabled.
 
 Otherwise you will get this error message returned by the `pyLast` library: *'Login: User required to be logged in'*.
+
+## Continue with Usage
+
+Use [Usage](usage.md) for monitoring and output options or [Configuration](configuration.md) to adjust saved settings. If setup or monitoring fails, run [Doctor Preflight](troubleshooting.md#doctor-preflight) and follow the reported recovery steps.

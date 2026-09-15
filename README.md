@@ -14,10 +14,27 @@ Powerful real-time tracker for Last.fm that brings your music data to life with 
 
 **Full documentation: [misiektoja.github.io/lastfm_monitor](https://misiektoja.github.io/lastfm_monitor/)**
 
-### 🚀 Quick Install
+<a id="-quick-install"></a>
+<a id="-quick-install-run"></a>
+### 🚀 Quick Install & Run
+
+New to Python or unsure what is installed? Follow the [Python install walkthrough](https://misiektoja.github.io/lastfm_monitor/installation/#new-to-python-install-everything) first.
+
+Install from PyPI:
+
 ```sh
 pip install lastfm_monitor
 ```
+
+Run the setup wizard:
+
+```sh
+lastfm_monitor --setup
+```
+
+The wizard asks for the target, authentication, polling intervals and optional notifications. Review the settings before saving them. See [Setup & First Run](https://misiektoja.github.io/lastfm_monitor/setup-and-first-run/) for the service-specific steps.
+
+For the manual single-file method, dependencies and upgrade commands, see [Installation](https://misiektoja.github.io/lastfm_monitor/installation/).
 
 <p align="center">
    <img src="https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/assets/lastfm_monitor.png" alt="lastfm_monitor_screenshot" width="90%"/>
@@ -36,15 +53,36 @@ pip install lastfm_monitor
 - **Guided setup wizard** that writes a ready-to-run configuration, and a **doctor preflight** that checks it before the first run
 - **Status persistence** across restarts, **flexible configuration** through config files, dotenv files, environment variables and command-line arguments, and **signal controls** for the running copy
 
+<a id="common-commands"></a>
+## Common Commands
+
+Use [Quick Install & Run](#-quick-install-run) for first-time setup. These examples use the PyPI command. See [Command Format by Installation Method](https://misiektoja.github.io/lastfm_monitor/usage/#command-format) for manual-script equivalents.
+
+Replace the target placeholders with a Last.fm username. Monitoring requires the [Last.fm API key and shared secret](https://misiektoja.github.io/lastfm_monitor/setup-and-first-run/#lastfm-api-key-and-shared-secret) described in the setup guide.
+
+| I want to... | Run this |
+| --- | --- |
+| Configure the target, credentials and alerts | `lastfm_monitor --setup` |
+| Start monitoring with saved credentials | `lastfm_monitor <lastfm_username>` |
+| Check setup before monitoring | `lastfm_monitor --doctor <lastfm_username>` |
+| Enter or replace credentials through hidden prompts | `lastfm_monitor --set-lastfm-credentials` |
+| Use a specific configuration and secrets file | `lastfm_monitor --config-file lastfm_monitor.conf --env-file .env <lastfm_username>` |
+| List the ten most recent tracks | `lastfm_monitor <lastfm_username> -l -n 10` |
+| List every supported command-line option | `lastfm_monitor --help` |
+
+The monitored account must expose the activity described in [User Privacy Settings](https://misiektoja.github.io/lastfm_monitor/setup-and-first-run/#user-privacy-settings).
+
+Monitoring runs until you press `Ctrl+C`. For email, Discord and ntfy alerts, CSV output and service-specific commands, see [Usage](https://misiektoja.github.io/lastfm_monitor/usage/). If a run fails, start with [Doctor Preflight](https://misiektoja.github.io/lastfm_monitor/troubleshooting/#doctor-preflight).
+
 ## Documentation
 
 | Page | What it covers |
 | --- | --- |
-| [Installation](https://misiektoja.github.io/lastfm_monitor/installation/) | Requirements, installing from PyPI or by hand, upgrading |
-| [Setup & First Run](https://misiektoja.github.io/lastfm_monitor/setup-and-first-run/) | The Last.fm API key and shared secret, the monitored account's privacy settings, the first run |
+| [Installation](https://misiektoja.github.io/lastfm_monitor/installation/) | Python walkthrough, PyPI or manual installation, upgrades |
+| [Setup & First Run](https://misiektoja.github.io/lastfm_monitor/setup-and-first-run/) | Setup wizard, Last.fm credentials, privacy settings and first run |
 | [Configuration](https://misiektoja.github.io/lastfm_monitor/configuration/) | Config file, Spotify metadata backends, SMTP, webhooks, storing secrets, check intervals |
 | [Usage](https://misiektoja.github.io/lastfm_monitor/usage/) | Monitoring mode, listing mode, notifications, CSV export, automatic playback, progress indicator, signals, coloring logs with GRC |
-| [Troubleshooting](https://misiektoja.github.io/lastfm_monitor/troubleshooting/) | What to check when something fails, `--debug` output |
+| [Troubleshooting](https://misiektoja.github.io/lastfm_monitor/troubleshooting/) | Doctor preflight, installation recovery, verbose and debug output |
 | [Testing](https://misiektoja.github.io/lastfm_monitor/testing/) | Running the offline suite, the linter and the docs build |
 | [About](https://misiektoja.github.io/lastfm_monitor/about/) | Change log, contributing, security, license, support |
 
