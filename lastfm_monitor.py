@@ -724,11 +724,11 @@ MIN_REDACTABLE_SECRET_LENGTH = 12
 PROJECT_URL = "https://github.com/misiektoja/lastfm_monitor"
 DOCS_BASE_URL = "https://misiektoja.github.io/lastfm_monitor"
 GUIDE_URL = f"{DOCS_BASE_URL}/"
-INSTALL_GUIDE_URL = f"{DOCS_BASE_URL}/installation/"
+INSTALLATION_GUIDE_URL = f"{DOCS_BASE_URL}/installation/"
 QUICK_START_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/"
 LASTFM_API_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/#lastfm-api-key-and-shared-secret"
 PRIVACY_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/#user-privacy-settings"
-CONFIG_FILE_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#configuration-file"
+CONFIG_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#configuration-file"
 SECRETS_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#storing-secrets"
 SMTP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#smtp-settings"
 WEBHOOK_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#webhook-settings"
@@ -816,41 +816,6 @@ ERROR_ALERT_RETRY_SECONDS = 300  # 5 minutes
 ERROR_ALERT_RETRY_MAX_SECONDS = 3600  # 1 hour
 
 
-# Tracks the error alert per channel: what was delivered, and how long a channel that failed waits before the next attempt
-class ErrorAlertState:
-    # Starts with nothing delivered and no channel on hold
-    def __init__(self) -> None:
-        self.email_sent = False
-        self.webhook_sent = False
-        self.email_failures = 0
-        self.webhook_failures = 0
-        self.email_retry_at = 0
-        self.webhook_retry_at = 0
-
-    # Forgets the delivered alert and any hold, so the next failure earns each channel a new one
-    def reset(self) -> None:
-        self.__init__()
-
-    # Tells whether a channel still owes the alert and its wait after a failed attempt, if any, has passed
-    def pending(self, channel: str, enabled, now: int) -> bool:
-        return bool(enabled) and not getattr(self, f"{channel}_sent") and now >= getattr(self, f"{channel}_retry_at")
-
-    # Records one attempt, holding a channel that failed for a growing wait so a broken server is not dialled on every check
-    def record(self, channel: str, attempted: bool, delivered: bool, now: int) -> None:
-        if not attempted:
-            return
-        if delivered:
-            setattr(self, f"{channel}_sent", True)
-            setattr(self, f"{channel}_failures", 0)
-            setattr(self, f"{channel}_retry_at", 0)
-            return
-        failures = getattr(self, f"{channel}_failures") + 1
-        delay = min(ERROR_ALERT_RETRY_SECONDS * 2 ** (failures - 1), ERROR_ALERT_RETRY_MAX_SECONDS)
-        setattr(self, f"{channel}_failures", failures)
-        setattr(self, f"{channel}_retry_at", now + delay)
-        print(f"* The {channel} alert is on hold for {display_time(delay)} after {failures} {'attempt' if failures == 1 else 'attempts'}, then tried again")
-
-
 stdout_bck = None
 csvfieldnames = ['Date', 'Artist', 'Track', 'Album']
 
@@ -890,7 +855,7 @@ MINIMUM_PYTHON_VERSION_TEXT = ".".join(str(part) for part in MINIMUM_PYTHON_VERS
 if sys.version_info < MINIMUM_PYTHON_VERSION:
     print(f"* Error: Python version {MINIMUM_PYTHON_VERSION_TEXT} or higher required !")
     print(f"To fix: Upgrade to Python {MINIMUM_PYTHON_VERSION_TEXT} or newer, since this is Python {sys.version.split()[0]}")
-    print(f"Guide: {INSTALL_GUIDE_URL}")
+    print(f"Guide: {INSTALLATION_GUIDE_URL}")
     sys.exit(1)
 
 import time
@@ -918,7 +883,7 @@ import importlib.util
 try:
     import pylast
 except ModuleNotFoundError:
-    raise SystemExit(f"Error: Couldn't find the pyLast library !\n\nTo install it, run:\n    pip install pylast\n\nOnce installed, re-run this tool.\n\nGuide: {INSTALL_GUIDE_URL}")
+    raise SystemExit(f"Error: Couldn't find the pyLast library !\n\nTo install it, run:\n    pip install pylast\n\nOnce installed, re-run this tool.\n\nGuide: {INSTALLATION_GUIDE_URL}")
 from urllib.parse import quote_plus, quote, unquote, urljoin, urlsplit
 try:
     from colorama import init as colorama_init  # type: ignore[import]
@@ -944,6 +909,41 @@ import hashlib
 import hmac
 from email.utils import parsedate_to_datetime
 import pyotp
+
+
+# Tracks the error alert per channel: what was delivered, and how long a channel that failed waits before the next attempt
+class ErrorAlertState:
+    # Starts with nothing delivered and no channel on hold
+    def __init__(self) -> None:
+        self.email_sent = False
+        self.webhook_sent = False
+        self.email_failures = 0
+        self.webhook_failures = 0
+        self.email_retry_at = 0
+        self.webhook_retry_at = 0
+
+    # Forgets the delivered alert and any hold, so the next failure earns each channel a new one
+    def reset(self) -> None:
+        self.__init__()
+
+    # Tells whether a channel still owes the alert and its wait after a failed attempt, if any, has passed
+    def pending(self, channel: str, enabled, now: int) -> bool:
+        return bool(enabled) and not getattr(self, f"{channel}_sent") and now >= getattr(self, f"{channel}_retry_at")
+
+    # Records one attempt, holding a channel that failed for a growing wait so a broken server is not dialled on every check
+    def record(self, channel: str, attempted: bool, delivered: bool, now: int) -> None:
+        if not attempted:
+            return
+        if delivered:
+            setattr(self, f"{channel}_sent", True)
+            setattr(self, f"{channel}_failures", 0)
+            setattr(self, f"{channel}_retry_at", 0)
+            return
+        failures = getattr(self, f"{channel}_failures") + 1
+        delay = min(ERROR_ALERT_RETRY_SECONDS * 2 ** (failures - 1), ERROR_ALERT_RETRY_MAX_SECONDS)
+        setattr(self, f"{channel}_failures", failures)
+        setattr(self, f"{channel}_retry_at", now + delay)
+        print(f"* The {channel} alert is on hold for {display_time(delay)} after {failures} {'attempt' if failures == 1 else 'attempts'}, then tried again")
 
 
 # Applies the configured TLS policy to Spotify requests including Spotipy token exchanges
@@ -2251,7 +2251,7 @@ def html_text(text):
 
 # Returns the advice an optional library that is missing carries, naming what the run loses and how to install it
 def missing_dependency_advice(package, effect, alternative=""):
-    return make_recovery_advice("dependency.missing", f"{effect} because the optional '{package}' library is missing", recovery_fix_with_guide(f"Install it with: {install_dependency_command(package)}" + (f". {alternative}" if alternative else ""), INSTALL_GUIDE_URL), False)
+    return make_recovery_advice("dependency.missing", f"{effect} because the optional '{package}' library is missing", recovery_fix_with_guide(f"Install it with: {install_dependency_command(package)}" + (f". {alternative}" if alternative else ""), INSTALLATION_GUIDE_URL), False)
 
 
 # Returns the advice a cancelled secret command reports, worded the same way by every one-shot secret command
@@ -2333,8 +2333,8 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
 
     if context == "config":
         if "does not exist" in message or "no such file" in message:
-            return advice("config.missing", safe_detail or "The configuration file was not found", f"Create one with '{render_command(['--generate-config', DEFAULT_CONFIG_FILENAME], include_paths=False)}' or correct the --config-file path", False, CONFIG_FILE_GUIDE_URL)
-        return advice("config.invalid", safe_detail or "The configuration file could not be read", f"Correct the reported line, or write a fresh template to a different path with '{render_command(['--generate-config', '<new-file>'], include_paths=False)}'", False, CONFIG_FILE_GUIDE_URL)
+            return advice("config.missing", safe_detail or "The configuration file was not found", f"Create one with '{render_command(['--generate-config', DEFAULT_CONFIG_FILENAME], include_paths=False)}' or correct the --config-file path", False, CONFIG_GUIDE_URL)
+        return advice("config.invalid", safe_detail or "The configuration file could not be read", f"Correct the reported line, or write a fresh template to a different path with '{render_command(['--generate-config', '<new-file>'], include_paths=False)}'", False, CONFIG_GUIDE_URL)
 
     if context in ("set_lastfm_credentials", "set_spotify_credentials", "set_webhook_url", "set_smtp_password"):
         flag = f"--{context.replace('_', '-')}"
@@ -2389,7 +2389,7 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
         return advice("webhook.rejected", safe_detail or "The webhook service refused the delivery", f"Confirm the webhook still exists and the URL is current, then verify with '{render_command(['--send-test-webhook'])}'", http_status is not None and http_status >= 500, WEBHOOK_GUIDE_URL)
 
     if context == "file.exists":
-        return advice("file.exists", safe_detail or "The destination file already exists", f"Re-run with --force to replace it after a timestamped backup, or write to a different path with '{render_command(['--generate-config', '<new-file>'], include_paths=False)}'", False, CONFIG_FILE_GUIDE_URL)
+        return advice("file.exists", safe_detail or "The destination file already exists", f"Re-run with --force to replace it after a timestamped backup, or write to a different path with '{render_command(['--generate-config', '<new-file>'], include_paths=False)}'", False, CONFIG_GUIDE_URL)
 
     if context == "file.unwritable":
         return advice("file.unwritable", safe_detail or "A file the tool keeps could not be written", "Check that the directory exists and is writable, or choose another path", False, DIAGNOSTICS_GUIDE_URL)
@@ -7499,7 +7499,7 @@ def doctor_check_environment(version_info=None, spec_finder=None):
     if tuple(selected_version)[:2] >= MINIMUM_PYTHON_VERSION:
         checks.append(make_doctor_check("Environment", "PASS", f"Python {version_text} is supported", minimum_detail))
     else:
-        advice = make_recovery_advice("dependency.missing", f"Python {version_text} is unsupported", recovery_fix_with_guide(f"Install Python {MINIMUM_PYTHON_VERSION_TEXT} or newer then retry", INSTALL_GUIDE_URL), False)
+        advice = make_recovery_advice("dependency.missing", f"Python {version_text} is unsupported", recovery_fix_with_guide(f"Install Python {MINIMUM_PYTHON_VERSION_TEXT} or newer then retry", INSTALLATION_GUIDE_URL), False)
         checks.append(make_doctor_check("Environment", "FAIL", advice.summary, minimum_detail, advice))
 
     find_spec = importlib.util.find_spec if spec_finder is None else spec_finder
@@ -7515,7 +7515,7 @@ def doctor_check_environment(version_info=None, spec_finder=None):
         if module_present(module_name):
             checks.append(make_doctor_check("Environment", "PASS", f"Required dependency {package_name} is installed"))
         else:
-            advice = make_recovery_advice("dependency.missing", f"Required dependency {package_name} is missing", recovery_fix_with_guide(f'Install it with: {install_dependency_command(package_name)}', INSTALL_GUIDE_URL), False)
+            advice = make_recovery_advice("dependency.missing", f"Required dependency {package_name} is missing", recovery_fix_with_guide(f'Install it with: {install_dependency_command(package_name)}', INSTALLATION_GUIDE_URL), False)
             checks.append(make_doctor_check("Environment", "FAIL", advice.summary, advice=advice))
 
     optional = [
@@ -7533,7 +7533,7 @@ def doctor_check_environment(version_info=None, spec_finder=None):
         if module_present(module_name):
             checks.append(make_doctor_check("Environment", "PASS", f"Optional dependency {package_name} is installed", use))
         else:
-            advice = make_recovery_advice("dependency.missing", f"Optional dependency {package_name} is not installed", recovery_fix_with_guide(f'Install it with: {install_dependency_command(package_name)}', INSTALL_GUIDE_URL), False)
+            advice = make_recovery_advice("dependency.missing", f"Optional dependency {package_name} is not installed", recovery_fix_with_guide(f'Install it with: {install_dependency_command(package_name)}', INSTALLATION_GUIDE_URL), False)
             checks.append(make_doctor_check("Environment", "WARN", advice.summary, f"{purpose}. Every other feature is unaffected", advice))
     return checks
 
@@ -7679,7 +7679,7 @@ def prepare_configured_paths(args):
         # Cleared here so a run that starts with usable settings cannot inherit an earlier run's report
         DISCARDED_SETTING_ERRORS.clear()
         return
-    advice = make_recovery_advice("config.invalid", "Invalid settings: " + ". ".join(errors), recovery_fix_with_guide("Correct the named settings in the configuration file or command line", CONFIG_FILE_GUIDE_URL), False)
+    advice = make_recovery_advice("config.invalid", "Invalid settings: " + ". ".join(errors), recovery_fix_with_guide("Correct the named settings in the configuration file or command line", CONFIG_GUIDE_URL), False)
     # A monitoring run cannot continue on a value this broken, but doctor, the setup wizard and the secret
     # commands are how it gets corrected, so they fall back to the built-in values and report the setting
     if not command_reports_configuration(args):
@@ -7726,7 +7726,7 @@ def discard_invalid_shape_settings():
 def doctor_check_configuration(config_path=None, env_path=None, target_value=None):
     # Read before the unusable values are replaced, so each row names the value the user configured
     # Reported as ordinary rows so one malformed setting cannot hide the rest of the configuration report
-    checks = [make_doctor_check("Configuration", "FAIL", detail, advice=make_recovery_advice("config.invalid", detail, recovery_fix_with_guide("Correct the named setting in the configuration file", CONFIG_FILE_GUIDE_URL), False)) for detail in configuration_shape_errors()]
+    checks = [make_doctor_check("Configuration", "FAIL", detail, advice=make_recovery_advice("config.invalid", detail, recovery_fix_with_guide("Correct the named setting in the configuration file", CONFIG_GUIDE_URL), False)) for detail in configuration_shape_errors()]
     discard_invalid_shape_settings()
     if config_path:
         checks.append(make_doctor_check("Configuration", "PASS", "Configuration file loaded", f"Path: {config_path}"))
@@ -7734,7 +7734,7 @@ def doctor_check_configuration(config_path=None, env_path=None, target_value=Non
         checks.append(make_doctor_check("Configuration", "PASS", "No configuration file selected", "Using built-in defaults and command-line overrides"))
     if env_path and str(env_path) in DOTENV_STARTUP_ERRORS:
         detail, fix = DOTENV_STARTUP_ERRORS[str(env_path)]
-        advice = make_recovery_advice("file.unreadable", detail, recovery_fix_with_guide(f"{fix}, then run Doctor again", CONFIG_FILE_GUIDE_URL), False)
+        advice = make_recovery_advice("file.unreadable", detail, recovery_fix_with_guide(f"{fix}, then run Doctor again", CONFIG_GUIDE_URL), False)
         checks.append(make_doctor_check("Configuration", "FAIL", "Dotenv file could not be loaded", detail, advice))
     elif env_path and os.path.isfile(str(env_path)):
         checks.append(make_doctor_check("Configuration", "PASS", "Dotenv file loaded", f"Path: {env_path}"))
@@ -7754,12 +7754,12 @@ def doctor_check_configuration(config_path=None, env_path=None, target_value=Non
     numeric_errors = runtime_configuration_errors()
     if numeric_errors:
         numeric_detail = "Invalid numeric settings: " + "; ".join(numeric_errors)
-        advice = make_recovery_advice("config.invalid", "One or more numeric settings are invalid", recovery_fix_with_guide("Correct the reported settings in the configuration file", CONFIG_FILE_GUIDE_URL), False, numeric_detail)
+        advice = make_recovery_advice("config.invalid", "One or more numeric settings are invalid", recovery_fix_with_guide("Correct the reported settings in the configuration file", CONFIG_GUIDE_URL), False, numeric_detail)
         checks.append(make_doctor_check("Configuration", "FAIL", advice.summary, numeric_detail, advice))
     boolean_errors = runtime_boolean_errors()
     if boolean_errors:
         boolean_detail = "Invalid on/off settings: " + "; ".join(boolean_errors)
-        advice = make_recovery_advice("config.invalid", "One or more on/off settings are invalid", recovery_fix_with_guide("Set the reported settings to True or False in the configuration file", CONFIG_FILE_GUIDE_URL), False, boolean_detail)
+        advice = make_recovery_advice("config.invalid", "One or more on/off settings are invalid", recovery_fix_with_guide("Set the reported settings to True or False in the configuration file", CONFIG_GUIDE_URL), False, boolean_detail)
         checks.append(make_doctor_check("Configuration", "FAIL", "One or more on/off settings are invalid", boolean_detail, advice))
 
     checks.extend(doctor_output_destination_checks(target_value))
@@ -8496,7 +8496,7 @@ def _wizard_seed_destination(state, env_file):
 def _wizard_destinations(config_file=None, env_file=None):
     # The sentinel is a deliberate choice rather than a broken path, so it gets the fix that undoes it
     if config_file is not None and str(config_file).casefold() == "none":
-        raise RecoveryError(make_recovery_advice("config.invalid", "--setup has nowhere to write the configuration", recovery_fix_with_guide(f"Replace '--config-file none' with a writable path, or drop the flag to write {DEFAULT_CONFIG_FILENAME} in the current directory", CONFIG_FILE_GUIDE_URL), False))
+        raise RecoveryError(make_recovery_advice("config.invalid", "--setup has nowhere to write the configuration", recovery_fix_with_guide(f"Replace '--config-file none' with a writable path, or drop the flag to write {DEFAULT_CONFIG_FILENAME} in the current directory", CONFIG_GUIDE_URL), False))
     if env_file is not None and str(env_file).casefold() == "none":
         raise RecoveryError(make_recovery_advice("secret.entry", "--setup has nowhere to write the secrets", recovery_fix_with_guide("Replace '--env-file none' with a writable path, or drop the flag to write .env in the current directory", SECRETS_GUIDE_URL), False))
     config_path = Path(config_file).expanduser() if config_file is not None else Path.cwd() / DEFAULT_CONFIG_FILENAME
@@ -10172,7 +10172,7 @@ def main():
             detail, fix = dotenv_load_problem(env_path, exc)
             DOTENV_STARTUP_ERRORS[str(env_path)] = (detail, fix)
             if not args.doctor:
-                print_recovery_advice(make_recovery_advice("file.unreadable", detail, recovery_fix_with_guide(fix, CONFIG_FILE_GUIDE_URL), False))
+                print_recovery_advice(make_recovery_advice("file.unreadable", detail, recovery_fix_with_guide(fix, CONFIG_GUIDE_URL), False))
                 if not command_reports_configuration(args):
                     sys.exit(1)
 
@@ -10202,7 +10202,7 @@ def main():
 
     configuration_errors = runtime_configuration_errors() + runtime_boolean_errors()
     if configuration_errors:
-        print_recovery_advice(make_recovery_advice("config.invalid", "Invalid settings: " + ". ".join(configuration_errors), recovery_fix_with_guide("Correct the reported settings in the configuration file or command line", CONFIG_FILE_GUIDE_URL), False))
+        print_recovery_advice(make_recovery_advice("config.invalid", "Invalid settings: " + ". ".join(configuration_errors), recovery_fix_with_guide("Correct the reported settings in the configuration file or command line", CONFIG_GUIDE_URL), False))
         sys.exit(1)
 
     # A target is optional only for the utility actions below. Checked after the dotenv file is resolved so the
@@ -10329,7 +10329,7 @@ def main():
             # Imported only to check availability and report a friendly install command when it is missing
             import bs4  # type: ignore  # noqa: F401
         except ImportError:
-            print_recovery_error(RecoveryError(make_recovery_advice("dependency.missing", "Friend and profile tracking needs beautifulsoup4, which is not installed", recovery_fix_with_guide(f"Install it with: {install_dependency_command('beautifulsoup4')}", INSTALL_GUIDE_URL), False)))
+            print_recovery_error(RecoveryError(make_recovery_advice("dependency.missing", "Friend and profile tracking needs beautifulsoup4, which is not installed", recovery_fix_with_guide(f"Install it with: {install_dependency_command('beautifulsoup4')}", INSTALLATION_GUIDE_URL), False)))
             sys.exit(1)
         if curl_req is None:
             print_recovery_error(RecoveryError(missing_dependency_advice("curl_cffi", "Friend and profile tracking cannot run")))

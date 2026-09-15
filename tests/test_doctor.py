@@ -549,9 +549,9 @@ class TestTheReport:
 
     # The fix line carries its own guide, so both are indented rather than one sequence spanning the newline
     def test_a_multi_line_fix_is_indented_on_every_line(self):
-        advice = monitor.make_recovery_advice("config.invalid", "Broken", monitor.recovery_fix_with_guide("Do the thing", monitor.CONFIG_FILE_GUIDE_URL), False)
+        advice = monitor.make_recovery_advice("config.invalid", "Broken", monitor.recovery_fix_with_guide("Do the thing", monitor.CONFIG_GUIDE_URL), False)
         rendered = monitor.render_doctor_sections(report_of(check("Environment", "FAIL", "Broken", advice=advice)))
-        assert f"  Guide: {monitor.CONFIG_FILE_GUIDE_URL}" in rendered.splitlines()
+        assert f"  Guide: {monitor.CONFIG_GUIDE_URL}" in rendered.splitlines()
 
     def test_the_install_method_is_stated_once_rather_than_taking_a_row(self):
         rendered = monitor.render_doctor_sections(report_of(check()))

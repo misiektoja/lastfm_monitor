@@ -388,7 +388,7 @@ class TestTheOneShotRefusals:
         printed = capsys.readouterr().out
         assert "* Error: Friend and profile tracking needs beautifulsoup4, which is not installed" in printed
         assert "To fix: Install it with: " in printed
-        assert f"Guide: {monitor.INSTALL_GUIDE_URL}" in printed
+        assert f"Guide: {monitor.INSTALLATION_GUIDE_URL}" in printed
 
     # Verifies an unusable separator mode names the three values it accepts rather than repeating the raised text alone
     def test_an_unusable_separator_mode_names_the_accepted_values(self, monkeypatch, tmp_path, capsys):
