@@ -1675,7 +1675,6 @@ class Logger(object):
     def flush(self):
         pass
 
-
     # Limits the terminal line across separate writes while leaving the log complete
     def _truncate_terminal(self, message):
         try:
@@ -5766,7 +5765,8 @@ def load_config_file(config_path, namespace=None, report_errors=True):
 
 
 # Reports whether durations carry an L* or S* mark, which only distinguishes sources while Spotify lookups are on
-def duration_marks_enabled(): return bool(USE_TRACK_DURATION_FROM_SPOTIFY) and not DO_NOT_SHOW_DURATION_MARKS
+def duration_marks_enabled():
+    return bool(USE_TRACK_DURATION_FROM_SPOTIFY) and not DO_NOT_SHOW_DURATION_MARKS
 
 
 # Resolves Spotify track metadata first then falls back to Last.fm duration

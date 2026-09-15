@@ -996,7 +996,11 @@ class TestAMonitoringFailureAlertsBothChannels:
     # An internet outage classifies as a timeout on one check and as unreachable on the next, and one alert covers it
     def test_an_internet_outage_that_flaps_alerts_once(self, monkeypatch, tmp_path, capsys):
         calls = recording_channels(monkeypatch, [(True, True)])
-        flapping = lambda call: RuntimeError("The read operation timed out") if call % 2 else RuntimeError("Connection refused")  # noqa: E731
+
+        # Alternates between timeout and connection failures
+        def flapping(call):
+            return RuntimeError("The read operation timed out") if call % 2 else RuntimeError("Connection refused")
+
         drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=14, liveness=3600, fail_after=2, error_factory=flapping, stub_notifications=False)
         errors = [call for call in calls if call["type"] == "error"]
         assert [(call["email"], call["webhook"]) for call in errors] == [(True, True)]
@@ -1123,7 +1127,11 @@ class TestALastingFailureIsReportedOnce:
     def test_an_internet_outage_that_flaps_is_one_outage(self, monkeypatch, tmp_path, capsys):
         monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
         monkeypatch.setattr(monitor, "DEBUG_MODE", False)
-        flapping = lambda call: RuntimeError("The read operation timed out") if call % 2 else RuntimeError("Connection refused")  # noqa: E731
+
+        # Alternates between timeout and connection failures
+        def flapping(call):
+            return RuntimeError("The read operation timed out") if call % 2 else RuntimeError("Connection refused")
+
         transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=12, liveness=3600, fail_after=2, error_factory=flapping)
         assert transcript.count("* Error:") == 1
         assert transcript.count("To fix: ") == 1

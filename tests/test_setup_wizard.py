@@ -96,7 +96,9 @@ def wizard(tmp_path, monkeypatch):
 
 # Stands in for a run that typed no flags at all, so every override the wizard runs behind reads as unset
 class NoFlags(argparse.Namespace):
-    def __getattr__(self, name): return None
+    # Treats unspecified command-line flags as unset
+    def __getattr__(self, name):
+        return None
 
 
 # Returns the settings a written config assigns

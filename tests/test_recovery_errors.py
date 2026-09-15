@@ -14,6 +14,7 @@ import lastfm_monitor as monitor
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
+
 # Returns the contexts the classifier branches on, so a typo in a call site cannot fall through to the runtime branch unnoticed
 def routed_contexts():
     tree = ast.parse(inspect.getsource(monitor.classify_recovery_error))
@@ -195,9 +196,8 @@ class TestContextRouting:
         assert advice.code == "unknown"
         assert advice.fix
 
-
-    # A write failure often names a missing file, which must not be mistaken for a file the tool could not read
     @pytest.mark.parametrize("detail", ["Could not initialize CSV file '/x/y.csv': [Errno 2] No such file or directory", "The CSV file '/x/y.csv' cannot be opened for writing"])
+    # A write failure often names a missing file, which must not be mistaken for a file the tool could not read
     def test_a_write_failure_is_never_reported_as_unreadable(self, detail):
         advice = monitor.classify_recovery_error(context="file.unwritable", detail=detail)
         assert advice.code == "file.unwritable"
@@ -218,6 +218,7 @@ class TestContextRouting:
 
         assert guarded >= 6, f"only {guarded} CSV writes are guarded, so this no longer covers them"
         assert not offenders, "CSV write failures reported outside the recovery block:\n" + "\n".join(offenders)
+
 
 class TestRendering:
     def test_every_failure_renders_an_error_line_and_a_fix_line(self):

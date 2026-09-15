@@ -107,7 +107,12 @@ def drive_loop(monkeypatch, capsys, tmp_path, now_playing, horizon, check_interv
     clock = FakeClock()
     if scrobbles is None:
         first_scrobble, only_track = clock.now - 600, FakeTrack()
-        scrobbles = lambda now: (first_scrobble, only_track)
+
+        # Returns the fixed scrobble used when no source is supplied
+        def default_scrobbles(now):
+            return (first_scrobble, only_track)
+
+        scrobbles = default_scrobbles
 
     user = FakeUser(clock, now_playing, scrobbles)
     network = FakeNetwork(user)
