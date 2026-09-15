@@ -489,15 +489,15 @@ class TestEveryDeliveryIsTraced:
         monkeypatch.setattr(monitor, "RECEIVER_EMAIL", "to@example.com")
         monkeypatch.setattr(monitor, "smtp_connect_and_login", lambda use_ssl, smtp_timeout=15: Session())
         assert monitor.send_email("Now playing", "Body", "", False) == 0
-        assert "* Email delivered to to@example.com: 'Now playing'" in capsys.readouterr().out
+        assert "* Email sent to to@example.com" in capsys.readouterr().out
 
-    def test_a_delivered_webhook_names_the_provider_and_the_alert_in_verbose(self, verbose_on, monkeypatch, capsys):
+    def test_a_delivered_webhook_names_the_provider_in_verbose(self, verbose_on, monkeypatch, capsys):
         monkeypatch.setattr(monitor, "WEBHOOK_ENABLED", True)
         monkeypatch.setattr(monitor, "WEBHOOK_URL", "https://example.com/hooks/abc")
         monkeypatch.setattr(monitor, "WEBHOOK_PROVIDER", "discord")
         monkeypatch.setattr(monitor, "post_webhook_request", lambda **kwargs: FakeResponse(204))
         assert monitor.send_webhook("Now playing", "Description", "song", force=True) == 0
-        assert "* Webhook delivered through Discord: 'Now playing'" in capsys.readouterr().out
+        assert "* Webhook sent through Discord" in capsys.readouterr().out
 
     def test_delivery_confirmations_can_be_turned_off(self, verbose_on, monkeypatch, capsys):
         class Session:
@@ -524,8 +524,8 @@ class TestEveryDeliveryIsTraced:
         assert monitor.send_webhook("Now playing", "Description", "song", force=True) == 0
 
         printed = capsys.readouterr().out
-        assert "Email delivered" not in printed
-        assert "Webhook delivered" not in printed
+        assert "Email sent to" not in printed
+        assert "Webhook sent through" not in printed
 
     def test_every_webhook_attempt_names_its_status_and_the_retry_delay(self, debug_on, monkeypatch, capsys):
         monkeypatch.setattr(monitor, "WEBHOOK_ENABLED", True)
@@ -1010,7 +1010,7 @@ class TestAMonitoringFailureAlertsBothChannels:
         calls = recording_channels(monkeypatch, [(True, True)])
         drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=3, liveness=3600, fail_after=2, error_factory=lambda call: RuntimeError("Invalid API key - You must be granted a valid key by last.fm"), stub_notifications=False)
         errors = [call for call in calls if call["type"] == "error"]
-        assert [call["subject"] for call in errors] == ["lastfm_monitor: API key error! (user: someuser)"]
+        assert [call["subject"] for call in errors] == ["Last.fm API key error! (user: someuser)"]
 
     # An outage used to reach the webhook but not email, which only heard about a rejected API key
     def test_any_failure_alerts_both_channels_once(self, monkeypatch, tmp_path, capsys):
@@ -1018,7 +1018,7 @@ class TestAMonitoringFailureAlertsBothChannels:
         drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=8, liveness=3600, fail_after=2, stub_notifications=False)
         errors = [call for call in calls if call["type"] == "error"]
         assert [(call["email"], call["webhook"]) for call in errors] == [(True, True)]
-        assert errors[0]["subject"] == "lastfm_monitor: monitoring error (user: someuser)"
+        assert errors[0]["subject"] == "Last.fm monitoring error (user: someuser)"
         assert "The Last.fm API is temporarily unavailable" in errors[0]["body"]
         assert "To fix:" in errors[0]["body"]
 

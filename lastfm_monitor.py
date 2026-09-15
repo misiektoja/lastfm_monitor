@@ -744,13 +744,13 @@ DOCTOR_SMTP_TIMEOUT = 5
 
 # One wording per test message, shared with the sibling monitors. The subject names the tool because the
 # message lands beside the real alerts, and the body names the command because it can arrive minutes later
-TEST_EMAIL_SUBJECT = f"{TOOL_NAME}: test email"
+TEST_EMAIL_SUBJECT = "Last.fm Monitor test email"
 TEST_EMAIL_BODY = "This test email was sent by --send-test-email. Your SMTP settings work."
-TEST_WEBHOOK_TITLE = f"{TOOL_NAME}: test webhook"
+TEST_WEBHOOK_TITLE = "Last.fm Monitor test webhook"
 TEST_WEBHOOK_BODY = "This test notification was sent by --send-test-webhook. Your webhook settings work."
-DOCTOR_TEST_EMAIL_SUBJECT = f"{TOOL_NAME}: doctor test email"
+DOCTOR_TEST_EMAIL_SUBJECT = "Last.fm Monitor doctor test email"
 DOCTOR_TEST_EMAIL_BODY = "This test email was sent after approval in --doctor. Your SMTP delivery settings work."
-DOCTOR_TEST_WEBHOOK_TITLE = f"{TOOL_NAME}: doctor test webhook"
+DOCTOR_TEST_WEBHOOK_TITLE = "Last.fm Monitor doctor test webhook"
 DOCTOR_TEST_WEBHOOK_BODY = "This test notification was sent after approval in --doctor. Your webhook delivery settings work."
 
 # Check labels shared with the sibling monitors, so one report reads the same as the next
@@ -1944,15 +1944,26 @@ def smtp_connect_and_login(use_ssl, smtp_timeout=15):
         smtp_login(smtp_object, SMTP_USER, SMTP_PASSWORD)
         return smtp_object
     except Exception:
-        try:
-            smtp_object.quit()
-        except Exception as cleanup_error:
-            debug_swallowed_exception("SMTP session cleanup", cleanup_error)
+        smtp_quit_quietly(smtp_object)
         raise
 
 
+# Closes an SMTP session without changing the result of an accepted or failed message
+def smtp_quit_quietly(smtp_object):
+    if smtp_object is None:
+        return
+    try:
+        smtp_object.quit()
+    except Exception as quit_error:
+        debug_print("SMTP quit", outcome="failed", error=f"{type(quit_error).__name__}: {quit_error}")
+        try:
+            smtp_object.close()
+        except Exception as close_error:
+            debug_print("SMTP close", outcome="failed", error=f"{type(close_error).__name__}: {close_error}")
+
+
 # Sends an email notification
-def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
+def send_email(subject, body, body_html, use_ssl, smtp_timeout=15, report_delivery=True):
     debug_print("Email delivery attempt", host=SMTP_HOST, port=SMTP_PORT, recipient=RECEIVER_EMAIL, subject=subject)
     fqdn_re = re.compile(r'(?=^.{4,253}$)(^((?!-)[a-zA-Z0-9-]{1,63}(?<!-)\.)+[a-zA-Z]{2,63}\.?$)')
     email_re = re.compile(r'[^@]+@[^@]+\.[^@]+')
@@ -1988,6 +1999,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         print_recovery_error(context="email", detail="The SMTP settings are incorrect (body and body_html cannot be empty at the same time)")
         return 1
 
+    smtpObj = None
     try:
         smtpObj = smtp_connect_and_login(use_ssl, smtp_timeout=smtp_timeout)
         email_msg = MIMEMultipart('alternative')
@@ -2006,13 +2018,15 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
             email_msg.attach(part2)
 
         smtpObj.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, email_msg.as_string())
-        smtpObj.quit()
         debug_print("Email delivery", host=SMTP_HOST, port=SMTP_PORT, recipient=RECEIVER_EMAIL, outcome="OK")
     except Exception as e:
         debug_print("Email delivery", host=SMTP_HOST, port=SMTP_PORT, recipient=RECEIVER_EMAIL, outcome="failed", error=f"{type(e).__name__}: {e}")
         print_recovery_error(e, context="email")
         return 1
-    verbose_delivery_print(f"Email delivered to {RECEIVER_EMAIL}: '{subject}'")
+    finally:
+        smtp_quit_quietly(smtpObj)
+    if report_delivery:
+        verbose_delivery_print(f"Email sent to {RECEIVER_EMAIL}")
     return 0
 
 
@@ -2922,7 +2936,7 @@ def _retain_webhook_secrets(deliver):
 
 @_retain_webhook_secrets
 # Sends one webhook through an isolated bounded retry path
-def send_webhook(title: str, description: str, notification_type: str = "song", force: bool = False, sleeper: Optional[Callable[[float], None]] = None) -> int:
+def send_webhook(title: str, description: str, notification_type: str = "song", force: bool = False, sleeper: Optional[Callable[[float], None]] = None, report_delivery: bool = True) -> int:
     if not force and not webhook_event_enabled(notification_type):
         return 1
     destination = str(WEBHOOK_URL or "").strip()
@@ -2962,7 +2976,8 @@ def send_webhook(title: str, description: str, notification_type: str = "song", 
                 response = post_webhook_request(destination=destination, json=discord_payload, headers=request_headers)
             attempt_label = f"#{attempt + 1}/{WEBHOOK_MAX_ATTEMPTS}"
             if 200 <= response.status_code <= 299:
-                verbose_delivery_print(f"Webhook delivered through {webhook_provider_display_name(provider)}: '{webhook_values['title']}'")
+                if report_delivery:
+                    verbose_delivery_print(f"Webhook sent through {webhook_provider_display_name(provider)}")
                 debug_print("Webhook delivery", provider=provider, host=webhook_destination_host(destination), attempt=attempt_label, status=response.status_code, outcome="OK")
                 return 0
             retryable = response.status_code == 429 or 500 <= response.status_code <= 599
@@ -7313,9 +7328,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             error_webhook_enabled = alert_due and error_alert.pending("webhook", webhook_event_enabled("error"), now)
             if error_email_enabled or error_webhook_enabled:
                 if advice.code == "auth.api_key_invalid":
-                    m_subject = f"lastfm_monitor: API key error! (user: {username})"
+                    m_subject = f"Last.fm API key error! (user: {username})"
                 else:
-                    m_subject = f"lastfm_monitor: monitoring error (user: {username})"
+                    m_subject = f"Last.fm monitoring error (user: {username})"
                 m_body = f"{advice.summary}{nl_ch}{nl_ch}To fix: {advice.fix}{nl_ch}{nl_ch}Last.fm Monitor will retry in {display_time(sleep_interval)}.{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                 m_body_html = f"<html><head></head><body>{html_text(advice.summary)}<br><br>To fix: {html_text(advice.fix)}<br><br>Last.fm Monitor will retry in {escape(display_time(sleep_interval))}.{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
                 email_delivered, webhook_delivered = send_notification_channels("error", m_subject, m_body, m_body_html, email_enabled=error_email_enabled, webhook_enabled=error_webhook_enabled)
@@ -7968,7 +7983,7 @@ def _doctor_offer_notification_tests(report, input_func=None):
     checks = []
     if report.email_ready:
         if _doctor_ask_yes_no("Send one test email now? This will deliver a real message", input_func=input_func):
-            delivered = send_email(DOCTOR_TEST_EMAIL_SUBJECT, DOCTOR_TEST_EMAIL_BODY, "", SMTP_SSL, smtp_timeout=DOCTOR_SMTP_TIMEOUT) == 0
+            delivered = send_email(DOCTOR_TEST_EMAIL_SUBJECT, DOCTOR_TEST_EMAIL_BODY, "", SMTP_SSL, smtp_timeout=DOCTOR_SMTP_TIMEOUT, report_delivery=False) == 0
             if delivered:
                 check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "PASS", "Doctor test email delivered", "One real test email was sent after confirmation")
             else:
@@ -7983,7 +7998,7 @@ def _doctor_offer_notification_tests(report, input_func=None):
     if report.webhook_ready:
         provider = webhook_provider_display_name()
         if _doctor_ask_yes_no(f"Send one test webhook through {provider} now? This will publish a real notification", input_func=input_func):
-            delivered = send_webhook(DOCTOR_TEST_WEBHOOK_TITLE, DOCTOR_TEST_WEBHOOK_BODY, "song", force=True) == 0
+            delivered = send_webhook(DOCTOR_TEST_WEBHOOK_TITLE, DOCTOR_TEST_WEBHOOK_BODY, "song", force=True, report_delivery=False) == 0
             if delivered:
                 check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "PASS", f"Doctor test webhook through {provider} delivered", "One real test webhook was sent after confirmation")
             else:
@@ -10138,7 +10153,7 @@ def main():
             print_recovery_error(context="email", detail=f"The mail server settings are incomplete, {join_setting_names(missing, 'and')} {'is' if len(missing) == 1 else 'are'} not set")
             sys.exit(1)
         print("* Sending test email notification ...\n")
-        if send_email(TEST_EMAIL_SUBJECT, TEST_EMAIL_BODY, "", SMTP_SSL, smtp_timeout=DOCTOR_SMTP_TIMEOUT) == 0:
+        if send_email(TEST_EMAIL_SUBJECT, TEST_EMAIL_BODY, "", SMTP_SSL, smtp_timeout=DOCTOR_SMTP_TIMEOUT, report_delivery=False) == 0:
             print("* Email sent successfully !")
         else:
             sys.exit(1)
@@ -10149,7 +10164,7 @@ def main():
             print_recovery_error(context="webhook", detail="WEBHOOK_URL must contain a complete HTTPS link")
             sys.exit(1)
         print("* Sending test webhook notification ...\n")
-        if send_webhook(TEST_WEBHOOK_TITLE, TEST_WEBHOOK_BODY, "song", force=True) == 0:
+        if send_webhook(TEST_WEBHOOK_TITLE, TEST_WEBHOOK_BODY, "song", force=True, report_delivery=False) == 0:
             print("* Webhook sent successfully !")
         else:
             sys.exit(1)

@@ -13,13 +13,13 @@ SOURCE = (PROJECT_ROOT / "lastfm_monitor.py").read_text(encoding="utf-8")
 
 # The table every sibling monitor sends, with this tool's name substituted
 SHARED_MESSAGES = (
-    ("TEST_EMAIL_SUBJECT", "lastfm_monitor: test email"),
+    ("TEST_EMAIL_SUBJECT", "Last.fm Monitor test email"),
     ("TEST_EMAIL_BODY", "This test email was sent by --send-test-email. Your SMTP settings work."),
-    ("TEST_WEBHOOK_TITLE", "lastfm_monitor: test webhook"),
+    ("TEST_WEBHOOK_TITLE", "Last.fm Monitor test webhook"),
     ("TEST_WEBHOOK_BODY", "This test notification was sent by --send-test-webhook. Your webhook settings work."),
-    ("DOCTOR_TEST_EMAIL_SUBJECT", "lastfm_monitor: doctor test email"),
+    ("DOCTOR_TEST_EMAIL_SUBJECT", "Last.fm Monitor doctor test email"),
     ("DOCTOR_TEST_EMAIL_BODY", "This test email was sent after approval in --doctor. Your SMTP delivery settings work."),
-    ("DOCTOR_TEST_WEBHOOK_TITLE", "lastfm_monitor: doctor test webhook"),
+    ("DOCTOR_TEST_WEBHOOK_TITLE", "Last.fm Monitor doctor test webhook"),
     ("DOCTOR_TEST_WEBHOOK_BODY", "This test notification was sent after approval in --doctor. Your webhook delivery settings work."),
 )
 
@@ -36,7 +36,7 @@ class TestSharedWording:
         assert getattr(monitor, name) == expected
 
     def test_the_subject_names_the_tool(self):
-        assert all(getattr(monitor, name).startswith(f"{monitor.TOOL_NAME}: ") for name, _ in SHARED_MESSAGES if name.endswith(("SUBJECT", "TITLE")))
+        assert all(getattr(monitor, name).startswith("Last.fm Monitor ") for name, _ in SHARED_MESSAGES if name.endswith(("SUBJECT", "TITLE")))
 
     # The body names the command because the message can arrive minutes later, beside another monitor's
     @pytest.mark.parametrize("name, expected", [(name, expected) for name, expected in SHARED_MESSAGES if name.endswith("BODY")])
@@ -104,23 +104,23 @@ class TestDeliveredMessages:
 
     def test_the_doctor_email_test_sends_the_doctor_message(self, monkeypatch, configured_mail):
         sent = []
-        monkeypatch.setattr(monitor, "send_email", lambda subject, body, body_html, use_ssl, smtp_timeout=15: sent.append((subject, body)) or 0)
+        monkeypatch.setattr(monitor, "send_email", lambda subject, body, body_html, use_ssl, smtp_timeout=15, report_delivery=True: sent.append((subject, body, report_delivery)) or 0)
         monkeypatch.setattr(monitor, "_doctor_terminal_stream", lambda: type("S", (), {"isatty": lambda self: True})())
         monkeypatch.setattr(monitor.sys, "stdin", type("S", (), {"isatty": lambda self: True})())
         report = monitor.DoctorReport()
         report.email_ready = True
         monitor._doctor_offer_notification_tests(report, input_func=lambda prompt: "y")
-        assert sent == [(monitor.DOCTOR_TEST_EMAIL_SUBJECT, monitor.DOCTOR_TEST_EMAIL_BODY)]
+        assert sent == [(monitor.DOCTOR_TEST_EMAIL_SUBJECT, monitor.DOCTOR_TEST_EMAIL_BODY, False)]
 
     def test_the_doctor_webhook_test_sends_the_doctor_message(self, monkeypatch):
         sent = []
-        monkeypatch.setattr(monitor, "send_webhook", lambda title, body, category, force=False: sent.append((title, body)) or 0)
+        monkeypatch.setattr(monitor, "send_webhook", lambda title, body, category, force=False, report_delivery=True: sent.append((title, body, report_delivery)) or 0)
         monkeypatch.setattr(monitor, "_doctor_terminal_stream", lambda: type("S", (), {"isatty": lambda self: True})())
         monkeypatch.setattr(monitor.sys, "stdin", type("S", (), {"isatty": lambda self: True})())
         report = monitor.DoctorReport()
         report.webhook_ready = True
         monitor._doctor_offer_notification_tests(report, input_func=lambda prompt: "y")
-        assert sent == [(monitor.DOCTOR_TEST_WEBHOOK_TITLE, monitor.DOCTOR_TEST_WEBHOOK_BODY)]
+        assert sent == [(monitor.DOCTOR_TEST_WEBHOOK_TITLE, monitor.DOCTOR_TEST_WEBHOOK_BODY, False)]
 
     @pytest.mark.parametrize("label", ["* Email sent successfully !", "* Webhook sent successfully !"])
     def test_each_command_reports_its_result_the_shared_way(self, label):
