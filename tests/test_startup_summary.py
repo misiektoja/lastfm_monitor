@@ -301,7 +301,7 @@ class TestWhatEachViewPrints:
     def test_the_full_view_prints_every_other_row(self, restored_globals, tmp_path, capsys):
         run_main_to_the_loop(tmp_path, arguments=["--verbose"])
         printed = [line for line in capsys.readouterr().out.splitlines() if line.startswith("* ")]
-        rendered = {line.split(":", 1)[0][2:] for line in printed}
+        rendered = {line.split(":", 1)[0][2:].strip() for line in printed}
         assert set(SHARED_ROW_ORDER) - {"Output", "More details"} <= rendered
         assert set(OWN_ROWS) <= rendered
         assert not any(line.startswith("* More details:") for line in printed)
@@ -357,7 +357,7 @@ class TestTheLogAlwaysGetsTheFullView:
         log_path = run_main_with_logging(tmp_path, arguments=["--verbose"])
         capsys.readouterr()
         logged = log_path.read_text(encoding="utf-8")
-        rendered = {line.split(":", 1)[0][2:] for line in logged.splitlines() if line.startswith("* ") and ":" in line}
+        rendered = {line.split(":", 1)[0][2:].strip() for line in logged.splitlines() if line.startswith("* ") and ":" in line}
         assert set(SHARED_ROW_ORDER) - {"Output", "More details"} <= rendered
         assert set(OWN_ROWS) <= rendered
 
