@@ -19,6 +19,7 @@ dependencies = [
   "spotipy>=2.24.0",
   "python-dotenv>=0.19",
   "beautifulsoup4>=4.9.0",
+  "curl_cffi>=0.11.4",
 ]
 classifiers = [
   "Programming Language :: Python :: 3",

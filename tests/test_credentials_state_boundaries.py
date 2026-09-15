@@ -6,6 +6,7 @@ import time
 
 import pytest
 import requests
+from curl_cffi import requests as curl_requests
 from requests.adapters import HTTPAdapter
 from spotipy.cache_handler import CacheFileHandler, MemoryCacheHandler
 
@@ -86,16 +87,16 @@ def test_invalid_friends_state_rebuilds_quietly(monkeypatch, tmp_path, capsys, u
     path.write_text(json.dumps({"users": users}), encoding="utf-8")
     attempts = []
 
-    # Supplies a complete real Last.fm following page to the scraper
-    def respond(adapter, request, **kwargs):
-        attempts.append(request)
-        response = requests.Response()
-        response.request = request
+    # Supplies a complete Last.fm following page through the website transport
+    def respond(url, **kwargs):
+        attempts.append(url)
+        response = curl_requests.Response()
+        response.url = url
         response.status_code = 200
-        response._content = b'<html><h1>Following (1)</h1><ul class="user-list"><li class="user-list-item"><a href="/user/alice">alice</a></li></ul></html>'
+        response.content = b'<html><h1>Following (1)</h1><ul class="user-list"><li class="user-list-item"><a href="/user/alice">alice</a></li></ul></html>'
         return response
 
-    monkeypatch.setattr(HTTPAdapter, "send", respond)
+    monkeypatch.setattr(curl_requests, "get", respond)
     changes, states = monitor.check_friends_changes("reviewuser", True, False)
     assert changes == {}
     assert states == {"followings": {"alice"}}
@@ -136,6 +137,13 @@ def test_resource_failure_stops_optional_requests(monkeypatch, surface):
         raise requests.ConnectionError("Socket allocation failed") from OSError(errno.EMFILE, "Too many open files")
 
     monkeypatch.setattr(HTTPAdapter, "send", respond)
+
+    # Raises the same local socket failure through the website transport
+    def curl_respond(url, **kwargs):
+        attempts.append(url)
+        raise curl_requests.exceptions.ConnectionError("Socket allocation failed") from OSError(errno.EMFILE, "Too many open files")
+
+    monkeypatch.setattr(curl_requests, "get", curl_respond)
     with pytest.raises(SystemExit) as error:
         if surface == "friends":
             monitor._lastfm_http_get_with_retry("https://www.last.fm/user/reviewuser/following")

@@ -5,6 +5,7 @@ pyotp
 spotipy
 python-dotenv
 beautifulsoup4
+curl_cffi>=0.11.4
 
 # Optional for display-width-aware terminal truncation (TRUNCATE_CHARS, --truncate)
 # wcwidth

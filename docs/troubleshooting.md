@@ -90,6 +90,14 @@ When the failure clears, the run says so whatever flags it was started with. A f
 
 Follow any new instructions if the failure changes. The old `ERROR_500_NUMBER_LIMIT`, `ERROR_500_TIME_LIMIT`, `ERROR_NETWORK_ISSUES_NUMBER_LIMIT` and `ERROR_NETWORK_ISSUES_TIME_LIMIT` settings are ignored.
 
+## Last.fm Website Tracking
+
+Follower, following and profile checks use `curl_cffi` with Chrome impersonation. Last.fm can return a `Client Challenge` page with HTTP 200 instead of the requested data. The tool recognizes this as browser verification and retries it. A rejected page cannot replace saved tracking data or produce change alerts.
+
+If browser verification persists, [update the installation and its dependencies](installation.md#upgrading) and check the same Last.fm profile in a browser. Opening it there does not share browser cookies with the monitor. Keep the saved tracking files. Changing API credentials does not fix a website challenge.
+
+Temporary website errors, including HTTP 600, also use bounded retries. Use `--debug` to see the HTTP status and retry attempts. The normal friend and profile check interval defaults to 90 minutes. Explicit saved intervals still apply.
+
 ## Verbose Output
 
 `--verbose` adds the decisions a run made, in the same `*` lines as the rest of the output:

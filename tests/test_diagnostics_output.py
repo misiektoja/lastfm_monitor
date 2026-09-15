@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 import requests as req
+from curl_cffi import requests as curl_requests
 
 import lastfm_monitor as monitor
 
@@ -323,7 +324,7 @@ class TestEveryDebugLineFollowsOneGrammar:
 
 class TestEveryOutboundCallIsNamed:
     def test_a_scraped_page_names_the_address_the_timeout_and_the_result(self, debug_on, monkeypatch, capsys):
-        monkeypatch.setattr(monitor.req, "get", lambda url, **kwargs: FakeResponse(200, content=b"<html></html>"))
+        monkeypatch.setattr(curl_requests, "get", lambda url, **kwargs: FakeResponse(200, content=b"<html></html>"))
         monitor._lastfm_http_get_with_retry("https://www.last.fm/user/someuser/following")
         printed = capsys.readouterr().out
         assert "HTTP GET" in printed
@@ -333,7 +334,7 @@ class TestEveryOutboundCallIsNamed:
         assert "timeout=" in printed
 
     def test_a_failed_page_names_the_transport_failure(self, debug_on, monkeypatch, capsys):
-        monkeypatch.setattr(monitor.req, "get", lambda url, **kwargs: (_ for _ in ()).throw(req.ConnectionError("no route to host")))
+        monkeypatch.setattr(curl_requests, "get", lambda url, **kwargs: (_ for _ in ()).throw(curl_requests.exceptions.ConnectionError("no route to host")))
         monkeypatch.setattr(monitor.time, "sleep", lambda seconds: None)
         with pytest.raises(RuntimeError):
             monitor._lastfm_http_get_with_retry("https://www.last.fm/user/someuser/following", attempts=2)
@@ -602,7 +603,7 @@ class TestEveryWaitIsTraced:
     def test_a_retry_names_its_delay_and_its_reason(self, debug_on, monkeypatch, capsys):
         waits = []
         monkeypatch.setattr(monitor.time, "sleep", waits.append)
-        monkeypatch.setattr(monitor.req, "get", lambda url, **kwargs: FakeResponse(503, headers={"Content-Type": "application/json"}))
+        monkeypatch.setattr(curl_requests, "get", lambda url, **kwargs: FakeResponse(503, headers={"Content-Type": "application/json"}))
         with pytest.raises(RuntimeError):
             monitor._lastfm_http_get_with_retry("https://www.last.fm/user/someuser", attempts=2, base_delay=1.0)
         printed = capsys.readouterr().out

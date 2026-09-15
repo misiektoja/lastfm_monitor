@@ -15,6 +15,7 @@ pyotp
 spotipy (optional, only for Spotify-related features)
 python-dotenv (optional)
 beautifulsoup4 (optional, only for friends and profile tracking)
+curl_cffi (optional, only for friends and profile tracking)
 colorama (optional, only for coloured output in the classic Windows Command Prompt)
 """
 
@@ -548,7 +549,7 @@ TRACK_DISPLAY_NAME = False
 
 # How often to check for friend and profile changes in seconds
 # Can also be set using the --friends-check-interval flag
-FRIENDS_CHECK_INTERVAL = 900  # 15 minutes
+FRIENDS_CHECK_INTERVAL = 5400  # 90 minutes
 
 # Whether to send an email when followers change
 # Can also be enabled via the --notify-followers flag
@@ -900,6 +901,10 @@ from datetime import datetime
 from dateutil import relativedelta
 import calendar
 import requests as req
+try:
+    from curl_cffi import requests as curl_req
+except ImportError:
+    curl_req = None
 import signal
 import smtplib
 import ssl
@@ -2202,7 +2207,7 @@ RECOVERY_CODES = frozenset({
     "secret.missing", "secret.entry",
     "auth.api_key_invalid",
     "network.unavailable", "network.timeout",
-    "lastfm.rate_limited", "lastfm.unavailable",
+    "lastfm.rate_limited", "lastfm.unavailable", "lastfm.challenge",
     "target.missing", "target.invalid", "target.not_found", "target.not_visible",
     "smtp.invalid", "smtp.authentication", "smtp.connection",
     "webhook.invalid", "webhook.rejected", "webhook.rate_limited", "webhook.connection",
@@ -2407,6 +2412,8 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
     if lastfm_status in (8, 11, 16) or (lastfm_status is not None and lastfm_status >= 500):
         return advice("lastfm.unavailable", "The Last.fm API is temporarily unavailable", "This is usually a Last.fm outage. The tool will keep retrying", True, DIAGNOSTICS_GUIDE_URL)
 
+    if "last.fm returned a browser verification page" in message:
+        return advice("lastfm.challenge", "Last.fm is asking for browser verification", "The tool will keep retrying. If this persists, update curl_cffi and check the Last.fm page in a browser", True, f"{DOCS_BASE_URL}/troubleshooting/#lastfm-website-tracking")
     if http_status == 429 or "http code 429" in message or "429 client" in message or "rate limit" in message or "too many requests" in message:
         return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. Increase the check intervals if this repeats", True, INTERVALS_GUIDE_URL)
     if "invalid api key" in message or "api key suspended" in message or "invalid method signature" in message:
@@ -3644,44 +3651,40 @@ def lastfm_get_recent_tracks(username, network, number):
         raise
 
 
-# Returns Last.fm HTTP headers crafted to look like a real browser so the WAF is less likely to block low-volume scraping
+# Requests English Last.fm pages while leaving browser identity and compression headers to curl_cffi
 def _lastfm_scrape_headers():
     return {
-        'User-Agent': (
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
-            'AppleWebKit/537.36 (KHTML, like Gecko) '
-            'Chrome/122.0.0.0 Safari/537.36'
-        ),
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
     }
 
 
 # Returns an error description when a Last.fm response should be retried
 def _lastfm_retryable_response_error(response):
-    if response.status_code == 429 or response.status_code >= 500:
-        return f"HTTP {response.status_code} from Last.fm"
-
     content_type = response.headers.get('Content-Type', '').lower()
     if 'text/html' in content_type:
         body = response.content.lower()
+        if re.search(rb'<title>\s*client challenge\s*</title>', body):
+            return "Last.fm returned a browser verification page (Client Challenge)"
         if b'temporarily unavailable' in body and b'error 503' in body:
             return "Last.fm returned its temporarily unavailable page"
+
+    if response.status_code == 429 or response.status_code >= 500:
+        return f"HTTP {response.status_code} from Last.fm"
 
     return None
 
 
 # Fetches a URL with backoff for transient Last.fm HTTP and soft error responses then raises RuntimeError on final failure
 def _lastfm_http_get_with_retry(url, attempts=3, base_delay=2.0):
+    if curl_req is None:
+        raise RecoveryError(missing_dependency_advice("curl_cffi", "Friend and profile tracking cannot run"))
     last_exc = None
     timeout = FUNCTION_TIMEOUT * 2
     for i in range(attempts):
         attempt_label = f"#{i + 1}/{attempts}"
         status = None
         try:
-            response = req.get(url, headers=_lastfm_scrape_headers(), timeout=timeout, verify=VERIFY_SSL)
+            response = curl_req.get(url, impersonate="chrome", headers=_lastfm_scrape_headers(), timeout=timeout, verify=VERIFY_SSL)
             status = response.status_code
             retryable_error = _lastfm_retryable_response_error(response)
             if retryable_error:
@@ -3691,14 +3694,14 @@ def _lastfm_http_get_with_retry(url, attempts=3, base_delay=2.0):
                 response.raise_for_status()
                 debug_print("HTTP GET", url=url, timeout=f"{timeout}s", attempt=attempt_label, status=status, outcome="OK")
                 return response
-        except (req.Timeout, req.ConnectionError) as e:
-            exit_if_out_of_file_descriptors(e)
-            last_exc = e
-            debug_print("HTTP GET", url=url, timeout=f"{timeout}s", attempt=attempt_label, outcome="failed", error=f"{type(e).__name__}: {e}")
-        except req.HTTPError as e:
+        except curl_req.exceptions.HTTPError as e:
             # Non-retryable 4xx (except 429 handled above) propagates immediately
             debug_print("HTTP GET", url=url, timeout=f"{timeout}s", attempt=attempt_label, status=status, outcome="failed", error=f"{type(e).__name__}: {e}")
             raise RuntimeError(f"Failed to fetch from Last.fm: {e}") from e
+        except (curl_req.exceptions.RequestException, OSError) as e:
+            exit_if_out_of_file_descriptors(e)
+            last_exc = e
+            debug_print("HTTP GET", url=url, timeout=f"{timeout}s", attempt=attempt_label, outcome="failed", error=f"{type(e).__name__}: {e}")
         if i < attempts - 1:
             delay = base_delay * (2 ** i)
             debug_print("Last.fm request retry", url=url, attempt=attempt_label, delay=f"{delay:g}s", status=status, outcome="failed")
@@ -3764,7 +3767,7 @@ def _lastfm_scrape_user_list(username, kind):
         return users
     except req.RequestException as e:
         raise RuntimeError(f"Failed to scrape {kind} from Last.fm: {e}")
-    except RuntimeError:
+    except (RuntimeError, RecoveryError):
         raise
     except Exception as e:
         raise RuntimeError(f"Failed to parse {kind} page: {e}")
@@ -3813,7 +3816,7 @@ def lastfm_get_profile(username):
         }
     except req.RequestException as e:
         raise RuntimeError(f"Failed to scrape profile from Last.fm: {e}")
-    except RuntimeError:
+    except (RuntimeError, RecoveryError):
         raise
     except Exception as e:
         raise RuntimeError(f"Failed to parse profile page: {e}")
@@ -7495,6 +7498,7 @@ def doctor_check_environment(version_info=None, spec_finder=None):
         ("dotenv", "python-dotenv", "Secrets can only come from environment variables or the configuration file", "Used only for reading secrets from a dotenv file"),
         ("spotipy", "spotipy", "The Spotify OAuth app metadata backend is unavailable, leaving the anonymous web player", "Used only for the Spotify OAuth app metadata backend"),
         ("bs4", "beautifulsoup4", "Follower, following and profile tracking cannot run", "Used only for follower, following and profile tracking"),
+        ("curl_cffi", "curl_cffi", "Follower, following and profile tracking cannot run", "Used only for Last.fm website requests in follower, following and profile tracking"),
         ("wcwidth", "wcwidth", "Wide characters count as one column, so a line holding them can run past the limit", "Used only to measure display width for screen truncation"),
     ]
     # The classic Command Prompt is the only place this library changes anything, so a machine it cannot
@@ -10258,13 +10262,16 @@ def main():
         # Upstream text still reaches the terminal without a log file, so it is sanitized by a stream either way
         sys.stdout = TerminalStream(sys.stdout)
 
-    # Check for beautifulsoup4 if friend or profile tracking is enabled
+    # Website tracking needs both the HTML parser and the browser impersonation transport
     if friends_check_enabled():
         try:
             # Imported only to check availability and report a friendly install command when it is missing
             import bs4  # type: ignore  # noqa: F401
         except ImportError:
             print_recovery_error(RecoveryError(make_recovery_advice("dependency.missing", "Friend and profile tracking needs beautifulsoup4, which is not installed", recovery_fix_with_guide(f"Install it with: {install_dependency_command('beautifulsoup4')}", INSTALL_GUIDE_URL), False)))
+            sys.exit(1)
+        if curl_req is None:
+            print_recovery_error(RecoveryError(missing_dependency_advice("curl_cffi", "Friend and profile tracking cannot run")))
             sys.exit(1)
 
     if SMTP_HOST.startswith("your_smtp_server_"):

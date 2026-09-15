@@ -8,8 +8,10 @@ New to Python? Start with [New to Python: check and install](#new-to-python-inst
 
 * Python 3.9 or higher
 
-Running an older Python stops the tool at startup with a message naming the version it found. Python 3.9 still works, but `pip` will resolve older releases of `pylast`, `requests` and `python-dotenv` there, because their current releases require Python 3.10 or newer. Prefer a newer Python where you can choose.
-* Libraries: [pyLast](https://github.com/pylast/pylast), `requests`, `python-dateutil`, [PyOTP](https://github.com/pyauth/pyotp), [Spotipy](https://github.com/spotipy-dev/spotipy), `python-dotenv`, `beautifulsoup4`
+Running an older Python stops the tool at startup with a message naming the version it found. Python 3.9 still works, but `pip` will resolve older releases of `pylast`, `requests`, `python-dotenv` and `curl_cffi` there because their current releases require Python 3.10 or newer. Prefer a newer Python where you can choose.
+* Libraries: [pyLast](https://github.com/pylast/pylast), `requests`, `python-dateutil`, [PyOTP](https://github.com/pyauth/pyotp), [Spotipy](https://github.com/spotipy-dev/spotipy), `python-dotenv`, `beautifulsoup4`, `curl_cffi>=0.11.4`
+
+Follower, following and profile tracking uses `curl_cffi` to fetch Last.fm pages with Chrome impersonation. It is installed with the package and `requirements.txt`. No browser installation or login is needed.
 
 [wcwidth](https://pypi.org/project/wcwidth/) is optional and is needed only to measure display width for `TRUNCATE_CHARS` and `--truncate`. Without it wide characters count as one column, so a line holding them can run past the limit.
 
@@ -168,7 +170,7 @@ Download the *[lastfm_monitor.py](https://raw.githubusercontent.com/misiektoja/l
 Install dependencies via pip:
 
 ```sh
-pip install pylast requests python-dateutil pyotp spotipy python-dotenv beautifulsoup4
+pip install pylast requests python-dateutil pyotp spotipy python-dotenv beautifulsoup4 "curl_cffi>=0.11.4"
 ```
 
 Alternatively, from the downloaded *[requirements.txt](https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/requirements.txt)*:

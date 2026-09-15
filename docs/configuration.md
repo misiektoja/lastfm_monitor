@@ -405,7 +405,7 @@ If you want to change the time required to mark the user as inactive (the timer 
 lastfm_monitor <lastfm_username> -o 120
 ```
 
-Friend and profile tracking uses one separate check interval which you can set via the `FRIENDS_CHECK_INTERVAL` configuration option or `--friends-check-interval` flag. This timer covers followings, followers, the About Me bio and the display name. It is independent from the music polling intervals.
+Friend and profile tracking checks every **90 minutes** by default (`FRIENDS_CHECK_INTERVAL = 5400`). Set `FRIENDS_CHECK_INTERVAL` or `--friends-check-interval` in seconds to change it. Existing saved values still apply. This timer covers followings, followers, the About Me bio and the display name. It is independent from the music polling intervals.
 
 To avoid false notifications caused by transient Last.fm responses, friend and profile changes are only confirmed after a number of consecutive checks (default: 3). You can configure this via the `FRIENDS_CHANGE_COUNTER` option or `--friends-change-counter` flag. This setting also controls the threshold for suppressing repeated error messages.
 

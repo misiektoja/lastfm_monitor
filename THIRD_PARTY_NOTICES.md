@@ -15,6 +15,7 @@ The distributed package contains no vendored third-party source. It declares the
 | [spotipy](https://pypi.org/project/spotipy/) | MIT | Spotify Web API access for playback control |
 | [python-dotenv](https://pypi.org/project/python-dotenv/) | BSD-3-Clause | Reading secrets from `.env` |
 | [beautifulsoup4](https://pypi.org/project/beautifulsoup4/) | MIT | Parsing Last.fm pages for data the API does not expose |
+| [curl_cffi](https://pypi.org/project/curl-cffi/) | MIT | Browser impersonation for Last.fm follower, following and profile pages |
 
 ## Build, test and lint dependencies
 
