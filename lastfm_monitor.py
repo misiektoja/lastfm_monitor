@@ -2006,11 +2006,15 @@ def install_command_prefix() -> List[str]:
     return ["lastfm_monitor"]
 
 
+# The documentation placeholders a printed command carries unquoted, because the reader replaces them before running it
+COMMAND_PLACEHOLDERS = frozenset(("<lastfm_username>", "<new-file>"))
+
+
 # Returns one command-line argument quoted for the shell the user is most likely pasting into
 def quote_command_argument(argument: Any) -> str:
     text = str(argument)
-    # A <placeholder> is documentation for the reader to replace, so quoting it would only be noise
-    if text.startswith("<") and text.endswith(">"):
+    # Matched exactly rather than by shape, since any other angle-bracket value is user-derived and would otherwise reach the shell unquoted
+    if text in COMMAND_PLACEHOLDERS:
         return text
     if platform.system() == "Windows":
         return f'"{text}"' if (not text or any(char.isspace() for char in text)) else text

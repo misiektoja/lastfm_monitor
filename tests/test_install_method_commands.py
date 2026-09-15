@@ -74,6 +74,11 @@ class TestArgumentQuoting:
     def test_an_ordinary_value_is_left_alone(self):
         assert monitor.quote_command_argument("--send-test-webhook") == "--send-test-webhook"
 
+    # A value only shaped like a placeholder is user input, so pasting the rendered command must not run a substitution
+    def test_a_value_shaped_like_a_placeholder_is_quoted(self):
+        crafted = "<$(echo>marker)>"
+        assert shlex.split(monitor.quote_command_argument(crafted)) == [crafted]
+
 
 class TestRenderedCommands:
     @pytest.fixture(autouse=True)
