@@ -42,16 +42,31 @@ For the manual single-file method, dependencies and upgrade commands, see [Insta
 
 ## Features
 
-- **Real-time tracking** of songs listened by Last.fm users, including when a user gets online or offline
-- **Automatic playback** of the tracked user's songs in your local Spotify client, with pause and resume following their actions
-- **Playback detail** covering pauses and resumes, an optional track progress indicator, listened duration and whether a song was skipped or ran past its length
-- **Change tracking** for the user's followers, followings, About Me bio and display name
-- **Email and webhook notifications** through Discord, ntfy and compatible services, configurable per event
-- **CSV export** of every listened song with timestamps, plus the **Last.fm Wrapped tool** for top artists, tracks and albums
-- **Clickable music and lyrics URLs** for Last.fm, Apple Music, YouTube Music, Amazon Music, Deezer, Tidal, Genius, AZLyrics, Tekstowo.pl, Musixmatch and Lyrics.com, configurable per service
-- **Session statistics** and detection of **offline mode** and **Spotify private mode**
-- **Guided setup wizard** that writes a ready-to-run configuration, and a **doctor preflight** that checks it before the first run
-- **Status persistence** across restarts, **flexible configuration** through config files, dotenv files, environment variables and command-line arguments, and **signal controls** for the running copy
+### Listening and Profile Tracking
+
+* **Listening activity**: Track songs, active and inactive periods, pauses and resumes.
+* **Playback detail**: Show listening duration, skipped tracks and an optional progress indicator.
+* **Profile changes**: Track followers, followed accounts, About Me bio and display name.
+* **Activity gaps**: Detect offline listening and estimate Spotify private mode, which is not always accurate.
+
+### Playback and Insights
+
+* **Spotify playback**: Follow the tracked user's songs, pauses and resumes in your local Spotify client.
+* **Session statistics**: Summarize listening time, tracks, skips, repeats and pauses.
+* **Last.fm Wrapped**: Generate top artist, track and album statistics from CSV history.
+* **Music and lyrics links**: Open configurable searches from console output and email.
+
+### Notifications and History
+
+* **Event alerts**: Configure email, Discord and ntfy notifications for listening and profile changes.
+* **CSV history**: Save listened tracks with timestamps.
+* **Saved state**: Retain activity, friend lists and tracked profile fields across restarts.
+
+### Setup and Configuration
+
+* **Guided setup**: Configure the monitor with `--setup` and check readiness with `--doctor`.
+* **Flexible settings**: Use config files, dotenv files, environment variables and command-line options.
+* **Runtime controls**: Adjust the running monitor through supported signals.
 
 <a id="common-commands"></a>
 ## Common Commands

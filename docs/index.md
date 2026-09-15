@@ -26,23 +26,31 @@ For the manual single-file method, dependencies and upgrade commands, see [Insta
 
 ## Features
 
-- **Real-time tracking** of songs listened by Last.fm users (including detection of when a user gets online or offline)
-- Possibility to **automatically play songs** listened by the tracked user in your local Spotify client
-- Information about when a **user pauses or resumes playback** with the option to show a **track progress indicator**
-- Information about the **duration** the user listened to a song and whether the **song was skipped** and if it was **shorter or longer than the track duration**
-- **Tracking** of a Last.fm user's **followers**, **followings**, **About Me bio** and **display name** with change notifications
-- **Email notifications** for various events (user becomes active or inactive, specific or all songs, songs on loop, new entries appearing while user was offline, friend changes, profile changes, errors)
-- **Webhook notifications** through **Discord**, **ntfy** and compatible integrations with event-specific controls
-- **Saving all listened songs** with timestamps to the **CSV file**
-- **Last.fm Wrapped tool** for generating Spotify Wrapped-style statistics (top artists, tracks, albums) from CSV data
-- **Clickable** **Last.fm**, **Apple Music**, **YouTube Music**, **Amazon Music**, **Deezer**, **Tidal**, **Genius Lyrics**, **AZLyrics**, **Tekstowo.pl**, **Musixmatch** and **Lyrics.com** search URLs printed in the console and included in email notifications (configurable per service)
-- Displaying **basic statistics for the user's playing session** (duration, time span, number of listened and skipped songs, songs on loop, paused playback time and number of pauses, songs played count)
-- Support for detecting **offline mode**
-- Support for detecting **Spotify's private mode** (not 100% accurate)
-- **Status persistence** - automatically saves the last activity status, friend lists and tracked profile fields to JSON files to track changes across restarts
-- **Flexible configuration** - support for config files, dotenv files, environment variables and command-line arguments
-- Possibility to **control the running copy** of the script via signals
-- **Functional, procedural Python** (minimal OOP)
+### Listening and Profile Tracking
+
+* **Listening activity**: Track songs, active and inactive periods, pauses and resumes.
+* **Playback detail**: Show listening duration, skipped tracks and an optional progress indicator.
+* **Profile changes**: Track followers, followed accounts, About Me bio and display name.
+* **Activity gaps**: Detect offline listening and estimate Spotify private mode, which is not always accurate.
+
+### Playback and Insights
+
+* **Spotify playback**: Follow the tracked user's songs, pauses and resumes in your local Spotify client.
+* **Session statistics**: Summarize listening time, tracks, skips, repeats and pauses.
+* **Last.fm Wrapped**: Generate top artist, track and album statistics from CSV history.
+* **Music and lyrics links**: Open configurable searches from console output and email.
+
+### Notifications and History
+
+* **Event alerts**: Configure email, Discord and ntfy notifications for listening and profile changes.
+* **CSV history**: Save listened tracks with timestamps.
+* **Saved state**: Retain activity, friend lists and tracked profile fields across restarts.
+
+### Setup and Configuration
+
+* **Guided setup**: Configure the monitor with `--setup` and check readiness with `--doctor`.
+* **Flexible settings**: Use config files, dotenv files, environment variables and command-line options.
+* **Runtime controls**: Adjust the running monitor through supported signals.
 
 ## Screenshots
 
