@@ -117,7 +117,7 @@ Each line reads `Operation: key=value, key=value`, and an operation that finishe
 [DEBUG 12:00:00] Completed check: check=#7, user=someuser, state=online, track=Artist - Track
 ```
 
-Traced operations include every outbound call with its address, timeout and result, where each secret resolved from, the configuration file and how many settings it applied, every completed check and the wait before the next one, every retry with its delay, each file the tool reads or writes, both notification channels with the destination host, the attempt and the delivery outcome, and the full [Spotify metadata](configuration.md#spotify-metadata-backends) path: server time, anonymous web-player token requests and refreshes, persisted-query hash discovery, OAuth app token retrieval and every search and match decision that resolves a track ID and duration.
+Traced operations include network requests, where each secret resolved from, the configuration file and how many settings it applied, every completed check and the wait before the next one, every retry with its delay, each file the tool reads or writes, both notification channels with the destination host, the attempt and the delivery outcome, and the full [Spotify metadata](configuration.md#spotify-metadata-backends) path: server time, anonymous web-player token requests and refreshes, persisted-query hash discovery, OAuth app token retrieval and search and match decisions that resolve a track ID and duration. Calls made internally by dependencies may not have individual result lines.
 
 Failures the tool recovers from on its own are traced too, so a feature that quietly does nothing can still be diagnosed.
 
@@ -140,3 +140,9 @@ If `pip` reports an externally managed environment, follow the pipx steps in [In
 If the tool cannot import a dependency, install the dependencies with the same Python interpreter that runs the script. On macOS or Linux use `python3 -m pip install -r requirements.txt`. On Windows use `python -m pip install -r requirements.txt`. Match the requirements file to your downloaded script.
 
 If a new terminal cannot find your saved settings, return to the directory used during setup or pass both `--config-file` and `--env-file` explicitly. Run `lastfm_monitor --doctor <lastfm_username>` to see which settings are loaded.
+
+## Invalid saved settings and state
+
+Timing values must be finite and within the documented range. Normal startup checks effective timing settings before monitoring. A configuration syntax error reports its file, line number and parser message without echoing source text that may contain credentials.
+
+If a saved last-activity file has an invalid structure, monitoring stops before replacing it. Correct the named file or move it aside to start a fresh baseline. Keep a copy if you need the old history. Older valid records and extra trailing metadata remain accepted.

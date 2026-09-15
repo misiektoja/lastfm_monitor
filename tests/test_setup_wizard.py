@@ -248,6 +248,8 @@ class TestTheSecretsTheWizardPutsInEffect:
         state = monitor.WizardSetupState(str(tmp_path / "lastfm_monitor.conf"), str(env_path), dict(monitor._config_template_defaults()))
         state.secret_updates = {"LASTFM_API_KEY": "written-key", "SMTP_PASSWORD": "written-password"}
 
+        state.config_path = tmp_path / "saved-settings.conf"
+        state.config_path.write_text("\n".join(f"{name} = {value!r}" for name, value in state.config_values.items()) + "\n", encoding="utf-8")
         monitor._wizard_apply_saved_values(state, env_path=env_path)
 
         assert monitor.secrets_by_source() == [("dotenv file", ["LASTFM_API_KEY", "SMTP_PASSWORD"])]
@@ -260,6 +262,8 @@ class TestTheSecretsTheWizardPutsInEffect:
         env_path.write_text("LASTFM_API_KEY=written-key\n", encoding="utf-8")
         state = monitor.WizardSetupState(str(tmp_path / "lastfm_monitor.conf"), str(env_path), dict(monitor._config_template_defaults()))
 
+        state.config_path = tmp_path / "saved-settings.conf"
+        state.config_path.write_text("\n".join(f"{name} = {value!r}" for name, value in state.config_values.items()) + "\n", encoding="utf-8")
         monitor._wizard_apply_saved_values(state, env_path=env_path)
 
         assert monitor.secrets_by_source() == [("dotenv file", ["LASTFM_API_KEY"]), ("environment", ["LASTFM_API_SECRET"])]
@@ -270,6 +274,8 @@ class TestTheSecretsTheWizardPutsInEffect:
         state = monitor.WizardSetupState(str(tmp_path / "lastfm_monitor.conf"), str(tmp_path / ".env"), dict(monitor._config_template_defaults()))
         state.secret_updates = {"WEBHOOK_URL": "https://example.test/hooks/written"}
 
+        state.config_path = tmp_path / "saved-settings.conf"
+        state.config_path.write_text("\n".join(f"{name} = {value!r}" for name, value in state.config_values.items()) + "\n", encoding="utf-8")
         monitor._wizard_apply_saved_values(state, env_path=None)
 
         assert monitor.secrets_by_source() == []

@@ -471,7 +471,7 @@ COLORED_OUTPUT = True
 # Can also be enabled via the --verbose flag, which turns it on regardless of this setting
 VERBOSE_MODE = False
 
-# Whether to print timestamped diagnostic detail, including every outbound call,
+# Whether to print timestamped diagnostic detail, including outbound calls,
 # each notification delivery attempt and the technical cause of failures
 # Independent of VERBOSE_MODE, so enable both to see everything
 # Can also be enabled via the --debug flag, which turns it on regardless of this setting
@@ -3687,6 +3687,66 @@ def lastfm_get_profile(username):
         raise RuntimeError(f"Failed to parse profile page: {e}")
 
 
+# Rejects timestamps that cannot safely reach date conversion
+def valid_state_timestamp(value):
+    if not finite_number(value) or value < 0:
+        return False
+    try:
+        datetime.fromtimestamp(value)
+    except (ValueError, OverflowError, OSError):
+        return False
+    return True
+
+
+# Reads saved history without adopting malformed values
+def read_status_record(path):
+    with open(path, "r", encoding="utf-8") as source:
+        record = json.load(source)
+    if not isinstance(record, list) or len(record) < 3:
+        raise ValueError("expected an activity list containing a timestamp, artist and track")
+    if any(not isinstance(value, str) for value in record[1:4]):
+        raise ValueError("the saved artist, track and optional album must be strings")
+    if not valid_state_timestamp(record[0]):
+        raise ValueError("the saved timestamp must be finite, nonnegative and representable")
+    return record
+
+
+# Accepts finite numeric values without overflowing on unusually large integers
+def finite_number(value):
+    import math
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+# Preserves inline credentials privately before setup replaces their only saved source
+def preserve_inline_config_secrets(config_path, env_path):
+    from dotenv import dotenv_values
+    source = Path(config_path).expanduser()
+    if not source.is_file():
+        return None
+    original = {}
+    if not load_config_file(source, namespace=original, report_errors=False):
+        raise ValueError("Existing configuration could not be read before preserving its inline secrets")
+    defaults = _config_template_defaults()
+    destination = Path(env_path).expanduser()
+    saved = dotenv_values(str(destination), interpolate=False) if destination.exists() else {}
+    updates = {}
+    for key in SECRET_KEYS:
+        value = original.get(key)
+        if isinstance(value, str) and value and value != defaults.get(key) and saved.get(key) is None:
+            updates[key] = value
+    if not updates:
+        return None
+    try:
+        return update_dotenv_file(destination, updates)
+    except Exception as exc:
+        raise OSError(f"Could not preserve inline secrets in '{destination}'. The original configuration was not replaced") from exc
+
+
 # Removes inline secret assignments from a setup backup while preserving other configuration text
 def redact_config_backup(content):
     import ast
@@ -5591,8 +5651,6 @@ def load_config_file(config_path, namespace=None, report_errors=True):
         detail = f"Config file '{config_path}' has invalid Python syntax"
         if exc.lineno is not None:
             detail += f" at line {exc.lineno}"
-        if exc.text:
-            detail += f" | Source: {exc.text.rstrip()}"
         detail += f" | Parser: {exc.msg}"
     # Checked before ValueError because UnicodeDecodeError derives from it
     except UnicodeDecodeError:
@@ -5756,12 +5814,12 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
     if os.path.isfile(lastfm_last_activity_file):
         try:
-            with open(lastfm_last_activity_file, 'r', encoding="utf-8") as f:
-                last_activity_read = json.load(f)
+            last_activity_read = read_status_record(lastfm_last_activity_file)
             debug_print("Last activity read", path=lastfm_last_activity_file, entries=len(last_activity_read), outcome="OK")
         except Exception as e:
             debug_print("Last activity read", path=lastfm_last_activity_file, outcome="failed", error=f"{type(e).__name__}: {e}")
-            print_recovery_error(e, context="file", detail=f"Cannot load the last status from '{lastfm_last_activity_file}'")
+            print_recovery_error(e, context="file", detail=f"Cannot load the last status from '{lastfm_last_activity_file}': {e}. Correct the file or move it aside to start a new history")
+            raise SystemExit(1) from None
         if last_activity_read:
             last_activity_ts = last_activity_read[0]
             last_activity_artist = last_activity_read[1]
@@ -7320,10 +7378,10 @@ def runtime_configuration_errors():
     positive_numbers = (("LASTFM_CHECK_INTERVAL", LASTFM_CHECK_INTERVAL), ("LASTFM_ACTIVE_CHECK_INTERVAL", LASTFM_ACTIVE_CHECK_INTERVAL), ("LASTFM_INACTIVITY_CHECK", LASTFM_INACTIVITY_CHECK), ("CHECK_INTERNET_TIMEOUT", CHECK_INTERNET_TIMEOUT))
     nonnegative_numbers = (("LIVENESS_CHECK_INTERVAL", LIVENESS_CHECK_INTERVAL), ("LASTFM_BREAK_CHECK_MULTIPLIER", LASTFM_BREAK_CHECK_MULTIPLIER), ("FRIENDS_CHECK_INTERVAL", FRIENDS_CHECK_INTERVAL), ("FRIENDS_RETRY_INTERVAL", FRIENDS_RETRY_INTERVAL))
     for name, value in positive_numbers:
-        if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+        if not finite_number(value) or value <= 0:
             errors.append(f"{name} must be a number greater than zero, not {value!r}")
     for name, value in nonnegative_numbers:
-        if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+        if not finite_number(value) or value < 0:
             errors.append(f"{name} must be a number zero or greater, not {value!r}")
     if not isinstance(SMTP_PORT, int) or isinstance(SMTP_PORT, bool) or not 1 <= SMTP_PORT <= 65535:
         errors.append(f"SMTP_PORT must be an integer from 1 through 65535, not {SMTP_PORT!r}")
@@ -8857,14 +8915,17 @@ def _wizard_apply_saved_values(state, env_path=None):
     except (OSError, UnicodeError, ValueError) as exc:
         print_recovery_error(exc, context="file", detail=f"Could not read saved secrets from '{selected_path}'")
         raise SystemExit(1) from None
-    globals().update(state.config_values)
+    saved_config = _config_template_defaults()
+    if not load_config_file(state.config_path, namespace=saved_config):
+        raise SystemExit(1)
+    globals().update(saved_config)
     for key in SECRET_KEYS:
         if key in exported:
             value, source = exported[key], "environment"
         elif saved.get(key) is not None:
             value, source = saved[key], "dotenv file"
         else:
-            value, source = state.config_values.get(key), "config file"
+            value, source = saved_config.get(key), "config file"
         globals()[key] = value
         if source == "dotenv file":
             os.environ[key] = str(value)
@@ -8964,11 +9025,12 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
 
     # Everything above only filled the state, so this is the first and only point anything reaches disk
     try:
+        preserved_dotenv = preserve_inline_config_secrets(state.config_path, state.env_path)
         backup_path, _written = write_generated_config(state.config_path, generate_config_with_current_values(state.config_values), force=True, redact_secrets=True)
     except Exception as exc:
         print_recovery_error(exc, context="file", detail=f"Could not write the configuration to '{state.config_path}'")
         return 1
-    dotenv_path = None
+    dotenv_path = preserved_dotenv
     # A cleared secret only has to leave a file that exists, so setup never creates one holding nothing
     if any(state.secret_updates.values()) or (state.secret_updates and Path(state.env_path).expanduser().is_file()):
         try:
@@ -9742,6 +9804,11 @@ def main():
         # Printed here rather than inside the run, so the wizard's own next steps are not followed by a second copy
         print_doctor_next_steps(args.username, doctor_exit)
         sys.exit(doctor_exit)
+
+    configuration_errors = runtime_configuration_errors() + runtime_boolean_errors()
+    if configuration_errors:
+        print_recovery_advice(make_recovery_advice("config.invalid", "Invalid settings: " + ". ".join(configuration_errors), recovery_fix_with_guide("Correct the reported settings in the configuration file or command line", CONFIG_FILE_GUIDE_URL), False))
+        sys.exit(1)
 
     # A target is optional only for the utility actions below. Checked after the dotenv file is resolved so the
     # command this prints carries the files this run was given, and before the credentials because the username

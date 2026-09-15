@@ -188,6 +188,11 @@ class TestTheCadenceIsMeasuredInSeconds:
     # An interval a config file switched off has to leave the reminder off too
     @pytest.mark.parametrize("interval, expected", [(300, 300), (0, 0), (-1, 0)])
     def test_the_configured_interval_is_what_the_loop_reminds_on(self, restored_globals, tmp_path, capsys, interval, expected):
+        if interval < 0:
+            settled = run_main_to_the_loop(tmp_path, f"LIVENESS_CHECK_INTERVAL = {interval}\n")
+            assert settled == {}
+            assert "LIVENESS_CHECK_INTERVAL" in capsys.readouterr().out
+            return
         settled = run_main_to_the_loop(tmp_path, f"LIVENESS_CHECK_INTERVAL = {interval}\n")
         capsys.readouterr()
         assert settled["LIVENESS_REMINDER_SECONDS"] == expected
