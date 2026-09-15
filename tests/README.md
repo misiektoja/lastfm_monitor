@@ -63,6 +63,7 @@ python -m pytest -m e2e
 | `test_repository_contracts.py` | Governance documents, issue templates, action pinning, release gating and the CI contract |
 | `test_repository_metadata.py` | Governance files, citation, funding, line endings, the declared editor style, the pinned linter, the declared Python floor and release integrity |
 | `test_setup_wizard.py` | The guided setup: answers held until Save, the mail server sign-in, the escape from every rejected answer, the frame around its questions, the review summary, per-section editing and the files it writes |
+| `test_partial_setup_save.py` | Real wizard inputs and filesystem failures after configuration replacement |
 | `test_startup_summary.py` | The startup summary rows: the shared order, the label column, which view each row belongs to and the values it reports |
 | `test_secret_sources.py` | The placeholder predicate, where each secret resolved from and how the sources are reported |
 | `test_notification_delivery.py` | What the two-channel sender reports and which channel a later attempt sends again |
