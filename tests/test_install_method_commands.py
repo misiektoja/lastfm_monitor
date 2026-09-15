@@ -58,9 +58,9 @@ class TestInstallDetection:
     def test_each_install_method_gets_its_own_command_prefix(self, monkeypatch):
         monkeypatch.setenv(monitor.INSTALL_METHOD_ENV_VAR, "manual")
         monkeypatch.setattr(monitor.sys, "argv", ["/opt/tools/lastfm_monitor.py"])
-        assert monitor.install_command_prefix() == [monitor.sys.executable, str(Path(monitor.__file__).resolve())]
+        assert monitor.install_command_prefix() == ["python3", "lastfm_monitor.py"]
         monkeypatch.setenv(monitor.INSTALL_METHOD_ENV_VAR, "pip")
-        assert monitor.install_command_prefix() == [monitor.sys.executable, "-m", "lastfm_monitor"]
+        assert monitor.install_command_prefix() == ["lastfm_monitor"]
 
 
 class TestArgumentQuoting:

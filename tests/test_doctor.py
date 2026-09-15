@@ -88,10 +88,11 @@ class TestTheEnvironmentSection:
         failed = [row for row in rows if row.status == "FAIL"]
         assert [row.label for row in failed] == ["Required dependency pylast is missing"]
 
-    # A bare pip may belong to another interpreter than the one running this tool
-    def test_the_install_command_names_this_interpreter(self, quiet_config):
+    # Dependency hints use a short interpreter command in the activated environment
+    def test_the_install_command_uses_a_short_interpreter_name(self, quiet_config):
         rows = monitor.doctor_check_environment(spec_finder=lambda name: None if name == "pylast" else object())
-        assert monitor.sys.executable in rows[1].advice.fix
+        assert 'python3 -m pip install "pylast"' in rows[1].advice.fix
+        assert monitor.sys.executable not in rows[1].advice.fix
         assert "Install it with: " in rows[1].advice.fix
 
     # A missing optional dependency costs one feature, which the loop still starts without

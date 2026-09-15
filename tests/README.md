@@ -36,6 +36,7 @@ python -m pytest -m e2e
 
 | File | Area under test |
 | --- | --- |
+| `test_compact_commands.py` | Literal short command prefixes, real help output and dependency hints |
 | `test_release_safety.py` | Credential preservation, private error rendering, runtime timing validation and saved-state compatibility |
 | `test_partial_outage.py` | Real pylast history success followed by a now-playing outage and recovery |
 | `test_recovery_safety.py` | Real dotenv reloads, setup backups, oversized counts and provider-error privacy |

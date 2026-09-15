@@ -2016,12 +2016,12 @@ def install_method_display_name(method=None) -> str:
     return {INSTALL_METHOD_PYPI: "PyPI install", INSTALL_METHOD_SCRIPT: "downloaded script"}.get(selected, selected)
 
 
-# Returns the argv prefix that invokes this tool for the detected install method
+# Returns a compact display prefix for the detected install method
 def install_command_prefix() -> List[str]:
-    executable = sys.executable
+    executable = "python" if platform.system() == "Windows" else "python3"
     if install_method() == INSTALL_METHOD_SCRIPT:
-        return [executable, str(Path(__file__).resolve())]
-    return [executable, "-m", "lastfm_monitor"]
+        return [executable, "lastfm_monitor.py"]
+    return ["lastfm_monitor"]
 
 
 # The documentation placeholders a printed command carries unquoted, because the reader replaces them before running it
@@ -2060,9 +2060,10 @@ def render_command(arguments=None, include_paths: bool = True, *, config_path=No
     return " ".join(quote_command_argument(part) for part in parts)
 
 
-# Returns the command that installs one package into the interpreter running this tool
+# Returns a compact dependency installation hint for the active platform
 def install_dependency_command(package_name: str) -> str:
-    return f'{quote_command_argument(sys.executable)} -m pip install "{package_name}"'
+    executable = "python" if platform.system() == "Windows" else "python3"
+    return f'{executable} -m pip install "{package_name}"'
 
 
 # True when a setting holds a real value rather than nothing or the placeholder the config template ships
