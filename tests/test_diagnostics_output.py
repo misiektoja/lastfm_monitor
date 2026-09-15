@@ -497,7 +497,7 @@ class TestEveryDeliveryIsTraced:
         monkeypatch.setattr(monitor, "WEBHOOK_PROVIDER", "discord")
         monkeypatch.setattr(monitor, "post_webhook_request", lambda **kwargs: FakeResponse(204))
         assert monitor.send_webhook("Now playing", "Description", "song", force=True) == 0
-        assert "* Webhook delivered through discord: Now playing" in capsys.readouterr().out
+        assert "* Webhook delivered through Discord: Now playing" in capsys.readouterr().out
 
     def test_every_webhook_attempt_names_its_status_and_the_retry_delay(self, debug_on, monkeypatch, capsys):
         monkeypatch.setattr(monitor, "WEBHOOK_ENABLED", True)

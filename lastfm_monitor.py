@@ -2643,7 +2643,7 @@ def send_webhook(title: str, description: str, notification_type: str = "song", 
                 response = post_webhook_request(json=discord_payload, headers=request_headers)
             attempt_label = f"#{attempt + 1}/{WEBHOOK_MAX_ATTEMPTS}"
             if 200 <= response.status_code <= 299:
-                verbose_print(f"Webhook delivered through {provider}: {webhook_values['title']}")
+                verbose_print(f"Webhook delivered through {webhook_provider_display_name(provider)}: {webhook_values['title']}")
                 debug_print("Webhook delivery", provider=provider, host=webhook_destination_host(), attempt=attempt_label, status=response.status_code, outcome="OK")
                 return 0
             retryable = response.status_code == 429 or 500 <= response.status_code <= 599
