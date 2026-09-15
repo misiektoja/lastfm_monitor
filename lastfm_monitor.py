@@ -7562,6 +7562,8 @@ BUILT_IN_SHAPE_SETTINGS = {name: globals()[name] for name in ('LF_LOGFILE', 'CSV
 # Shape errors whose settings were replaced with the built-in values, so doctor still names them
 DISCARDED_SETTING_ERRORS = []
 
+DOTENV_STARTUP_ERRORS = {}
+
 
 # True when the selected command exists to correct the configuration, so a malformed setting is reported
 # there instead of stopping the one run that could repair it
@@ -7639,7 +7641,11 @@ def doctor_check_configuration(config_path=None, env_path=None, target_value=Non
         checks.append(make_doctor_check("Configuration", "PASS", "Configuration file loaded", f"Path: {config_path}"))
     else:
         checks.append(make_doctor_check("Configuration", "PASS", "No configuration file selected", "Using built-in defaults and command-line overrides"))
-    if env_path and os.path.isfile(str(env_path)):
+    if env_path and str(env_path) in DOTENV_STARTUP_ERRORS:
+        detail = DOTENV_STARTUP_ERRORS[str(env_path)]
+        advice = make_recovery_advice("file.unreadable", detail, recovery_fix_with_guide("Save the dotenv file as UTF-8 and check its read permissions, then run Doctor again", CONFIG_FILE_GUIDE_URL), False)
+        checks.append(make_doctor_check("Configuration", "FAIL", "Dotenv file could not be loaded", detail, advice))
+    elif env_path and os.path.isfile(str(env_path)):
         checks.append(make_doctor_check("Configuration", "PASS", "Dotenv file loaded", f"Path: {env_path}"))
     elif env_path:
         advice = make_recovery_advice("config.missing", "The requested dotenv file was not found", recovery_fix_with_guide("Create the file or select an existing path with --env-file", SECRETS_GUIDE_URL), False, f"Path: {env_path}")
@@ -9022,9 +9028,11 @@ def _wizard_collect_destination_section(state, input_func=None, getpass_func=Non
     state.config_values["DOTENV_FILE"] = str(selected_env)
     if selected_env == current_env:
         return
+    for key, value in _wizard_private_values(state.env_path).items():
+        if key in SECRET_KEYS and isinstance(value, str) and key not in state.secret_updates and _wizard_saved_secret_value(key, selected_env) is None:
+            state.secret_updates[key] = value
     state.env_path = selected_env
-    # A secret kept rather than retyped was never queued, so it would be missing from a dotenv file that just moved
-    print("  The dotenv destination changed. Re-enter authentication and notification settings that may contain secrets.")
+    print("  The dotenv destination changed. Existing private settings will be kept in the new file when you save. Review authentication and notification settings.")
     _wizard_collect_auth_section(state, input_func=input_func, getpass_func=getpass_func)
     print()
     _wizard_collect_spotify_section(state, input_func=input_func, getpass_func=getpass_func)
@@ -9922,6 +9930,8 @@ def main():
     )
 
     args = parser.parse_args()
+    DOTENV_STARTUP_ERRORS.clear()
+    env_path = None
 
     # Applied before the config file so its own failures and the secret resolution traces are visible, then
     # applied again afterwards so a saved VERBOSE_MODE or DEBUG_MODE of False cannot erase the command line
@@ -10030,6 +10040,13 @@ def main():
             env_path = DOTENV_FILE if DOTENV_FILE else None
             if env_path:
                 print_recovery_advice(missing_dependency_advice("python-dotenv", f"The dotenv file '{env_path}' was not loaded", "Or export the secrets as environment variables"), label="Warning")
+        except (OSError, UnicodeError, ValueError):
+            detail = f"Dotenv file '{env_path}' could not be read as UTF-8"
+            DOTENV_STARTUP_ERRORS[str(env_path)] = detail
+            if not args.doctor:
+                print_recovery_advice(make_recovery_advice("file.unreadable", detail, recovery_fix_with_guide("Save the dotenv file as UTF-8 and check its read permissions", CONFIG_FILE_GUIDE_URL), False))
+                if not command_reports_configuration(args):
+                    sys.exit(1)
 
     # Environment variables are a documented alternative to a dotenv file, so they apply even when no file was loaded
     for secret in SECRET_KEYS:

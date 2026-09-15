@@ -1,5 +1,7 @@
 # Troubleshooting
 
+If a dotenv file cannot be read or is not UTF-8, monitoring stops with the file path and repair guidance. Save it as UTF-8 and check its read permissions. Doctor reports the failed load and continues the remaining checks.
+
 ## Doctor Preflight
 
 `--doctor` runs every check the tool needs before monitoring can start, then reports what is ready and what is not. It writes no files, and the email and webhook delivery tests only run after you approve each one separately.

@@ -81,6 +81,7 @@ python -m pytest -m e2e
 | `test_spotify_web_backend.py` | TOTP generation and config override, anonymous token handling and caching |
 | `test_tls_verification.py` | The TLS verification switch, the call sites that read it and the library sessions it reaches |
 | `test_webhook_notifications.py` | Webhook settings coverage, startup rollups, URL validation and independent event switches |
+| `test_moved_private_settings.py` | Kept credentials across dotenv destination changes and startup error handling |
 
 The configuration template every released version shipped is checked in under `data/config_templates/`, so
 `test_config_loading.py` can replay each of them through the current parser. See the README there before adding
