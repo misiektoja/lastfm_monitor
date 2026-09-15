@@ -933,7 +933,7 @@ import shlex
 import tempfile
 from itertools import tee, islice, chain
 from collections import namedtuple
-from html import escape
+from html import escape, unescape
 import contextlib
 import functools
 import shutil
@@ -2842,6 +2842,18 @@ def truncate_utf8_bytes(text: str, max_bytes: int, suffix: str = "") -> str:
     return encoded[:max_bytes - len(encoded_suffix)].decode("utf-8", errors="ignore") + suffix
 
 
+# Converts one HTML email body to the Discord markdown subset, so a Discord alert reads like the email
+def html_body_to_discord_markdown(body_html: str) -> str:
+    text = re.sub(r"(?is)</?(?:html|head|body)\s*>", "", str(body_html or ""))
+    text = re.sub(r"(?is)<a\s[^>]*?href=[\"']([^\"']*)[\"'][^>]*>(.*?)</a>", lambda m: f"[{m.group(2)}]({m.group(1)})", text)
+    text = re.sub(r"(?is)<b\s*>(.*?)</b\s*>", lambda m: f"**{m.group(1)}**" if m.group(1).strip() else m.group(1), text)
+    text = re.sub(r"(?is)<i\s*>(.*?)</i\s*>", lambda m: f"*{m.group(1)}*" if m.group(1).strip() else m.group(1), text)
+    text = re.sub(r"(?is)<br\s*/?>", "\n", text)
+    # Anything still tag-shaped is layout the markdown body has no use for, such as a stray paragraph or list wrapper
+    text = re.sub(r"(?s)<[^>]+>", "", text)
+    return unescape(text).strip()
+
+
 # Builds one bounded ntfy title and message pair
 def build_ntfy_webhook_message(title: str, description: str) -> Tuple[str, str]:
     safe_title = str(title).replace("\x00", "")[:WEBHOOK_EMBED_TITLE_LIMIT] or "Last.fm Monitor"
@@ -2943,7 +2955,7 @@ def _retain_webhook_secrets(deliver):
 
 @_retain_webhook_secrets
 # Sends one webhook through an isolated bounded retry path
-def send_webhook(title: str, description: str, notification_type: str = "song", force: bool = False, sleeper: Optional[Callable[[float], None]] = None, report_delivery: bool = True) -> int:
+def send_webhook(title: str, description: str, notification_type: str = "song", force: bool = False, sleeper: Optional[Callable[[float], None]] = None, report_delivery: bool = True, discord_description: str = "") -> int:
     if not force and not webhook_event_enabled(notification_type):
         return 1
     destination = str(WEBHOOK_URL or "").strip()
@@ -2962,10 +2974,12 @@ def send_webhook(title: str, description: str, notification_type: str = "song", 
     if header_error is not None:
         print_recovery_error(context="webhook", detail=header_error)
         return 1
+    # Discord renders markdown, so it gets the email's formatting while ntfy keeps the plain body it can display
+    effective_description = discord_description if provider == "discord" and discord_description else description
     try:
-        webhook_values = build_webhook_values(title, description, notification_type)
+        webhook_values = build_webhook_values(title, effective_description, notification_type)
         request_headers = build_webhook_headers(provider, webhook_values)
-        discord_payload = build_webhook_payload(title, description, notification_type, webhook_values) if provider == "discord" else None
+        discord_payload = build_webhook_payload(title, effective_description, notification_type, webhook_values) if provider == "discord" else None
     except ValueError as exc:
         print_recovery_error(exc, context="webhook")
         return 1
@@ -3021,7 +3035,7 @@ def send_notification_channels(notification_type: str, subject: str, body: str, 
         use_short_content = NTFY_SHORT is True and normalized_webhook_provider() == "ntfy"
         webhook_subject = (subject_short or subject) if use_short_content else subject
         webhook_body = (body_short or body) if use_short_content else body
-        webhook_delivered = send_webhook(webhook_subject, webhook_body, notification_type, force=True) == 0
+        webhook_delivered = send_webhook(webhook_subject, webhook_body, notification_type, force=True, discord_description=html_body_to_discord_markdown(body_html)) == 0
         debug_print("Notification dispatch", type=notification_type, channel="webhook", outcome="OK" if webhook_delivered else "failed")
     # Delivery rather than the attempt, so a channel that failed is tried again while one that arrived is not sent twice
     return email_delivered, webhook_delivered
