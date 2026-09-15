@@ -1460,7 +1460,8 @@ def truncate_string_per_line(message, truncate_width, tabsize=8):
     try:
         from wcwidth import wcwidth
     except ImportError:
-        return message
+        # Without wcwidth every character costs one column, so truncation still applies and only wide characters are measured short
+        wcwidth = len
     truncated_lines = []
     for line in message.split("\n"):
         expanded_line = line.expandtabs(tabsize)
@@ -2702,14 +2703,19 @@ def format_webhook_payload(template: Any, values: dict) -> Any:
 
 # Parses legacy and current Discord templates before validating their object shape
 def render_discord_template(template, values):
-    if isinstance(template, str):
-        try:
-            template = json.loads(template)
-        except json.JSONDecodeError:
-            template = json.loads(str(format_webhook_payload(template, values)))
-    if not isinstance(template, dict):
-        raise ValueError("WEBHOOK_TEMPLATE must be a dictionary or a JSON object string")
-    return format_webhook_payload(template, values)
+    # A placeholder the payload cannot fill, such as the positional {0}, fails inside str.format rather than as a
+    # value error, so every parsing and rendering failure is reported as the one error callers already handle
+    try:
+        if isinstance(template, str):
+            try:
+                template = json.loads(template)
+            except json.JSONDecodeError:
+                template = json.loads(str(format_webhook_payload(template, values)))
+        if isinstance(template, dict):
+            return format_webhook_payload(template, values)
+    except Exception as exc:
+        raise ValueError("WEBHOOK_TEMPLATE must be a dictionary or a JSON object string") from exc
+    raise ValueError("WEBHOOK_TEMPLATE must be a dictionary or a JSON object string")
 
 
 # Returns a configuration error for unsafe or unsupported webhook customization
@@ -2885,7 +2891,8 @@ def _retain_webhook_secrets(deliver):
         headers = settings.get("WEBHOOK_HEADERS")
         if isinstance(headers, dict):
             values.extend(value for name, value in headers.items() if isinstance(name, str) and name.casefold() == "authorization")
-        secrets = tuple(value for value in values if isinstance(value, str) and value and not value.startswith("your_"))
+        # The same minimum length every other redaction path applies, so a short secret cannot blank out ordinary words
+        secrets = tuple(value for value in values if isinstance(value, str) and len(value) >= MIN_REDACTABLE_SECRET_LENGTH and not value.startswith("your_"))
         token = _DELIVERY_SECRET_VALUES.set(_DELIVERY_SECRET_VALUES.get() + secrets)
         try:
             return deliver(*args, **kwargs)
@@ -7355,7 +7362,7 @@ def doctor_check_environment(version_info=None, spec_finder=None):
         ("dotenv", "python-dotenv", "Secrets can only come from environment variables or the configuration file", "Used only for reading secrets from a dotenv file"),
         ("spotipy", "spotipy", "The Spotify OAuth app metadata backend is unavailable, leaving the anonymous web player", "Used only for the Spotify OAuth app metadata backend"),
         ("bs4", "beautifulsoup4", "Follower, following and profile tracking cannot run", "Used only for follower, following and profile tracking"),
-        ("wcwidth", "wcwidth", "Screen truncation is disabled and lines are printed in full", "Used only to measure display width for screen truncation"),
+        ("wcwidth", "wcwidth", "Wide characters count as one column, so a line holding them can run past the limit", "Used only to measure display width for screen truncation"),
     ]
     # The classic Command Prompt is the only place this library changes anything, so a machine it cannot
     # affect is not warned about a package it does not need

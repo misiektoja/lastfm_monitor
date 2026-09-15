@@ -398,10 +398,10 @@ class TestTerminalTruncation:
         pytest.importorskip("wcwidth")
         assert monitor.truncate_string_per_line("abcdef\nabcdef", 3) == "abc\nabc"
 
-    # Without wcwidth there is no way to measure a column, so the text is left alone rather than mismeasured
-    def test_text_is_left_alone_when_the_optional_library_is_missing(self, monkeypatch):
+    # Without wcwidth every character costs one column, so the width cap still applies rather than switching off
+    def test_the_width_cap_still_applies_without_the_optional_library(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "wcwidth", None)
-        assert monitor.truncate_string_per_line("abcdef", 3) == "abcdef"
+        assert monitor.truncate_string_per_line("abcdef", 3) == "abc"
 
     def test_the_command_line_width_wins_over_the_configured_one(self):
         assert monitor.resolve_truncate_chars(80, 120, False) == 80

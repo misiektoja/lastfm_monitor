@@ -100,7 +100,7 @@ Verbose mode can also be turned on permanently with the `VERBOSE_MODE` configura
 
 The two modes are independent. `--verbose` does not turn on debug output and `--debug` does not turn on verbose output. A run with neither ends its startup summary with a line naming both.
 
-If long track titles or paths wrap and make the output hard to read, set `TRUNCATE_CHARS` or use the `--truncate N` flag to cut each screen line to a maximum width. Use `999` to auto-detect the terminal width. The log file always keeps the full line, so the setting is ignored when logging is disabled with `-d`. It is off by default and needs the optional `wcwidth` library to measure display width, otherwise lines are left untouched.
+If long track titles or paths wrap and make the output hard to read, set `TRUNCATE_CHARS` or use the `--truncate N` flag to cut each screen line to a maximum width. Use `999` to auto-detect the terminal width. The log file always keeps the full line, so the setting is ignored when logging is disabled with `-d`. It is off by default. Install the optional `wcwidth` library for correct widths with wide characters, which otherwise count as one column and can run a line past the limit.
 
 ## Debug Output
 
