@@ -301,7 +301,7 @@ RECENT_TRACKS_NUMBER = 10
 
 # How many recently listened songs to display in the inactive notification email
 # Set to 0 to disable the recently listened songs list
-INACTIVE_EMAIL_RECENT_SONGS_COUNT = 5
+INACTIVE_EMAIL_RECENT_SONGS_COUNT = 10
 
 # Method used to play the song listened by the tracked user in local Spotify client under macOS
 # (i.e. when TRACK_SONGS / -g functionality is enabled)
