@@ -148,7 +148,7 @@ Save the password itself through a hidden prompt instead of editing the dotenv f
 lastfm_monitor --set-smtp-password
 ```
 
-The command signs in to the configured mail server and writes the password only if the server accepts it. Nothing is sent. Configure `SMTP_HOST`, `SMTP_USER`, `SENDER_EMAIL` and `RECEIVER_EMAIL` first, since the sign-in needs them.
+The command signs in to the configured mail server and writes the password only if the server accepts it. Nothing is sent. Configure `SMTP_HOST`, `SMTP_USER`, `SENDER_EMAIL` and `RECEIVER_EMAIL` first, since the sign-in needs them. An exported `SMTP_PASSWORD` wins over the saved one at startup, so the command says so after saving rather than leaving you with a value the next run will not read.
 
 Verify your SMTP settings by using `--send-test-email` flag (the tool will try to send a test email notification):
 
