@@ -110,7 +110,7 @@ If long track titles or paths wrap and make the output hard to read, set `TRUNCA
 lastfm_monitor <lastfm_username> --debug
 ```
 
-Each line reads `Operation: key=value, key=value`, and an operation that finished reports `outcome=OK`, `failed`, `degraded` or `skipped`, so `grep outcome=failed` finds every failure in a long run.
+Each line reads `Operation: key=value, key=value`. Fields depend on the operation. Some results report `outcome=OK`, `failed`, `degraded` or `skipped`. Webhook responses also use HTTP status and retry fields, so an outcome-only search does not find every failure.
 
 ```text
 [DEBUG 12:00:00] HTTP GET: url=https://www.last.fm/user/someuser/following, timeout=30s, attempt=#1/3, status=200, outcome=OK
@@ -146,3 +146,7 @@ If a new terminal cannot find your saved settings, return to the directory used 
 Timing values must be finite and within the documented range. Normal startup checks effective timing settings before monitoring. A configuration syntax error reports its file, line number and parser message without echoing source text that may contain credentials.
 
 If a saved last-activity file has an invalid structure, monitoring stops before replacing it. Correct the named file or move it aside to start a fresh baseline. Keep a copy if you need the old history. Older valid records and extra trailing metadata remain accepted.
+
+Malformed path settings and color-theme values are reported by Doctor with the setting name. Invalid color values are ignored while rendering help so you can still find the configuration commands.
+
+Saved status timestamps more than five minutes in the future are invalid. Check the system clock then correct the named history file or move it aside to start fresh. Monitoring preserves the invalid file instead of replacing it.

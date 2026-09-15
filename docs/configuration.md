@@ -140,6 +140,8 @@ With `-r`, a successful duration from either Spotify backend is marked `S*`. Las
 
 ## SMTP Settings
 
+Private password entry preserves leading and trailing spaces. The exact value checked with the mail server is saved.
+
 If you want to use email notifications functionality, configure SMTP settings in the `lastfm_monitor.conf` file.
 
 Save the password itself through a hidden prompt instead of editing the dotenv file by hand:
@@ -159,6 +161,8 @@ lastfm_monitor --send-test-email
 The message arrives as `lastfm_monitor: test email` and its body names the command that sent it, so a mailbox holding alerts from more than one monitor says which is which. With the mail settings incomplete, the command reports what is missing instead of attempting a send.
 
 ## Webhook Settings
+
+A delivery keeps its original destination and credentials for every retry. Reloaded settings apply to the next delivery. Discord templates must produce a JSON object. Dictionary templates and JSON strings are supported, including strings with escaped format braces. Mentions remain disabled in every template.
 
 Webhook alerts work independently from email. Discord and ntfy are supported directly. Compatible services can use the Discord request format or the advanced payload and header settings.
 
