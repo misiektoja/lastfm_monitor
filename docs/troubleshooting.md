@@ -137,6 +137,6 @@ If `lastfm_monitor` is not found after installation, close the terminal and open
 
 If `pip` reports an externally managed environment, follow the pipx steps in [Installation](installation.md#install-lastfm-monitor-after-python-check). Use `pipx upgrade lastfm_monitor` for later upgrades.
 
-If the tool cannot import a dependency, install the dependencies with the same Python interpreter that runs the script. Use `python3 -m pip install -r requirements.txt` on macOS or Linux, or `python -m pip install -r requirements.txt` on Windows, with the requirements file matching your downloaded script.
+If the tool cannot import a dependency, install the dependencies with the same Python interpreter that runs the script. On macOS or Linux use `python3 -m pip install -r requirements.txt`. On Windows use `python -m pip install -r requirements.txt`. Match the requirements file to your downloaded script.
 
 If a new terminal cannot find your saved settings, return to the directory used during setup or pass both `--config-file` and `--env-file` explicitly. Run `lastfm_monitor --doctor <lastfm_username>` to see which settings are loaded.
