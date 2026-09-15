@@ -410,6 +410,7 @@ CLASSIFIER_EXEMPTIONS = {
     "Couldn't find the pyLast library": "raised at import, while a dependency the classifier itself needs is missing",
     "Cannot clear the screen contents": "a cosmetic notice with nothing for the operator to recover from",
     "is available again after": "a recovery notice that reports a failure ending rather than a failure",
+    "Monitoring failure changed for": "a one-line note on a classified outage that already had its full report",
 }
 
 # Words that mark a printed line as a report of something going wrong
@@ -561,10 +562,10 @@ def test_an_outage_that_changes_category_keeps_its_start(monkeypatch):
     second = monitor.classify_recovery_error(OSError(24, "Too many open files"))
     assert first.code != second.code
 
-    assert reporter.failed(first, 900) == "full"
+    assert reporter.failed(first) == "full"
     for index in range(60):
         clock[0] += 15
-        reporter.failed(second if index % 2 else first, 900)
+        reporter.failed(second if index % 2 else first)
 
     assert reporter.since == 1000000
     assert reporter.recovered() == 900

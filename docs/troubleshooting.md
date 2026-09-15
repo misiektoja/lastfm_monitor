@@ -62,27 +62,27 @@ A configuration file that cannot be parsed stops the run and names the file, the
 
 Failures that clear on their own, such as a Last.fm outage or a rate limit, say that the tool keeps retrying. Failures that need you, such as a rejected key or a hidden profile, do not.
 
-A failure is reported once, when it starts, with the delay before the next attempt on the same line:
+A failure is reported once, with the delay before the next attempt on the same line. A failure the tool can retry away, such as a Last.fm outage or a lost connection, is reported once the next check has failed too, so a blip of a single check between polls a few seconds apart prints nothing. A failure that needs you, such as a rejected key, is reported on the first check. With `--verbose` every first failing check is reported:
 
 ```
 * Error: The Last.fm API is temporarily unavailable (retrying in 30 seconds)
 To fix: This is usually a Last.fm outage. The tool will keep retrying
 ```
 
-While it lasts the tool stays quiet and the liveness reminder carries it instead, so a two day outage is a handful of lines rather than one block per check:
+While it lasts the tool stays quiet and reminds you once an hour, with how many checks have failed so far, so a two day outage is a handful of lines rather than one block per check. The reminder has its own cadence and does not depend on `LIVENESS_CHECK_INTERVAL`:
 
 ```
-* Monitoring degraded for <lastfm_username>. The Last.fm API is temporarily unavailable since Mon 08 Sep 2026, 09:15:05
-Liveness check, timestamp:	Mon 08 Sep 2026, 21:15:05
+* Monitoring degraded for <lastfm_username>. The Last.fm API is temporarily unavailable since Mon 08 Sep 2026, 09:15:05, 360 failed checks
+Liveness check, timestamp:	Mon 08 Sep 2026, 10:15:05
 ```
 
-When the failure clears, the run says so whatever flags it was started with:
+When the failure clears, the run says so whatever flags it was started with. A failure that was never reported recovers quietly:
 
 ```
 * Monitoring recovered for <lastfm_username> after 14 hours
 ```
 
-A different kind of failure is reported in full again, so a rate limit that follows an outage is not hidden by it. With `LIVENESS_CHECK_INTERVAL = 0` there is no reminder to carry the outage, so the older aggregated summaries such as `* Error 50x (15x times in the last 2 minutes): ...` keep their `ERROR_500_NUMBER_LIMIT` and `ERROR_NETWORK_ISSUES_NUMBER_LIMIT` cadence instead.
+An outage that starts failing differently is still one outage. A lost connection that reads as a timeout on one check and as an unreachable host on the next prints nothing new, and a change to another kind of failure that clears on its own, such as a rate limit after an outage, is one line, `* Monitoring failure changed for <lastfm_username>. <what fails now>`, rather than a second full report. A change to a failure that needs you is reported in full. The `ERROR_500_NUMBER_LIMIT`, `ERROR_500_TIME_LIMIT`, `ERROR_NETWORK_ISSUES_NUMBER_LIMIT` and `ERROR_NETWORK_ISSUES_TIME_LIMIT` settings of earlier versions are retired. A configuration file that still sets them is loaded with a note and they are ignored.
 
 ## Verbose Output
 

@@ -374,18 +374,6 @@ CHECK_INTERNET_TIMEOUT = 5
 # connection then cannot be told apart from the real service
 VERIFY_SSL = True
 
-# Threshold for displaying Last.fm 50x errors - it is to suppress sporadic issues with Last.fm API endpoint
-# Adjust the values according to the LASTFM_CHECK_INTERVAL and LASTFM_ACTIVE_CHECK_INTERVAL timers
-# If more than 15 Last.fm API related errors in 2 minutes, show an alert
-ERROR_500_NUMBER_LIMIT = 15
-ERROR_500_TIME_LIMIT = 120  # 2 min
-
-# Threshold for displaying network errors - it is to suppress sporadic issues with internet connectivity
-# Adjust the values according to the LASTFM_CHECK_INTERVAL and LASTFM_ACTIVE_CHECK_INTERVAL timers
-# If more than 15 network related errors in 2 minutes, show an alert
-ERROR_NETWORK_ISSUES_NUMBER_LIMIT = 15
-ERROR_NETWORK_ISSUES_TIME_LIMIT = 120  # 2 min
-
 # CSV file to write every scrobble
 # Can also be set using the -b flag
 CSV_FILE = ""
@@ -646,10 +634,6 @@ LIVENESS_CHECK_INTERVAL = 0
 CHECK_INTERNET_URL = ""
 CHECK_INTERNET_TIMEOUT = 0
 VERIFY_SSL = True
-ERROR_500_NUMBER_LIMIT = 0
-ERROR_500_TIME_LIMIT = 0
-ERROR_NETWORK_ISSUES_NUMBER_LIMIT = 0
-ERROR_NETWORK_ISSUES_TIME_LIMIT = 0
 CSV_FILE = ""
 MONITOR_LIST_FILE = ""
 DOTENV_FILE = ""
@@ -2184,41 +2168,59 @@ def render_recovery_error(error=None, context="runtime", debug=None, detail="", 
 
 
 # Tracks one failure category over time, so a lasting outage is reported once instead of on every check
+# How long a reported failure may go on before the run reminds about it, whatever the liveness banner is set to
+OUTAGE_REMINDER_SECONDS = 3600  # 1 hour
+
+
+# Returns the family a failure code belongs to, so the DNS and timeout failures of one internet outage count as one
+def outage_family(code):
+    return "network" if str(code or "").startswith("network.") else str(code or "")
+
+
 class OutageReporter:
-    # Starts with no failure recorded, so the first failure of any category is reported in full
-    def __init__(self):
+    # Starts with no failure recorded and reports a new retryable failure once confirm_checks checks in a row failed
+    def __init__(self, confirm_checks=1):
+        self.confirm_checks = max(1, confirm_checks)
         self.code = None
         self.since = 0
         self.reported_at = 0
+        self.failures = 0
+        self.reported = False
 
-    # Records one failed check and returns "full" for a new failure, "degraded" once the liveness interval has passed,
-    # "repeat" while the liveness banner is switched off or "" while the same failure is merely continuing
-    def failed(self, advice, liveness_interval):
+    # Records one failed check and returns "full" when the failure is to be reported in full, "changed" when a
+    # reported outage moved to another failure family, "reminder" once OUTAGE_REMINDER_SECONDS passed since the
+    # last report or "" while nothing new is to be said
+    def failed(self, advice):
         now = int(time.time())
-        if advice.code != self.code:
-            # A category change mid-outage is still the same outage, so its start and the alert delay it feeds are kept
-            if not self.code:
-                self.since = now
-            self.code = advice.code
+        if not self.code:
+            self.since = now
+        self.failures += 1
+        changed = self.code is not None and outage_family(advice.code) != outage_family(self.code)
+        self.code = advice.code
+        if not self.reported:
+            # A failure the tool cannot retry away is reported at once, one it can waits for the next check to confirm it
+            if advice.retryable and self.failures < self.confirm_checks:
+                return ""
+            self.reported = True
             self.reported_at = now
             return "full"
-        # With the liveness banner off there is nothing to carry the reminder, so the summary keeps its old cadence
-        if not liveness_interval:
-            return "repeat"
-        # Timed rather than counted, because a failing run usually retries on a different interval than a healthy one
-        if now - self.reported_at >= liveness_interval:
+        if changed:
             self.reported_at = now
-            return "degraded"
+            return "changed" if advice.retryable else "full"
+        # Timed rather than counted, because a failing run usually retries on a different interval than a healthy one
+        if now - self.reported_at >= OUTAGE_REMINDER_SECONDS:
+            self.reported_at = now
+            return "reminder"
         return ""
 
-    # Clears the failure after a successful check and returns how long it lasted, or None when none was active
+    # Clears the failure after a successful check and returns how long it lasted, or None when nothing was reported
     def recovered(self):
-        if not self.code:
-            return None
-        lasted = int(time.time()) - self.since
+        lasted = int(time.time()) - self.since if self.code and self.reported else None
         self.code = None
         self.since = 0
         self.reported_at = 0
+        self.failures = 0
+        self.reported = False
         return lasted
 
 
@@ -2228,10 +2230,16 @@ def print_liveness_banner(message):
     print_cur_ts("Liveness check, timestamp:\t")
 
 
-# Reports a lasting failure on the liveness cadence, so a broken run still says it is alive without repeating itself
-def print_outage_liveness(target, advice, since):
-    print(f"* Monitoring degraded for {target}. {advice.summary} since {get_date_from_ts(since)}")
+# Reminds about a lasting failure once an hour, so a broken run still says it is alive without repeating itself
+def print_outage_liveness(target, advice, since, failures=0):
+    count = f", {failures} failed {'check' if failures == 1 else 'checks'}" if failures else ""
+    print(f"* Monitoring degraded for {target}. {advice.summary} since {get_date_from_ts(since)}{count}")
     print_cur_ts("Liveness check, timestamp:\t")
+
+
+# Notes that a reported outage now fails differently, in one line rather than a second full report
+def print_outage_change(target, advice):
+    print(f"* Monitoring failure changed for {target}. {advice.summary}")
 
 
 # Reports that a failure cleared, since a throttled failure no longer stops printing when it is over
@@ -5061,7 +5069,7 @@ def apply_early_output_config():
 
 
 # Settings an older version wrote that this version no longer defines, ignored instead of rejected
-RETIRED_CONFIG_SETTINGS = frozenset(())
+RETIRED_CONFIG_SETTINGS = frozenset(("ERROR_500_NUMBER_LIMIT", "ERROR_500_TIME_LIMIT", "ERROR_NETWORK_ISSUES_NUMBER_LIMIT", "ERROR_NETWORK_ISSUES_TIME_LIMIT"))
 
 # Settings the template ships commented out, so the tool's own defaults apply until a user uncomments them.
 # They are still accepted from a configuration file, since the template is also the settings allowlist
@@ -5314,10 +5322,6 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
     sp_track_uri_id = None
     duration_mark = ""
     pauses_number = 0
-    error_500_counter = 0
-    error_500_start_ts = 0
-    error_network_issue_counter = 0
-    error_network_issue_start_ts = 0
     friends_check_last_ts = 0
     check_count = 0
 
@@ -5761,7 +5765,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
     friends_pending_changes = None
     friends_streak = 0
     friends_failure_announced = False
-    outage = OutageReporter()
+    # A blip of one check is confirmed by the next before it is printed, since the checks here are seconds apart
+    outage = OutageReporter(confirm_checks=1 if VERBOSE_MODE else 2)
     recovery_hint_tracker = RecoveryHintTracker()
     friends_next_check_ts = 0
 
@@ -6605,22 +6610,6 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             if last_track_start_ts > 0:
                 last_track_start_ts_old2 = last_track_start_ts
 
-            ERROR_500_ZERO_TIME_LIMIT = ERROR_500_TIME_LIMIT + LASTFM_CHECK_INTERVAL
-            if LASTFM_CHECK_INTERVAL * ERROR_500_NUMBER_LIMIT > ERROR_500_ZERO_TIME_LIMIT:
-                ERROR_500_ZERO_TIME_LIMIT = LASTFM_CHECK_INTERVAL * (ERROR_500_NUMBER_LIMIT + 1)
-
-            if error_500_start_ts and ((int(time.time()) - error_500_start_ts) >= ERROR_500_ZERO_TIME_LIMIT):
-                error_500_start_ts = 0
-                error_500_counter = 0
-
-            ERROR_NETWORK_ZERO_TIME_LIMIT = ERROR_NETWORK_ISSUES_TIME_LIMIT + LASTFM_CHECK_INTERVAL
-            if LASTFM_CHECK_INTERVAL * ERROR_NETWORK_ISSUES_NUMBER_LIMIT > ERROR_NETWORK_ZERO_TIME_LIMIT:
-                ERROR_NETWORK_ZERO_TIME_LIMIT = LASTFM_CHECK_INTERVAL * (ERROR_NETWORK_ISSUES_NUMBER_LIMIT + 1)
-
-            if error_network_issue_start_ts and ((int(time.time()) - error_network_issue_start_ts) >= ERROR_NETWORK_ZERO_TIME_LIMIT):
-                error_network_issue_start_ts = 0
-                error_network_issue_counter = 0
-
             # Not gated on the user being offline, since a user who listens for days is exactly when a silent run looks dead
             if LIVENESS_REMINDER_SECONDS and int(time.time()) - alive_since >= LIVENESS_REMINDER_SECONDS:
                 print_liveness_banner(f"Monitoring healthy for {username}. The user is {'active' if lf_user_online else 'inactive'} with no activity change since the last check")
@@ -6634,55 +6623,25 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             advice = classify_recovery_error(e, context="runtime")
             sleep_interval = LASTFM_ACTIVE_CHECK_INTERVAL if lf_user_online else LASTFM_CHECK_INTERVAL
             retry_note = f"retrying in {display_time(sleep_interval)}"
-            # A failure that changes category is a different failure, so each channel earns a new alert for it
-            if advice.code != error_delivery_code:
+            # A failure that changes family is a different failure, so each channel earns a new alert for it, while an
+            # internet outage that flaps between a timeout and an unreachable host stays one failure
+            if outage_family(advice.code) != outage_family(error_delivery_code):
                 error_email_sent = False
                 error_webhook_sent = False
                 error_delivery_code = advice.code
 
-            if advice.code == "lastfm.unavailable":
-                if not error_500_start_ts:
-                    error_500_start_ts = int(time.time())
-                    error_500_counter = 1
-                else:
-                    error_500_counter += 1
-
-            if advice.code in ("network.unavailable", "network.timeout", "lastfm.rate_limited") or str(e) == '':
-                if not error_network_issue_start_ts:
-                    error_network_issue_start_ts = int(time.time())
-                    error_network_issue_counter = 1
-                else:
-                    error_network_issue_counter += 1
-
-            # A failure that has not changed is left to the liveness cadence rather than repeated on every check
-            outage_outcome = outage.failed(advice, LIVENESS_REMINDER_SECONDS)
-            report_in_full = outage_outcome == "full"
+            # A failure is reported once it is confirmed, then left to the hourly reminder rather than repeated on every check
+            outage_outcome = outage.failed(advice)
             reported = False
-
-            # With the liveness banner off the aggregated 50x and network summaries keep their old cadence
-            if outage_outcome == "repeat":
-                if error_500_start_ts and (error_500_counter >= ERROR_500_NUMBER_LIMIT and (int(time.time()) - error_500_start_ts) >= ERROR_500_TIME_LIMIT):
-                    print_recovery_error(e, "runtime", retry_note=retry_note, label=f"Error 50x ({error_500_counter}x times in the last {display_time((int(time.time()) - error_500_start_ts))})", tracker=recovery_hint_tracker)
-                    reported = True
-                    error_500_start_ts = 0
-                    error_500_counter = 0
-
-                elif error_network_issue_start_ts and (error_network_issue_counter >= ERROR_NETWORK_ISSUES_NUMBER_LIMIT and (int(time.time()) - error_network_issue_start_ts) >= ERROR_NETWORK_ISSUES_TIME_LIMIT):
-                    print_recovery_error(e, "runtime", retry_note=retry_note, label=f"Error with network ({error_network_issue_counter}x times in the last {display_time((int(time.time()) - error_network_issue_start_ts))})", tracker=recovery_hint_tracker)
-                    reported = True
-                    error_network_issue_start_ts = 0
-                    error_network_issue_counter = 0
-
-                elif not error_500_start_ts and not error_network_issue_start_ts:
-                    report_in_full = True
-
-            if outage_outcome == "degraded":
-                print_outage_liveness(username, advice, outage.since)
-                alive_since = int(time.time())
-
-            elif report_in_full:
+            if outage_outcome == "full":
                 print_recovery_error(e, "runtime", retry_note=retry_note, tracker=recovery_hint_tracker)
                 reported = True
+            elif outage_outcome == "changed":
+                print_outage_change(username, advice)
+                reported = True
+            elif outage_outcome == "reminder":
+                print_outage_liveness(username, advice, outage.since, outage.failures)
+                alive_since = int(time.time())
 
             # Attempted on every failing check rather than only on the report, so a channel that failed is tried again
             # A failure the tool can retry away is alerted once the outage has lasted ERROR_ALERT_AFTER_SECONDS, one it cannot at once
