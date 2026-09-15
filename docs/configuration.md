@@ -404,3 +404,16 @@ Liveness check, timestamp:	Mon 08 Sep 2026, 09:15:05
 The reminder is timed in seconds, so it arrives at the same rate whether the user is listening or not. Set `LIVENESS_CHECK_INTERVAL` to change it (default: 86400, i.e. 24 hours), or to 0 to switch it off.
 
 Anything the tool prints about the user restarts the countdown, so a busy run stays quiet.
+
+
+### Reloading secrets and backup contents
+
+On systems with SIGHUP, reloading applies changes from the selected dotenv file. Removing a file-owned
+assignment restores its independently configured fallback or clears the value when no fallback exists.
+A read or parsing failure keeps the last usable credentials and reports how to correct the file.
+An explicit reload can override a startup export with a value present in the file.
+
+
+Setup's configuration backup blanks inline secret assignments from older configurations while retaining
+other settings and comments. General `--generate-config` backups remain exact copies and can contain
+inline credentials. The dotenv file is not backed up during secret replacement.

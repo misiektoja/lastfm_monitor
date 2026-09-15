@@ -163,7 +163,7 @@ class TestTheOrderTheLayersRunIn:
 
     # After load_dotenv both layers look identical in os.environ, so the snapshot has to be taken first
     def test_exported_keys_are_captured_before_the_dotenv_is_loaded(self):
-        assert SOURCE.index("exported_secrets = frozenset(") < SOURCE.index("load_dotenv(env_path, override=False")
+        assert SOURCE.index("exported_secrets = frozenset(") < SOURCE.index("load_managed_dotenv(env_path, override=False")
 
     # A trace taken before the arguments are applied reports every command-line secret as coming from somewhere else
     def test_the_grouped_trace_runs_after_the_arguments_are_applied(self):
