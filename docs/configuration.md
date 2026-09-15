@@ -176,7 +176,7 @@ lastfm_monitor --set-webhook-url
 
 The command validates that the destination is a complete HTTPS URL then updates only `WEBHOOK_URL` in `.env`. Existing values require confirmation. Use `--env-file PATH` to select another private settings file.
 
-Set `WEBHOOK_ENABLED = True` in `lastfm_monitor.conf` then choose `WEBHOOK_PROVIDER = "discord"` or `WEBHOOK_PROVIDER = "ntfy"`. Standard Discord and `ntfy.sh` URLs correct a mismatched configured provider automatically. This also applies to a `WEBHOOK_URL` replaced in the dotenv file and reloaded with `SIGHUP`: swapping a Discord webhook for an ntfy topic moves the provider with it, and the tool says so. A destination it does not recognize leaves the configured provider alone.
+Set `WEBHOOK_ENABLED = True` in `lastfm_monitor.conf` then choose `WEBHOOK_PROVIDER = "discord"` or `WEBHOOK_PROVIDER = "ntfy"`. Standard Discord and `ntfy.sh` URLs correct a mismatched configured provider automatically. While `WEBHOOK_PROVIDER` is left at its default, that detection is silent and `--verbose` reports it. A warning appears only when your configuration file sets a provider the URL disagrees with. This also applies to a `WEBHOOK_URL` replaced in the dotenv file and reloaded with `SIGHUP`: swapping a Discord webhook for an ntfy topic moves the provider with it, and the tool says so. A destination it does not recognize leaves the configured provider alone.
 
 Enable the events you want through the `WEBHOOK_*_NOTIFICATION` settings. Last.fm Monitor supports active, inactive, monitored track, every song, loop, offline entry, follower, following and error alerts. Matching command-line switches are listed under [Webhook Notifications](usage.md#webhook-notifications).
 

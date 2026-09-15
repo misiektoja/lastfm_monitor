@@ -195,6 +195,7 @@ class TestTheWebhookProviderWarning:
     def test_it_names_the_service_the_way_the_service_spells_it(self, capsys, monkeypatch):
         monkeypatch.setattr(monitor, "WEBHOOK_URL", "https://discord.com/api/webhooks/1/abc", raising=False)
         monkeypatch.setattr(monitor, "WEBHOOK_PROVIDER", "ntfy", raising=False)
+        monkeypatch.setattr(monitor, "CONFIGURED_SETTING_NAMES", {"WEBHOOK_PROVIDER"})
         args = monitor.argparse.Namespace(**{name: None for name in ("webhook_provider", "webhook_url", "webhook_enabled", "webhook_active", "webhook_inactive", "webhook_track", "webhook_song_changes", "webhook_loop", "webhook_offline_entries", "webhook_followers", "webhook_followings", "webhook_profile", "webhook_errors")})
         monitor.apply_webhook_cli_overrides(args, monitor.argparse.ArgumentParser())
         printed = capsys.readouterr().out

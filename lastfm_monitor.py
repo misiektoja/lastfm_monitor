@@ -856,6 +856,9 @@ CLI_CONFIG_PATH = None
 # Set once when --config-file selects the 'none' sentinel, so no caller falls back to the search path
 CONFIG_DISCOVERY_DISABLED = False
 
+# The settings a configuration file actually assigned, so a built-in default is never mistaken for a choice
+CONFIGURED_SETTING_NAMES = set()
+
 # to solve the issue: 'SyntaxError: f-string expression part cannot include a backslash'
 nl_ch = "\n"
 
@@ -1677,6 +1680,9 @@ class Logger(object):
 
     # Limits the terminal line across separate writes while leaving the log complete
     def _truncate_terminal(self, message):
+        # The limit is fixed once at startup, so with truncation off there is no column to keep track of
+        if not TRUNCATE_CHARS:
+            return message
         try:
             from wcwidth import wcwidth
         except ImportError:
@@ -2950,8 +2956,6 @@ def send_webhook(title: str, description: str, notification_type: str = "song", 
         try:
             if provider == "ntfy":
                 response = post_webhook_request(destination=destination, data=ntfy_message.encode("utf-8"), params=ntfy_params, headers=request_headers)
-            elif isinstance(discord_payload, str):
-                response = post_webhook_request(destination=destination, data=discord_payload, headers=request_headers)
             else:
                 response = post_webhook_request(destination=destination, json=discord_payload, headers=request_headers)
             attempt_label = f"#{attempt + 1}/{WEBHOOK_MAX_ATTEMPTS}"
@@ -3795,15 +3799,25 @@ def lastfm_get_profile(username):
         raise RuntimeError(f"Failed to parse profile page: {e}")
 
 
+# How far ahead of this machine's clock a saved timestamp may be before the tool stops timing against it
+STATE_FUTURE_TOLERANCE_SECONDS = 300
+
+
 # Rejects timestamps that cannot safely reach date conversion
 def valid_state_timestamp(value):
-    if not finite_number(value) or value < 0 or value > time.time() + 300:
+    if not finite_number(value) or value < 0:
         return False
     try:
         datetime.fromtimestamp(value)
     except (ValueError, OverflowError, OSError):
         return False
     return True
+
+
+# Reports whether a saved timestamp is far enough ahead of this machine's clock to be untrustworthy. The tool
+# wrote the file itself, so a clock moved backwards is the usual cause and is not a reason to refuse to run
+def state_timestamp_ahead(value):
+    return finite_number(value) and value > time.time() + STATE_FUTURE_TOLERANCE_SECONDS
 
 
 # Reads saved history without adopting malformed values
@@ -3815,8 +3829,18 @@ def read_status_record(path):
     if any(not isinstance(value, str) for value in record[1:4]):
         raise ValueError("the saved artist, track and optional album must be strings")
     if not valid_state_timestamp(record[0]):
-        raise ValueError("the saved timestamp must be finite, nonnegative, representable and no more than five minutes in the future")
+        raise ValueError("the saved timestamp must be finite, nonnegative and representable")
     return record
+
+
+# Replaces a saved timestamp this machine's clock cannot support, so only the timing restarts and the saved
+# entry itself is kept. A file this tool wrote must not be able to stop the next run over a corrected clock
+def reconcile_status_record(record, path):
+    if not record or not state_timestamp_ahead(record[0]):
+        return record
+    print(f"* Warning: The saved activity in '{path}' is dated ahead of this machine's clock.")
+    print(f"  Keeping the saved track '{record[2]}' and timing it from now. Check the system clock if this repeats.")
+    return [int(time.time()), *record[1:]]
 
 
 # Accepts finite numeric values without overflowing on unusually large integers
@@ -5757,6 +5781,9 @@ def load_config_file(config_path, namespace=None, report_errors=True):
         # Parsed as data rather than executed, so a config file picked up from the working directory cannot run code
         parsed_values = parse_config_content(content, str(config_path), retired_settings)
         selected_namespace.update(parsed_values)
+        # Only a load that reaches the module settings records a choice, not a copy read for the wizard or a report
+        if selected_namespace is globals():
+            CONFIGURED_SETTING_NAMES.update(parsed_values)
         debug_print("Configuration applied", path=str(config_path), settings=len(parsed_values), retired=len(retired_settings) or None, outcome="OK")
         if retired_settings and report_errors:
             print(f"* Note: {describe_retired_settings(retired_settings, chr(39) + str(config_path) + chr(39))}")
@@ -5932,7 +5959,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
     if os.path.isfile(lastfm_last_activity_file):
         try:
-            last_activity_read = read_status_record(lastfm_last_activity_file)
+            last_activity_read = reconcile_status_record(read_status_record(lastfm_last_activity_file), lastfm_last_activity_file)
             debug_print("Last activity read", path=lastfm_last_activity_file, entries=len(last_activity_read), outcome="OK")
         except Exception as e:
             debug_print("Last activity read", path=lastfm_last_activity_file, outcome="failed", error=f"{type(e).__name__}: {e}")
@@ -7307,7 +7334,12 @@ def apply_webhook_cli_overrides(args: argparse.Namespace, parser: argparse.Argum
         configured_provider = normalized_webhook_provider()
         if detected_provider and detected_provider != configured_provider:
             WEBHOOK_PROVIDER = detected_provider
-            print(f"* Warning: Configured webhook provider did not match the URL. Using {webhook_provider_display_name(detected_provider)}.")
+            # The built-in default is not a choice anyone made, so detection there is the documented behaviour
+            # rather than a mismatch. Only a provider the configuration actually sets is worth warning about
+            if "WEBHOOK_PROVIDER" in CONFIGURED_SETTING_NAMES:
+                print(f"* Warning: Configured webhook provider did not match the URL. Using {webhook_provider_display_name(detected_provider)}.")
+            else:
+                verbose_print(f"Webhook provider detected from the URL: {webhook_provider_display_name(detected_provider)}")
 
 
 # The four shared status markers. A fifth neutral marker is the single biggest source of drift between these
