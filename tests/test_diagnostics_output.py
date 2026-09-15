@@ -1030,14 +1030,13 @@ class TestAMonitoringFailureAlertsBothChannels:
         assert html_lines[fix_index] == escape(text_lines[fix_index])
         assert html_lines[fix_index + 1] == text_lines[fix_index + 1]
 
-    # A failure that changes category is a different failure, so it earns each channel a new alert
-    def test_a_changed_failure_category_earns_a_new_alert(self, monkeypatch, tmp_path, capsys):
+    # One outage earns one alert per channel, however the failure changes, until a check succeeds again
+    def test_a_changed_failure_category_does_not_earn_a_second_alert(self, monkeypatch, tmp_path, capsys):
         calls = recording_channels(monkeypatch, [(True, True)])
         drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=14, liveness=3600, fail_after=1, error_factory=two_category_failure, stub_notifications=False)
         errors = [call for call in calls if call["type"] == "error"]
-        assert len(errors) == 2
+        assert len(errors) == 1
         assert "temporarily unavailable" in errors[0]["body"]
-        assert "timed out" in errors[1]["body"]
 
     # Each channel is tracked on its own, so the one that failed is retried once its hold has passed while the one that landed is left alone
     def test_a_failed_channel_is_retried_and_a_delivered_one_is_not(self, monkeypatch, tmp_path, capsys):

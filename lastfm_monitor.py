@@ -5894,9 +5894,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
     email_sent = False
     webhook_sent = False
-    # The error alert is tracked apart from the event alerts, once per channel and per failure category
+    # The error alert is tracked apart from the event alerts, once per channel and per outage
     error_alert = ErrorAlertState()
-    error_delivery_code = None
 
     tracks_upper = {t.upper() for t in tracks}
 
@@ -6114,7 +6113,6 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 print_outage_recovery(username, outage_lasted)
                 alive_since = int(time.time())
             error_alert.reset()
-            error_delivery_code = None
             recovery_hint_tracker.reset()
             # Handle case where user still has no tracks
             if not recent_tracks or len(recent_tracks) == 0:
@@ -6836,11 +6834,6 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             advice = classify_recovery_error(e, context="runtime")
             sleep_interval = LASTFM_ACTIVE_CHECK_INTERVAL if lf_user_online else LASTFM_CHECK_INTERVAL
             retry_note = f"retrying in {display_time(sleep_interval)}"
-            # A failure that changes family is a different failure, so each channel earns a new alert for it, while an
-            # internet outage that flaps between a timeout and an unreachable host stays one failure
-            if outage_family(advice.code) != outage_family(error_delivery_code):
-                error_alert.reset()
-                error_delivery_code = advice.code
 
             # A failure is reported once it is confirmed, then left to the hourly reminder rather than repeated on every check
             outage_outcome = outage.failed(advice)
