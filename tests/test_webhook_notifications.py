@@ -302,3 +302,24 @@ class TestSecretReload:
         monitor.reload_secrets_signal_handler(monitor.signal.SIGHUP, None)
         assert monitor.WEBHOOK_URL == DISCORD_DESTINATION
         assert "Reloaded" not in capsys.readouterr().out
+
+
+# Verifies a link whose text repeats its destination reaches Discord bare, because a masked link there prints as plain text
+def test_self_labeled_links_stay_bare_in_discord_markdown():
+    profile_url = "https://www.last.fm/user/misiektoja"
+    markdown = monitor.html_body_to_discord_markdown(f"Profile: <a href=\"{profile_url}\">{profile_url}</a><br>")
+    assert markdown == f"Profile: {profile_url}"
+
+
+# Verifies a link with its own text keeps the masked form Discord renders as a hyperlink
+def test_labeled_links_keep_the_masked_discord_form():
+    body_html = "Genius lyrics URL: <a href=\"https://genius.com/a-t\">Artist - Track</a>"
+    assert monitor.html_body_to_discord_markdown(body_html) == "Genius lyrics URL: [Artist - Track](https://genius.com/a-t)"
+
+
+# Verifies an image link becomes its alt text or a bare URL instead of an empty masked link
+def test_image_links_never_produce_an_empty_discord_label():
+    with_alt = "<a href=\"https://www.last.fm/music/Artist\"><img src=\"https://lastfm.freetls.fastly.net/a.png\" alt=\"Cover\"></a>"
+    without_alt = "<a href=\"https://www.last.fm/music/Artist\"><img src=\"https://lastfm.freetls.fastly.net/a.png\"></a>"
+    assert monitor.html_body_to_discord_markdown(with_alt) == "[Cover](https://www.last.fm/music/Artist)"
+    assert monitor.html_body_to_discord_markdown(without_alt) == "https://www.last.fm/music/Artist"
