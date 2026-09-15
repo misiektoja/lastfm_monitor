@@ -39,9 +39,12 @@ def heading_anchor(heading):
     return re.sub(r"[^a-z0-9 _-]", "", heading.strip().lower()).replace(" ", "-")
 
 
-# Returns every anchor a page offers, which is one per heading below the title
+# Return generated heading IDs and explicit HTML anchors outside code fences
 def page_anchors(path):
-    return {heading_anchor(line.lstrip("#").strip()) for line in lines_outside_fences(path.read_text(encoding="utf-8")) if line.startswith("##")}
+    lines = lines_outside_fences(path.read_text(encoding="utf-8"))
+    headings = {heading_anchor(line.lstrip("#").strip()) for line in lines if line.startswith("#")}
+    explicit = set(re.findall(r'<a\s+id="([^"]+)"[^>]*>', "\n".join(lines)))
+    return headings | explicit
 
 
 ALL_ANCHORS = {path.name: page_anchors(path) for path in DOCS_DIR.glob("*.md")}

@@ -2,7 +2,10 @@
 
 Powerful real-time tracker for Last.fm that brings your music data to life with automated Spotify playback, instant activity alerts and deep scrobble analytics.
 
-<a id="-quick-install"></a>
+<p align="center">
+   <img src="https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/assets/lastfm_monitor.png" alt="lastfm_monitor_screenshot" width="90%"/>
+</p>
+
 <a id="-quick-install-run"></a>
 ### 🚀 Quick Install & Run
 
@@ -52,11 +55,6 @@ For the manual single-file method, dependencies and upgrade commands, see [Insta
 * **Flexible settings**: Use config files, dotenv files, environment variables and command-line options.
 * **Runtime controls**: Adjust the running monitor through supported signals.
 
-## Screenshots
-
-![lastfm_monitor](https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/assets/lastfm_monitor.png)
-
-<a id="common-commands"></a>
 ## Common Commands
 
 Use [Quick Install & Run](#-quick-install-run) for first-time setup. These examples use the PyPI command. See [Command Format by Installation Method](usage.md#command-format) for manual-script equivalents.
@@ -84,3 +82,5 @@ Monitoring runs until you press `Ctrl+C`. For email, Discord and ntfy alerts, CS
 * [Configuration](configuration.md) - settings, notifications and secret storage
 * [Usage](usage.md) - monitoring, output and command options
 * [Troubleshooting](troubleshooting.md) - Doctor checks and recovery steps
+* [Testing](testing.md) - automated checks and documentation builds
+* [About](about.md) - contributing, security, licensing and support

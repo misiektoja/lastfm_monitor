@@ -12,9 +12,12 @@
 
 Powerful real-time tracker for Last.fm that brings your music data to life with automated Spotify playback, instant activity alerts and deep scrobble analytics.
 
+<p align="center">
+   <img src="https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/assets/lastfm_monitor.png" alt="lastfm_monitor_screenshot" width="90%"/>
+</p>
+
 **Full documentation: [misiektoja.github.io/lastfm_monitor](https://misiektoja.github.io/lastfm_monitor/)**
 
-<a id="-quick-install"></a>
 <a id="-quick-install-run"></a>
 ### 🚀 Quick Install & Run
 
@@ -35,10 +38,6 @@ lastfm_monitor --setup
 The wizard asks for the target, authentication, polling intervals and optional notifications. Review the settings before saving them. See [Setup & First Run](https://misiektoja.github.io/lastfm_monitor/setup-and-first-run/) for the service-specific steps.
 
 For the manual single-file method, dependencies and upgrade commands, see [Installation](https://misiektoja.github.io/lastfm_monitor/installation/).
-
-<p align="center">
-   <img src="https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/assets/lastfm_monitor.png" alt="lastfm_monitor_screenshot" width="90%"/>
-</p>
 
 ## Features
 
@@ -68,7 +67,6 @@ For the manual single-file method, dependencies and upgrade commands, see [Insta
 * **Flexible settings**: Use config files, dotenv files, environment variables and command-line options.
 * **Runtime controls**: Adjust the running monitor through supported signals.
 
-<a id="common-commands"></a>
 ## Common Commands
 
 Use [Quick Install & Run](#-quick-install-run) for first-time setup. These examples use the PyPI command. See [Command Format by Installation Method](https://misiektoja.github.io/lastfm_monitor/usage/#command-format) for manual-script equivalents.
@@ -101,27 +99,22 @@ Monitoring runs until you press `Ctrl+C`. For email, Discord and ntfy alerts, CS
 | [Testing](https://misiektoja.github.io/lastfm_monitor/testing/) | Running the offline suite, the linter and the docs build |
 | [About](https://misiektoja.github.io/lastfm_monitor/about/) | Change log, contributing, security, license, support |
 
-<a id="change-log"></a>
 ## Change Log
 
 See [RELEASE_NOTES.md](https://github.com/misiektoja/lastfm_monitor/blob/main/RELEASE_NOTES.md) for details.
 
-<a id="contributing"></a>
 ## Contributing
 
 Bug reports, documentation fixes and code contributions are welcome. See [CONTRIBUTING.md](https://github.com/misiektoja/lastfm_monitor/blob/main/CONTRIBUTING.md) for the development setup, the checks CI enforces and what a change needs before it is merged. Participation is covered by the [Code of Conduct](https://github.com/misiektoja/lastfm_monitor/blob/main/CODE_OF_CONDUCT.md).
 
-<a id="security"></a>
 ## Security
 
 Report a suspected vulnerability privately through [GitHub security advisories](https://github.com/misiektoja/lastfm_monitor/security/advisories/new), never as a public issue. [SECURITY.md](https://github.com/misiektoja/lastfm_monitor/blob/main/SECURITY.md) covers the reporting process, the supported versions and the security posture of stored credentials and configuration loading.
 
-<a id="license"></a>
 ## License
 
 Licensed under GPLv3. See [LICENSE](https://github.com/misiektoja/lastfm_monitor/blob/main/LICENSE). Dependency licenses are listed in [THIRD_PARTY_NOTICES.md](https://github.com/misiektoja/lastfm_monitor/blob/main/THIRD_PARTY_NOTICES.md).
 
-<a id="support"></a>
 ## Support
 
 Questions, bug reports and vulnerability reports each have a place, listed in [SUPPORT.md](https://github.com/misiektoja/lastfm_monitor/blob/main/SUPPORT.md).

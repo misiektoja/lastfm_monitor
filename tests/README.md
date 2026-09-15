@@ -36,6 +36,7 @@ python -m pytest -m e2e
 
 | File | Area under test |
 | --- | --- |
+| `test_documentation_layout.py` | Unique anchors, main screenshot placement and matching entry-page feature summaries |
 | `test_config_loading.py` | Config files read as data and never executed |
 | `test_config_writers.py` | The timestamped config backup, the atomic replace, the secrets the generated config drops and the dotenv file that is deliberately not backed up |
 | `test_doctor.py` | The preflight row contract, every check's failure branches, the section order and the verdict |
