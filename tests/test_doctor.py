@@ -749,7 +749,7 @@ class TestWhereDoctorSitsInStartup:
 
     # A channel main would switch off before doctor ran would be reported as merely disabled
     def test_the_unusable_webhook_gate_runs_after_doctor(self):
-        assert SOURCE.index("if args.doctor:") < SOURCE.index("if WEBHOOK_ENABLED and not validate_webhook_url():\n        print(\"* Webhook alerts are off")
+        assert SOURCE.index("if args.doctor:") < SOURCE.index("if WEBHOOK_ENABLED and not validate_webhook_url():\n        verbose_print(\"Webhook notifications are off")
 
     def test_the_flag_is_advertised(self):
         assert '"--doctor",' in SOURCE
@@ -800,3 +800,21 @@ def test_a_row_carries_its_advice_and_refuses_to_go_without():
     assert not hasattr(advice, "guide_url")
     with pytest.raises(ValueError):
         monitor.make_doctor_check("Configuration", "WARN", "a warning row", "a detail worth keeping")
+
+
+# A string such as "false" counts as on, so an on/off setting holding anything but True or False is named in one row
+def test_invalid_boolean_settings_are_reported_in_one_row(monkeypatch):
+    monkeypatch.setattr(monitor, "ERROR_NOTIFICATION", "false", raising=False)
+    monkeypatch.setattr(monitor, "SMTP_SSL", 1, raising=False)
+
+    rows = [item for item in monitor.doctor_check_configuration() if item.label == "One or more on/off settings are invalid"]
+
+    assert [item.status for item in rows] == ["FAIL"]
+    assert "ERROR_NOTIFICATION must be True or False, not 'false'" in rows[0].detail
+    assert "SMTP_SSL must be True or False, not 1" in rows[0].detail
+    assert rows[0].advice.fix.startswith("Set the reported settings to True or False")
+
+
+# The shipped defaults are all real booleans, so a run with nothing overridden never sees the on/off row
+def test_the_shipped_defaults_pass_the_boolean_check():
+    assert monitor.runtime_boolean_errors() == []

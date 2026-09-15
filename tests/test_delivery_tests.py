@@ -75,11 +75,11 @@ class TestNothingToSend:
     # The monitoring run's notice says the same thing, so a one-shot test must not print both
     def test_one_command_reports_one_problem_once(self, tmp_path):
         result = run_with_defaults(tmp_path, "--send-test-webhook")
-        assert "Webhook alerts are off because" not in result.stdout
+        assert "Webhook notifications are off because" not in result.stdout
         assert result.stdout.count("WEBHOOK_URL") == 2
 
     def test_the_senders_run_before_the_monitoring_notice(self):
-        assert SOURCE.index("if args.send_test_webhook:") < SOURCE.index("print(\"* Webhook alerts are off because")
+        assert SOURCE.index("if args.send_test_webhook:") < SOURCE.index("verbose_print(\"Webhook notifications are off because")
 
     @pytest.mark.parametrize("missing, names, expected", [
         ("SMTP_HOST", "MAIL_DESTINATION_SETTINGS", True),
