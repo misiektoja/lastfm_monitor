@@ -29,27 +29,27 @@ For the manual single-file method, dependencies and upgrade commands, see [Insta
 
 ## Features
 
-### Listening and Profile Tracking
+### 🔍 Listening and Profile Tracking
 
 * **Listening activity**: Track songs, active and inactive periods, pauses and resumes.
 * **Playback detail**: Show listening duration, skipped tracks and an optional progress indicator.
 * **Profile changes**: Track followers, followed accounts, About Me bio and display name.
 * **Activity gaps**: Detect offline listening and estimate Spotify private mode, which is not always accurate.
 
-### Playback and Insights
+### 📊 Playback and Insights
 
 * **Spotify playback**: Follow the tracked user's songs, pauses and resumes in your local Spotify client.
 * **Session statistics**: Summarize listening time, tracks, skips, repeats and pauses.
 * **Last.fm Wrapped**: Generate top artist, track and album statistics from CSV history.
 * **Music and lyrics links**: Open configurable searches from console output and email.
 
-### Notifications and History
+### 🔔 Notifications and History
 
 * **Event alerts**: Configure email, Discord and ntfy notifications for listening and profile changes.
 * **CSV history**: Save listened tracks with timestamps.
 * **Saved state**: Retain activity, friend lists and tracked profile fields across restarts.
 
-### Setup and Configuration
+### ⚙️ Setup and Configuration
 
 * **Guided setup**: Configure the monitor with `--setup` and check readiness with `--doctor`.
 * **Flexible settings**: Use config files, dotenv files, environment variables and command-line options.
