@@ -140,7 +140,7 @@ class TestNothingIsWrittenBeforeSave:
 class TestWhatSaveWrites:
 
     def test_the_answers_reach_the_configuration(self, wizard, tmp_path):
-        code, _script = wizard(full_run_answers(polling=["30", "5m", ""], output=["", "scrobbles", ""]))
+        code, _script = wizard(full_run_answers(polling=["30", "5m", ""], output=["", "y", "scrobbles", ""]))
 
         assert code == 0
         written = config_values(tmp_path / "lastfm_monitor.conf")
@@ -279,7 +279,7 @@ class TestPerSectionEditing:
 
     def test_one_section_is_changed_without_losing_the_others(self, wizard, tmp_path):
         # Review, choose Output files, switch the log off, keep the rest, then save
-        code, _script = wizard(full_run_answers(target=["someuser", ""], review=["2", "6", "n", "notes", "", "1"]))
+        code, _script = wizard(full_run_answers(target=["someuser", ""], review=["2", "6", "n", "y", "notes", "", "1"]))
 
         assert code == 0
         written = config_values(tmp_path / "lastfm_monitor.conf")
@@ -289,11 +289,12 @@ class TestPerSectionEditing:
 
     # Re-entering a section starts it over from the values setup began with, which is what its defaults then show
     def test_editing_a_section_restarts_it_from_the_starting_values(self, wizard, tmp_path):
-        code, script = wizard(full_run_answers(output=["", "scrobbles", ""], review=["2", "6", "", "", "", "1"]))
+        code, script = wizard(full_run_answers(output=["", "y", "scrobbles", ""], review=["2", "6", "", "n", "", "1"]))
 
         assert code == 0
         assert config_values(tmp_path / "lastfm_monitor.conf")["CSV_FILE"] == ""
-        assert "Optional CSV output path (blank disables it): " in script.prompts
+        # The hint is the starting value, not the "scrobbles" answer this run gave the section the first time
+        assert "Write a CSV file of the changes? [y/N]: " in script.prompts
 
     def test_returning_to_the_summary_changes_nothing(self, wizard, tmp_path):
         code, _script = wizard(full_run_answers(review=["2", "10", "1"]))
@@ -822,6 +823,7 @@ class TestEveryRequiredQuestionCanBeAbandoned:
         ("_wizard_collect_email_section", "SMTP username"): "declining switches email and its alerts off",
         ("_wizard_collect_email_section", "Sender email"): "declining switches email and its alerts off",
         ("_wizard_collect_email_section", "Receiver email"): "declining switches email and its alerts off",
+        ("_wizard_collect_output_section", "CSV output path"): "declining switches CSV output off",
         ("_wizard_collect_destination_section", "Configuration file destination"): "the shown default is the current path",
         ("_wizard_collect_destination_section", "Dotenv file destination"): "the shown default is the current path",
     }

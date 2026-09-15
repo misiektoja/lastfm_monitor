@@ -378,3 +378,20 @@ def test_refusing_to_replace_a_config_without_a_terminal_raises_its_own_error(tm
         monitor.write_generated_config(destination, "SMTP_PORT = 465\n", interactive=False)
 
     assert destination.read_text(encoding="utf-8") == "SMTP_PORT = 587\n"
+
+
+# Verifies an explicit colour theme survives a config rebuild, since the template ships the setting commented out
+def test_a_rebuilt_config_keeps_an_explicit_color_theme():
+    values = dict(monitor._config_template_defaults())
+    values["COLOR_THEME"] = {"header": "bright_red"}
+
+    rendered = monitor.generate_config_with_current_values(values)
+
+    assert monitor.parse_config_content(rendered, "<generated>")["COLOR_THEME"] == {"header": "bright_red"}
+
+
+# Verifies the shipped default stays commented out, so a rebuild does not pin a theme the user never chose
+def test_a_rebuilt_config_leaves_the_default_theme_commented():
+    rendered = monitor.generate_config_with_current_values(dict(monitor._config_template_defaults()))
+
+    assert "\nCOLOR_THEME = {" not in rendered

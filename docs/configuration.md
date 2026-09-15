@@ -319,7 +319,7 @@ The `--help` screen is coloured too. Group headings, option names, the values th
 COLOR_THEME = { "track": "bright_magenta bold", "username": "green" }
 ```
 
-Generated configuration files ship this block commented out, so the built-in defaults apply and a later change to them reaches you. Uncomment only the lines you want to change and the rest keep following the defaults.
+Generated configuration files ship this block commented out, so the built-in defaults apply and a later change to them reaches you. Overrides you added are written back as a real block when setup rebuilds the file, so they are not lost. Uncomment only the lines you want to change and the rest keep following the defaults.
 
 A value combines one colour with any number of style attributes, separated by spaces or `+`, for example `"bright_cyan bold"`, `"red underline"` or `"bright_magenta bold underline"`. An empty string leaves that part uncoloured.
 
