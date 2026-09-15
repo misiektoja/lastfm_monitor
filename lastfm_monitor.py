@@ -2535,6 +2535,8 @@ def validate_webhook_url(url: Any = None) -> bool:
         return False
     try:
         parsed = urlsplit(selected_url.strip())
+        if parsed.port is not None and not 1 <= parsed.port <= 65535:
+            return False
     except ValueError:
         return False
     return parsed.scheme.casefold() == "https" and bool(parsed.hostname) and not parsed.username and not parsed.password and bool(parsed.path.strip("/"))
@@ -3080,6 +3082,9 @@ def close_pending_notice_block():
 
 # Records a swallowed exception in debug output so a silently degraded feature can still be diagnosed
 def debug_swallowed_exception(context, exc):
+    if is_too_many_open_files(exc):
+        print_recovery_advice(classify_recovery_error(exc))
+        raise SystemExit(1)
     debug_print(context, outcome="failed", error=f"{type(exc).__name__}: {exc}")
 
 
@@ -5137,6 +5142,9 @@ def spotify_resolve_track_metadata(artist, track, album=""):
             sp_track_uri_id, sp_track_duration = spotify_search_song_trackid_duration_oauth(access_token, artist, track, album)
             debug_print("Spotify OAuth app metadata", track_id=sp_track_uri_id, duration=f"{sp_track_duration}s", outcome="OK")
         except Exception as error:
+            if is_too_many_open_files(error):
+                print_recovery_advice(classify_recovery_error(error))
+                raise SystemExit(1)
             debug_print("Spotify OAuth app metadata", outcome="failed", error=f"{type(error).__name__}: {error}")
 
     if not sp_track_uri_id or sp_track_duration <= 0:
@@ -5148,6 +5156,9 @@ def spotify_resolve_track_metadata(artist, track, album=""):
             if web_track_duration > 0:
                 sp_track_duration = web_track_duration
         except Exception as error:
+            if is_too_many_open_files(error):
+                print_recovery_advice(classify_recovery_error(error))
+                raise SystemExit(1)
             debug_print("Spotify anonymous web metadata", outcome="failed", error=f"{type(error).__name__}: {error}")
 
     return sp_track_uri_id, sp_track_duration
@@ -5787,6 +5798,9 @@ def get_track_info(artist, track, album, network):
                 # Last.fm returns duration in milliseconds
                 track_duration = int(lf_duration / 1000)
         except Exception as e:
+            if is_too_many_open_files(e):
+                print_recovery_advice(classify_recovery_error(e))
+                raise SystemExit(1)
             debug_print("Last.fm track duration fallback", artist=artist, track=track, outcome="failed", error=f"{type(e).__name__}: {e}")
             track_duration = 0
 
@@ -7476,13 +7490,28 @@ def runtime_configuration_errors():
     return errors
 
 
+# Validates effective path settings before startup expands or opens them
+def prepare_configured_paths(args):
+    overrides = {'DOTENV_FILE': 'env_file', 'CSV_FILE': 'csv_file', 'MONITOR_LIST_FILE': 'monitor_list'}
+    settings = globals().copy()
+    for name, argument in overrides.items():
+        value = getattr(args, argument, None)
+        if value:
+            settings[name] = value
+    errors = configuration_shape_errors(settings)
+    if errors:
+        print_recovery_advice(make_recovery_advice("config.invalid", "Invalid settings: " + ". ".join(errors), recovery_fix_with_guide("Correct the named settings in the configuration file or command line", CONFIG_FILE_GUIDE_URL), False))
+        raise SystemExit(1)
+
+
 # Names malformed path and color settings before diagnostics consume their values
-def configuration_shape_errors():
+def configuration_shape_errors(settings=None):
+    settings = globals() if settings is None else settings
     errors = []
     for name in ('LF_LOGFILE', 'CSV_FILE', 'MONITOR_LIST_FILE', 'DOTENV_FILE'):
-        if name in globals() and not isinstance(globals()[name], (str, os.PathLike)):
+        if name in settings and not isinstance(settings[name], (str, os.PathLike)):
             errors.append(f"{name} must be a path string")
-    theme = globals().get("COLOR_THEME", {})
+    theme = settings.get("COLOR_THEME", {})
     if not isinstance(theme, dict):
         errors.append("COLOR_THEME must be a dictionary of style strings")
     else:
@@ -9819,6 +9848,8 @@ def main():
     # Anything already set once the config file has been read came from the settings, edited in place or loaded
     for secret in SECRET_KEYS:
         record_secret_source(secret, "config file")
+
+    prepare_configured_paths(args)
 
     if args.env_file:
         DOTENV_FILE = os.path.expanduser(args.env_file)

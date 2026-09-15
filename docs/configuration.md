@@ -138,6 +138,8 @@ Spotify metadata supplies the track duration, title, artists, album, URI and ext
 
 With `-r`, a successful duration from either Spotify backend is marked `S*`. Last.fm fallback duration is marked `L*`. Without `-r`, Last.fm remains the duration source while Spotify metadata can still resolve a track ID for `-g` playback.
 
+Path settings are validated before startup opens files. An invalid value names the setting to correct. Command-line path overrides still take precedence.
+
 ## SMTP Settings
 
 Private password entry preserves leading and trailing spaces. The exact value checked with the mail server is saved.
