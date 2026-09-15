@@ -13,7 +13,7 @@ Examples use the PyPI command. For a downloaded script, run commands from the di
 
 For example, `lastfm_monitor --setup` becomes `python3 lastfm_monitor.py --setup` on macOS or Linux. Use `python` on Windows. Replace placeholders such as `<lastfm_username>` with a Last.fm username.
 
-The manual-script examples assume the current directory contains `lastfm_monitor.py`. Commands printed by setup, Doctor and recovery messages use the running interpreter and the full script path. Packaged installations use the running interpreter with `-m lastfm_monitor`.
+Activate the tool's virtual environment before running these commands. For a downloaded script, run them from the directory containing `lastfm_monitor.py`.
 
 For first-time configuration, follow [Setup & First Run](setup-and-first-run.md). Use [Doctor Preflight](troubleshooting.md#doctor-preflight) to check a setup before monitoring.
 
@@ -41,7 +41,7 @@ Settings come from a configuration file when one is found. [Configuration File](
 
 If a run does not start, `--doctor` reports every check the tool makes before monitoring. See [Doctor Preflight](troubleshooting.md#doctor-preflight).
 
-Before monitoring starts the tool prints the settings in effect: the monitored user, the polling intervals, both alert channels, the files the run reads and writes, and each optional feature that is switched on. `--verbose` and `--debug` print the complete list instead, including the settings left at their defaults and where each secret came from. That view also names the webhook service alerts go to and whether that channel is switched on, the mail server that sends them with the recipient address masked, whether the delivery confirmations are printed and the process id, Python version and operating system the run is on. Each channel's own settings are indented under it. See [Verbose Output](troubleshooting.md#verbose-output).
+The startup summary shows the target, polling intervals, alerts, output files and enabled features. Use `--verbose` or `--debug` for all settings and secret sources. See [Verbose Output](troubleshooting.md#verbose-output).
 
 The log file always receives the complete list, whichever view the terminal was shown, so a log attached to a bug report carries every effective setting.
 
@@ -159,7 +159,7 @@ To disable sending an email on errors (enabled by default):
 lastfm_monitor <lastfm_username> -e
 ```
 
-An error alert goes out once the same failure has lasted **2 minutes**, since the checks here run every few seconds, so a short outage or one lost request reaches nobody, while a failure that cannot clear on its own, such as a rejected API key, is alerted at once. Each kind of failure alerts once per channel. A channel that could not deliver is tried again on a later failing check, after **5 minutes** at first and then after twice the previous wait, up to an hour. A run that recovered alerts again when it fails later. The same rule governs the webhook error alert.
+Email and webhook error alerts are sent after **2 minutes** of a continuing failure. Problems that need your action, such as a rejected API key, alert immediately. Each kind of failure alerts once per channel. Failed deliveries are retried after 5 minutes, with increasing waits up to an hour. Alerts can fire again after monitoring recovers.
 
 To be notified when a user's followers change:
 - set `FOLLOWERS_NOTIFICATION` to `True`

@@ -25,11 +25,11 @@ Authentication
 * `[FAIL]` monitoring cannot start until it is fixed
 * `[SKIP]` the check did not run, usually because an earlier one failed
 
-The report groups its rows into **Environment** for the Python version and the libraries in use, **Configuration** for the configuration and dotenv files in effect, where each secret came from and every file the run will write, **Authentication** for the Last.fm credentials, **Spotify metadata** for the metadata backend when track duration or playback is on, **Connectivity** for the endpoint the tool checks before each run, **Target** for the monitored profile and **Notifications** for both alert channels. A section with nothing to report is left out.
+The report covers **Environment**, **Configuration**, **Authentication**, **Spotify metadata**, **Connectivity**, **Target** and **Notifications**. Optional sections appear only when relevant features are enabled.
 
 Only a `[FAIL]` changes the exit code, which is `1` when anything failed and `0` otherwise, so the command can gate a deployment. The report ends with the command that starts monitoring using the same configuration and dotenv files you passed to doctor.
 
-Spotify app validation always requests a fresh token held only in memory. Existing token-cache files are neither read nor changed.
+Doctor checks Spotify app credentials without changing the token cache.
 
 The credentials themselves are never displayed. A row that reports a secret names the setting and its source, not its value.
 
@@ -68,14 +68,14 @@ A configuration file that cannot be parsed stops the run and names the file, the
 
 Failures that clear on their own, such as a Last.fm outage or a rate limit, say that the tool keeps retrying. Failures that need you, such as a rejected key or a hidden profile, do not.
 
-A failure is reported once, with the delay before the next attempt on the same line. A failure the tool can retry away, such as a Last.fm outage or a lost connection, is reported once the next check has failed too, so a blip of a single check between polls a few seconds apart prints nothing. A failure that needs you, such as a rejected key, is reported on the first check. With `--verbose` every first failing check is reported:
+Temporary failures are reported after two failed checks. Problems that need your action, such as a rejected key, are reported immediately. Use `--verbose` to see every first failure:
 
 ```
 * Error: The Last.fm API is temporarily unavailable (retrying in 30 seconds)
 To fix: This is usually a Last.fm outage. The tool will keep retrying
 ```
 
-While it lasts the tool stays quiet and reminds you once an hour, with how many checks have failed so far, so a two day outage is a handful of lines rather than one block per check. The reminder has its own cadence and does not depend on `LIVENESS_CHECK_INTERVAL`:
+Continuing outages produce one reminder per hour, independently of `LIVENESS_CHECK_INTERVAL`:
 
 ```
 * Monitoring degraded for <lastfm_username>. The Last.fm API is temporarily unavailable since Mon 08 Sep 2026, 09:15:05, 360 failed checks
@@ -88,7 +88,7 @@ When the failure clears, the run says so whatever flags it was started with. A f
 * Monitoring recovered for <lastfm_username> after 14 hours
 ```
 
-An outage that starts failing differently is still one outage. A lost connection that reads as a timeout on one check and as an unreachable host on the next prints nothing new, and a change to another kind of failure that clears on its own, such as a rate limit after an outage, is one line, `* Monitoring failure changed for <lastfm_username>. <what fails now>`, rather than a second full report. A change to a failure that needs you is reported in full. The `ERROR_500_NUMBER_LIMIT`, `ERROR_500_TIME_LIMIT`, `ERROR_NETWORK_ISSUES_NUMBER_LIMIT` and `ERROR_NETWORK_ISSUES_TIME_LIMIT` settings of earlier versions are retired. A configuration file that still sets them is loaded with a note and they are ignored.
+Follow any new instructions if the failure changes. The old `ERROR_500_NUMBER_LIMIT`, `ERROR_500_TIME_LIMIT`, `ERROR_NETWORK_ISSUES_NUMBER_LIMIT` and `ERROR_NETWORK_ISSUES_TIME_LIMIT` settings are ignored.
 
 ## Verbose Output
 
@@ -125,7 +125,7 @@ Each line reads `Operation: key=value, key=value`. Fields depend on the operatio
 [DEBUG 12:00:00] Completed check: check=#7, user=someuser, state=online, track=Artist - Track
 ```
 
-Traced operations include network requests, where each secret resolved from, the configuration file and how many settings it applied, every completed check and the wait before the next one, every retry with its delay, each file the tool reads or writes, both notification channels with the destination host, the attempt and the delivery outcome, and the full [Spotify metadata](configuration.md#spotify-metadata-backends) path: server time, anonymous web-player token requests and refreshes, persisted-query hash discovery, OAuth app token retrieval and search and match decisions that resolve a track ID and duration. Calls made internally by dependencies may not have individual result lines.
+Debug output covers requests, settings, secret sources, polling, retries, file access, notifications and [Spotify metadata](configuration.md#spotify-metadata-backends). It includes token retrieval and track matching details. Some dependency operations have no individual trace.
 
 Failures the tool recovers from on its own are traced too, so a feature that quietly does nothing can still be diagnosed.
 
@@ -150,6 +150,8 @@ If the tool cannot import a dependency, install the dependencies with the same P
 If a new terminal cannot find your saved settings, return to the directory used during setup or pass both `--config-file` and `--env-file` explicitly. Run `lastfm_monitor --doctor <lastfm_username>` to see which settings are loaded.
 
 ## Invalid saved settings and state
+
+If setup fails while saving, the configuration may already have changed. Correct the reported destination problem, rerun `--setup` with the same `--config-file` and `--env-file` paths then run `--doctor` before monitoring. The configuration backup restores non-secret settings only.
 
 Timing values must be finite and within the documented range. Normal startup checks effective timing settings before monitoring. A configuration syntax error reports its file, line number and parser message without echoing source text that may contain credentials.
 

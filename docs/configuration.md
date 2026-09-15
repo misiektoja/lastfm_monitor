@@ -166,7 +166,7 @@ The message arrives as `lastfm_monitor: test email` and its body names the comma
 
 ## Webhook Settings
 
-A delivery keeps its original destination and credentials for every retry. Reloaded settings apply to the next delivery. Discord templates must produce a JSON object. Dictionary templates and JSON strings are supported, including strings with escaped format braces. Unknown fields such as `{descripton}` and placeholders the alert cannot fill are reported with the template text that failed, before delivery. Legacy JSON strings with doubled object braces still work. Alert text is expanded once, so quotes and braces in a title remain literal text. Mentions remain disabled in every template.
+Discord templates must produce a JSON object. Dictionary templates and JSON strings are supported, including legacy strings with doubled object braces. Unsupported placeholders are reported before delivery. Alert text is kept literal and mentions are disabled. Reloaded settings apply to the next delivery.
 
 Webhook alerts work independently from email. Discord and ntfy are supported directly. Compatible services can use the Discord request format or the advanced payload and header settings.
 
@@ -178,7 +178,7 @@ lastfm_monitor --set-webhook-url
 
 The command validates that the destination is a complete HTTPS URL then updates only `WEBHOOK_URL` in `.env`. Existing values require confirmation. Use `--env-file PATH` to select another private settings file.
 
-Set `WEBHOOK_ENABLED = True` in `lastfm_monitor.conf` then choose `WEBHOOK_PROVIDER = "discord"` or `WEBHOOK_PROVIDER = "ntfy"`. Standard Discord and `ntfy.sh` URLs correct a mismatched configured provider automatically. While `WEBHOOK_PROVIDER` is left at its default, that detection is silent and `--verbose` reports it. A warning appears only when your configuration file sets a provider the URL disagrees with. This also applies to a `WEBHOOK_URL` replaced in the dotenv file and reloaded with `SIGHUP`: swapping a Discord webhook for an ntfy topic moves the provider with it, and the tool says so. A destination it does not recognize leaves the configured provider alone.
+Set `WEBHOOK_ENABLED = True` in `lastfm_monitor.conf` and choose `WEBHOOK_PROVIDER = "discord"` or `WEBHOOK_PROVIDER = "ntfy"`. Standard Discord and ntfy.sh URLs select the provider automatically, including after a `SIGHUP` reload. Other destinations use the configured provider.
 
 Enable the events you want through the `WEBHOOK_*_NOTIFICATION` settings. Last.fm Monitor supports active, inactive, monitored track, every song, loop, offline entry, follower, following and error alerts. Matching command-line switches are listed under [Webhook Notifications](usage.md#webhook-notifications).
 
@@ -204,7 +204,7 @@ If `WEBHOOK_ENABLED` is on but `WEBHOOK_URL` is not a complete HTTPS link, the t
 
 ### When One Channel Fails
 
-Email and webhook alerts are delivered independently, and the tool tracks which one arrived. If an error alert reaches the webhook but the mail server rejects the message, a later check sends the email again and leaves the webhook alone, so a failed channel is retried without delivering the same alert twice. The retry waits 5 minutes at first and twice the previous wait after each further failure, up to an hour, so a mail server that is down is not dialled on every check.
+Error alerts are delivered independently by email and webhook. If one channel fails, only that channel is retried. Retries start after 5 minutes and double after each failure, up to an hour.
 
 ## Storing Secrets
 
@@ -221,7 +221,7 @@ lastfm_monitor --set-smtp-password
 
 Each command accepts `--env-file PATH`. Existing values require confirmation and the update is atomic. `--env-file none` is rejected because these commands must save their values.
 
-The dotenv file is replaced in one step and is never backed up, so a rotated secret is not left behind in a second file. Keep your own copy if you need one. A secret you switch off, such as the ntfy access token in the setup wizard, has its line removed rather than left as an empty value.
+Replaced secrets are not backed up. Keep your own copy if you need one.
 
 Answering `n` to the replacement question keeps the saved value and says so. Pressing Ctrl+C at any prompt cancels the command and exits with a failure code. Neither answer changes the dotenv file.
 
@@ -293,7 +293,18 @@ A forgotten `export` can shadow the file invisibly, so `--debug` names each secr
 
 A secret still holding its `your_...` placeholder counts as unset and is left out. Lengths appear only for the secrets whose length the provider issues, never for a password you chose.
 
-When a `--set-*` command or the setup wizard replaces a secret, it rewrites that one assignment in place and leaves every other line alone. A line you wrote as `export NAME=...` keeps its `export`, so a dotenv file you also source in a shell still exports it. A value you clear has its line removed rather than left empty.
+Secret commands update the selected value without changing other dotenv settings. Clearing a value removes its assignment.
+
+### Reloading secrets and backup contents
+
+On systems with SIGHUP, reloading applies changes from the selected dotenv file. Removing a file-owned
+assignment restores its independently configured fallback or clears the value when no fallback exists.
+A read or parsing failure keeps the last usable credentials and reports how to correct the file.
+An explicit reload can override a startup export with a value present in the file.
+
+Setup keeps the saved `DOTENV_FILE` unless you choose another path with `--env-file`. When you move it, review the private settings before saving. Kept credentials are copied to the new destination and the old file stays intact. Values already in the new dotenv file take precedence unless you replace them. At startup, a nonempty exported secret overrides the dotenv file. A dotenv value, including an empty one, overrides the configuration.
+
+Setup moves retained credentials from older configuration files into the selected dotenv file unless that file already defines the same key. It leaves the original configuration in place if it cannot preserve those credentials. Setup creates a timestamped configuration backup with inline secrets removed. General `--generate-config` backups can contain inline credentials. Replaced dotenv secrets are not backed up.
 
 ## TLS Verification
 
@@ -412,16 +423,3 @@ Liveness check, timestamp:	Mon 08 Sep 2026, 09:15:05
 The reminder is timed in seconds, so it arrives at the same rate whether the user is listening or not. Set `LIVENESS_CHECK_INTERVAL` to change it (default: 86400, i.e. 24 hours), or to 0 to switch it off.
 
 Anything the tool prints about the user restarts the countdown, so a busy run stays quiet.
-
-
-### Reloading secrets and backup contents
-
-On systems with SIGHUP, reloading applies changes from the selected dotenv file. Removing a file-owned
-assignment restores its independently configured fallback or clears the value when no fallback exists.
-A read or parsing failure keeps the last usable credentials and reports how to correct the file.
-An explicit reload can override a startup export with a value present in the file.
-
-
-Setup's configuration backup blanks inline secret assignments from older configurations while retaining
-other settings and comments. General `--generate-config` backups remain exact copies and can contain
-inline credentials. The dotenv file is not backed up during secret replacement.
