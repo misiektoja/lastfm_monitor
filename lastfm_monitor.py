@@ -211,6 +211,14 @@ WEBHOOK_ERROR_NOTIFICATION = True
 # Values support the same placeholders as WEBHOOK_TEMPLATE
 WEBHOOK_HEADERS = {}
 
+# Optional ntfy access token for Bearer authentication
+# Prefer an environment variable or dotenv file instead of storing this token here
+NTFY_ACCESS_TOKEN = ""
+
+# Whether to use compact ntfy alert titles and bodies for smaller screens
+# Discord webhook and email content remain unchanged
+NTFY_SHORT = False
+
 # ----------------------------
 # Advanced Webhook Settings
 # ----------------------------
@@ -248,14 +256,6 @@ WEBHOOK_TEMPLATE = {
 #       ("description", "strip"),
 #   ]
 WEBHOOK_TRANSFORMS = []
-
-# Optional ntfy access token for Bearer authentication
-# Prefer an environment variable or dotenv file instead of storing this token here
-NTFY_ACCESS_TOKEN = ""
-
-# Whether to use compact ntfy alert titles and bodies for smaller screens
-# Discord webhook and email content remain unchanged
-NTFY_SHORT = False
 
 # How often to check for user activity when the user is considered offline (not playing music); in seconds
 # Can also be set using the -c flag
@@ -347,21 +347,6 @@ SP_USER_GOT_OFFLINE_TRACK_ID = ""
 # Delay before pausing the above track after the user goes offline; in seconds
 # Set to 0 to keep playing indefinitely until manually paused
 SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE = 5  # 5 seconds
-
-# Whether to print extra startup and runtime detail
-# Independent of DEBUG_MODE, so enable both to see everything
-# Can also be enabled via the --verbose flag, which turns it on regardless of this setting
-VERBOSE_MODE = False
-
-# Whether to print timestamped diagnostic detail, including every outbound call,
-# each notification delivery attempt and the technical cause of failures
-# Independent of VERBOSE_MODE, so enable both to see everything
-# Can also be enabled via the --debug flag, which turns it on regardless of this setting
-DEBUG_MODE = False
-
-# Whether verbose output confirms each delivered email and webhook alert
-# Applies only when VERBOSE_MODE is enabled
-DELIVERY_CONFIRMATIONS = True
 
 # How often to print a "liveness check" message to the output; in seconds
 # Set to 0 to disable
@@ -480,6 +465,21 @@ COLORED_OUTPUT = True
 #     "help_comment": "bright_black",
 #     "help_default": "bright_black",
 # }
+
+# Whether to print extra startup and runtime detail
+# Independent of DEBUG_MODE, so enable both to see everything
+# Can also be enabled via the --verbose flag, which turns it on regardless of this setting
+VERBOSE_MODE = False
+
+# Whether to print timestamped diagnostic detail, including every outbound call,
+# each notification delivery attempt and the technical cause of failures
+# Independent of VERBOSE_MODE, so enable both to see everything
+# Can also be enabled via the --debug flag, which turns it on regardless of this setting
+DEBUG_MODE = False
+
+# Whether verbose output confirms each delivered email and webhook alert
+# Applies only when VERBOSE_MODE is enabled
+DELIVERY_CONFIRMATIONS = True
 
 # Value added/subtracted via signal handlers to adjust inactivity timeout (LASTFM_INACTIVITY_CHECK); in seconds
 LASTFM_INACTIVITY_CHECK_SIGNAL_VALUE = 30  # 30 seconds
@@ -619,10 +619,10 @@ WEBHOOK_FOLLOWINGS_NOTIFICATION = False
 WEBHOOK_PROFILE_NOTIFICATION = False
 WEBHOOK_ERROR_NOTIFICATION = False
 WEBHOOK_HEADERS = {}
-WEBHOOK_TEMPLATE = {}
-WEBHOOK_TRANSFORMS = []
 NTFY_ACCESS_TOKEN = ""
 NTFY_SHORT = False
+WEBHOOK_TEMPLATE = {}
+WEBHOOK_TRANSFORMS = []
 LASTFM_CHECK_INTERVAL = 0
 LASTFM_ACTIVE_CHECK_INTERVAL = 0
 LASTFM_INACTIVITY_CHECK = 0
@@ -658,13 +658,10 @@ HORIZONTAL_LINE = 0
 CLEAR_SCREEN = False
 COLORED_OUTPUT = False
 COLOR_THEME: dict = {}
+VERBOSE_MODE = False
+DEBUG_MODE = False
+DELIVERY_CONFIRMATIONS = True
 LASTFM_INACTIVITY_CHECK_SIGNAL_VALUE = 0
-ENABLE_GENIUS_LYRICS_URL = False
-ENABLE_AZLYRICS_URL = False
-ENABLE_TEKSTOWO_URL = False
-ENABLE_MUSIXMATCH_URL = False
-ENABLE_LYRICS_COM_URL = False
-USE_LASTFM_URL_IN_LAST_PLAYED = False
 ENABLE_SPOTIFY_URL = False
 ENABLE_LASTFM_URL = False
 ENABLE_LASTFM_ALBUM_URL = False
@@ -673,6 +670,12 @@ ENABLE_YOUTUBE_MUSIC_URL = False
 ENABLE_AMAZON_MUSIC_URL = False
 ENABLE_DEEZER_URL = False
 ENABLE_TIDAL_URL = False
+ENABLE_GENIUS_LYRICS_URL = False
+ENABLE_AZLYRICS_URL = False
+ENABLE_TEKSTOWO_URL = False
+ENABLE_MUSIXMATCH_URL = False
+ENABLE_LYRICS_COM_URL = False
+USE_LASTFM_URL_IN_LAST_PLAYED = False
 TRACK_FOLLOWINGS = False
 TRACK_FOLLOWERS = False
 TRACK_BIO = False
@@ -683,9 +686,6 @@ FOLLOWINGS_NOTIFICATION = False
 PROFILE_NOTIFICATION = False
 FRIENDS_CHANGE_COUNTER = 0
 FRIENDS_RETRY_INTERVAL = 0
-VERBOSE_MODE = False
-DEBUG_MODE = False
-DELIVERY_CONFIRMATIONS = True
 LASTFM_USERNAME_GLOBAL = ""
 
 exec(CONFIG_BLOCK, globals())
