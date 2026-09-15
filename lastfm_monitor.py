@@ -5406,6 +5406,10 @@ def load_config_file(config_path, namespace=None, report_errors=True):
     return False
 
 
+# Reports whether durations carry an L* or S* mark, which only distinguishes sources while Spotify lookups are on
+def duration_marks_enabled(): return bool(USE_TRACK_DURATION_FROM_SPOTIFY) and not DO_NOT_SHOW_DURATION_MARKS
+
+
 # Resolves Spotify track metadata first then falls back to Last.fm duration
 def get_track_info(artist, track, album, network):
     sp_track_uri_id = None
@@ -5422,7 +5426,7 @@ def get_track_info(artist, track, album, network):
 
     if sp_track_duration > 0:
         track_duration = sp_track_duration
-        if not DO_NOT_SHOW_DURATION_MARKS:
+        if duration_marks_enabled():
             duration_mark = " S*"
     else:
         try:
@@ -5430,7 +5434,7 @@ def get_track_info(artist, track, album, network):
             lf_duration = lf_track.get_duration()
             debug_print("Last.fm track duration fallback", artist=artist, track=track, duration=f"{lf_duration}ms", outcome="OK")
             if lf_duration and lf_duration > 0:
-                if USE_TRACK_DURATION_FROM_SPOTIFY and not DO_NOT_SHOW_DURATION_MARKS:
+                if duration_marks_enabled():
                     duration_mark = " L*"
                 # Last.fm returns duration in milliseconds
                 track_duration = int(lf_duration / 1000)
@@ -7535,7 +7539,7 @@ def build_startup_summary(target=None, config_path=None, env_path=None, log_path
         StartupSummaryRow("Spotify token cache", SP_TOKENS_FILE or "Memory only", concise=bool(SP_TOKENS_FILE and (TRACK_SONGS or USE_TRACK_DURATION_FROM_SPOTIFY) and spotify_oauth_app_configured())),
         StartupSummaryRow("Spotify playback control", str(TRACK_SONGS), concise=bool(TRACK_SONGS)),
         StartupSummaryRow("Track duration from Spotify", str(USE_TRACK_DURATION_FROM_SPOTIFY), concise=bool(USE_TRACK_DURATION_FROM_SPOTIFY)),
-        StartupSummaryRow("Duration marks", str(not DO_NOT_SHOW_DURATION_MARKS)),
+        StartupSummaryRow("Duration marks", str(duration_marks_enabled())),
         StartupSummaryRow("Play break multiplier", f"{LASTFM_BREAK_CHECK_MULTIPLIER} ({display_time(LASTFM_BREAK_CHECK_MULTIPLIER * LASTFM_ACTIVE_CHECK_INTERVAL)})"),
         StartupSummaryRow("Progress indicator", str(PROGRESS_INDICATOR), concise=bool(PROGRESS_INDICATOR)),
         StartupSummaryRow("Liveness output", display_time(LIVENESS_CHECK_INTERVAL) if LIVENESS_CHECK_INTERVAL else "Disabled", concise=bool(LIVENESS_CHECK_INTERVAL)),
@@ -8886,9 +8890,6 @@ def apply_cli_overrides(args):
 
     if args.fetch_duration is True:
         USE_TRACK_DURATION_FROM_SPOTIFY = True
-
-    if not USE_TRACK_DURATION_FROM_SPOTIFY:
-        DO_NOT_SHOW_DURATION_MARKS = True
 
 
 # Runs the command-line interface

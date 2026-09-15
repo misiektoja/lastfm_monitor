@@ -277,6 +277,17 @@ class TestTheValues:
         monkeypatch.setattr(monitor, "USE_TRACK_DURATION_FROM_SPOTIFY", False)
         assert row_named(monitor.build_startup_summary("someuser"), "Metadata backend").value == "Disabled"
 
+    # The row answers whether a mark will appear, which needs the Spotify lookup that produces the two sources
+    def test_the_duration_mark_row_follows_both_settings(self, monkeypatch):
+        monkeypatch.setattr(monitor, "USE_TRACK_DURATION_FROM_SPOTIFY", True)
+        monkeypatch.setattr(monitor, "DO_NOT_SHOW_DURATION_MARKS", False)
+        assert row_named(monitor.build_startup_summary("someuser"), "Duration marks").value == "True"
+        monkeypatch.setattr(monitor, "DO_NOT_SHOW_DURATION_MARKS", True)
+        assert row_named(monitor.build_startup_summary("someuser"), "Duration marks").value == "False"
+        monkeypatch.setattr(monitor, "USE_TRACK_DURATION_FROM_SPOTIFY", False)
+        monkeypatch.setattr(monitor, "DO_NOT_SHOW_DURATION_MARKS", False)
+        assert row_named(monitor.build_startup_summary("someuser"), "Duration marks").value == "False"
+
     def test_the_notification_rows_roll_up_the_alerts_each_channel_sends(self, monkeypatch):
         monkeypatch.setattr(monitor, "ACTIVE_NOTIFICATION", True)
         monkeypatch.setattr(monitor, "ERROR_NOTIFICATION", True)

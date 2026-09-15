@@ -1,5 +1,6 @@
 """The guided setup: answers held until Save, the mail server sign-in, the escape from every rejected answer, the frame around its questions, the review summary, per-section editing and the files it writes."""
 
+import argparse
 import ast
 import os
 import smtplib
@@ -91,6 +92,11 @@ def wizard(tmp_path, monkeypatch):
         return code, script
 
     return run
+
+
+# Stands in for a run that typed no flags at all, so every override the wizard runs behind reads as unset
+class NoFlags(argparse.Namespace):
+    def __getattr__(self, name): return None
 
 
 # Returns the settings a written config assigns
@@ -962,6 +968,34 @@ class TestTheFlowAfterSave:
 
 
 # What Enter does on a rerun, channel by channel: a saved setup must not be switched off by accepting defaults
+class TestTheValuesTheWizardStartsFrom:
+
+    # The wizard saves the settings in effect, so a setting no question covers must not be switched on behind it
+    def test_an_unset_flag_leaves_the_duration_mark_setting_alone(self, monkeypatch):
+        monkeypatch.setattr(monitor, "USE_TRACK_DURATION_FROM_SPOTIFY", False)
+        monkeypatch.setattr(monitor, "DO_NOT_SHOW_DURATION_MARKS", False)
+
+        monitor.apply_cli_overrides(NoFlags())
+
+        assert monitor.DO_NOT_SHOW_DURATION_MARKS is False
+
+    def test_the_hide_flag_still_switches_the_marks_off(self, monkeypatch):
+        monkeypatch.setattr(monitor, "DO_NOT_SHOW_DURATION_MARKS", False)
+
+        monitor.apply_cli_overrides(NoFlags(hide_duration_source=True))
+
+        assert monitor.DO_NOT_SHOW_DURATION_MARKS is True
+
+    # Answering yes to the Spotify duration used to save a config that switched the marks off
+    def test_taking_the_duration_from_spotify_keeps_the_marks_on(self, wizard, tmp_path):
+        code, _script = wizard(full_run_answers(spotify=["y", "y", "n", "n"]))
+
+        assert code == 0
+        written = config_values(tmp_path / "lastfm_monitor.conf")
+        assert written["USE_TRACK_DURATION_FROM_SPOTIFY"] is True
+        assert written["DO_NOT_SHOW_DURATION_MARKS"] is False
+
+
 class TestTheDefaultsOnARerun:
 
     def test_the_webhook_question_follows_the_saved_switch(self):
