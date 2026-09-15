@@ -2794,12 +2794,11 @@ def build_webhook_payload(title: str, description: str, notification_type: str, 
         raise ValueError("WEBHOOK_TEMPLATE could not be formatted with the supported placeholders") from exc
     if not isinstance(payload, dict):
         raise ValueError("WEBHOOK_TEMPLATE must be a JSON object or a dictionary")
-    if isinstance(payload, dict):
-        if payload.get("username") == "":
-            payload.pop("username")
-        if payload.get("avatar_url") == "":
-            payload.pop("avatar_url")
-        payload["allowed_mentions"] = {"parse": []}
+    if payload.get("username") == "":
+        payload.pop("username")
+    if payload.get("avatar_url") == "":
+        payload.pop("avatar_url")
+    payload["allowed_mentions"] = {"parse": []}
     return payload
 
 
@@ -3090,11 +3089,17 @@ def close_pending_notice_block():
         print_cur_ts("Timestamp:\t\t\t")
 
 
-# Records a swallowed exception in debug output so a silently degraded feature can still be diagnosed
+# Stops the run when this process is out of file descriptors, since every fallback below it would hit the same limit
+def exit_if_out_of_file_descriptors(exc):
+    if not is_too_many_open_files(exc):
+        return
+    print_recovery_advice(classify_recovery_error(exc))
+    raise SystemExit(1)
+
+
+# Records a swallowed exception in debug output, first stopping the run if the cause was a local descriptor limit
 def debug_swallowed_exception(context, exc):
-    if is_too_many_open_files(exc):
-        print_recovery_advice(classify_recovery_error(exc))
-        raise SystemExit(1)
+    exit_if_out_of_file_descriptors(exc)
     debug_print(context, outcome="failed", error=f"{type(exc).__name__}: {exc}")
 
 
