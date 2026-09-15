@@ -75,6 +75,10 @@ class SpotifyWebBackendTests(unittest.TestCase):
         with patch.object(monitor, "SPOTIFY_TOTP_SECRET_CIPHER_BYTES", ("bad", 55)):
             with self.assertRaises(ValueError):
                 monitor.generate_totp()
+        # A single number in place of the sequence is truthy, so it has to be rejected before anything iterates it
+        with patch.object(monitor, "SPOTIFY_TOTP_SECRET_CIPHER_BYTES", 17):
+            with self.assertRaises(ValueError):
+                monitor.generate_totp()
         with patch.object(monitor, "SPOTIFY_TOTP_VERSION", 0):
             with self.assertRaises(ValueError):
                 monitor.generate_totp()

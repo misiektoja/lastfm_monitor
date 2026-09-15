@@ -448,6 +448,27 @@ def test_a_line_break_in_a_value_cannot_split_the_assignment(tmp_path):
     assert destination.read_text(encoding="utf-8") == 'SMTP_PASSWORD="one\\ntwo"\n'
 
 
+# Verifies a saved value written across several lines is replaced whole, since replacing only its first
+# line left the rest of the old secret behind and the next run could not parse what it wrote
+def test_a_multiline_secret_is_replaced_whole(tmp_path):
+    destination = tmp_path / ".env"
+    destination.write_text('SMTP_PASSWORD="first line\nsecond line"\nOTHER=keep\n', encoding="utf-8")
+
+    monitor.update_dotenv_file(destination, {"SMTP_PASSWORD": "replacement"})
+
+    assert destination.read_text(encoding="utf-8") == 'SMTP_PASSWORD="replacement"\nOTHER=keep\n'
+
+
+# Verifies clearing such a value removes all of it, for the same reason
+def test_a_cleared_multiline_secret_leaves_nothing_behind(tmp_path):
+    destination = tmp_path / ".env"
+    destination.write_text('SMTP_PASSWORD="first line\nsecond line"\nOTHER=keep\n', encoding="utf-8")
+
+    monitor.update_dotenv_file(destination, {"SMTP_PASSWORD": ""})
+
+    assert destination.read_text(encoding="utf-8") == "OTHER=keep\n"
+
+
 # Verifies the writer refuses a key this tool does not ship, so a typo cannot put an unknown name in the private file
 def test_the_writer_refuses_a_key_this_tool_does_not_ship(tmp_path):
     with pytest.raises(ValueError):
