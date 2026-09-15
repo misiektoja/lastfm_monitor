@@ -211,7 +211,7 @@ class TestSetSmtpPassword:
         assert "mail-secret-value" not in str(raised.value)
         assert "mail-secret-value" not in capsys.readouterr().out
 
-    # Several providers quote the credentials back in the rejection reply, and the sign-in has already restored
+    # Several providers quote the credentials back in the rejection reply. The sign-in has already restored
     # the previous password by then, so the value that was tried has to reach the redaction from the caller
     def test_a_reply_quoting_the_password_is_redacted(self, tmp_path, configured_mail, capsys):
         destination = tmp_path / ".env"
