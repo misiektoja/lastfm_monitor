@@ -249,7 +249,9 @@ class TestWhereTheCallSiteSits:
         assert not any("lf_user_online" in ast.dump(gate) for gate in gates), "the banner is gated on the target's state"
 
     def test_the_reminder_is_not_conditional_on_a_flag(self):
-        settled = SOURCE.index("    LIVENESS_REMINDER_SECONDS = LIVENESS_CHECK_INTERVAL if LIVENESS_CHECK_INTERVAL > 0 else 0")
-        line_start = SOURCE.rindex("\n", 0, settled)
-        preceding = SOURCE[:line_start].rsplit("\n", 3)[-3:]
-        assert not any(line.strip().startswith("if ") for line in preceding), f"the reminder is settled inside a branch: {preceding}"
+        tree = ast.parse(SOURCE)
+        function = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "apply_cli_overrides")
+        assignments = [node for node in ast.walk(function) if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "LIVENESS_REMINDER_SECONDS" for target in node.targets)]
+        assert assignments
+        guards = [node.test for node in ast.walk(function) if isinstance(node, ast.If) and any(assignment in ast.walk(node) for assignment in assignments)]
+        assert all("args." not in ast.unparse(guard) for guard in guards)

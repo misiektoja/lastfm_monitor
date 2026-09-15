@@ -1,5 +1,6 @@
 """Install detection and the commands the tool prints for it, including the paths a printed command has to carry."""
 
+from command_expectations import runtime_command
 import inspect
 import ast
 import re
@@ -57,9 +58,9 @@ class TestInstallDetection:
     def test_each_install_method_gets_its_own_command_prefix(self, monkeypatch):
         monkeypatch.setenv(monitor.INSTALL_METHOD_ENV_VAR, "manual")
         monkeypatch.setattr(monitor.sys, "argv", ["/opt/tools/lastfm_monitor.py"])
-        assert monitor.install_command_prefix() == ["python3", "lastfm_monitor.py"]
+        assert monitor.install_command_prefix() == [monitor.sys.executable, str(Path(monitor.__file__).resolve())]
         monkeypatch.setenv(monitor.INSTALL_METHOD_ENV_VAR, "pip")
-        assert monitor.install_command_prefix() == ["lastfm_monitor"]
+        assert monitor.install_command_prefix() == [monitor.sys.executable, "-m", "lastfm_monitor"]
 
 
 class TestArgumentQuoting:
@@ -88,50 +89,50 @@ class TestRenderedCommands:
         monkeypatch.setattr(monitor, "DOTENV_FILE", "")
 
     def test_a_command_starts_with_the_prefix_for_the_detected_install(self):
-        assert monitor.render_command(["--send-test-webhook"]) == "lastfm_monitor --send-test-webhook"
+        assert monitor.render_command(["--send-test-webhook"]) == runtime_command("lastfm_monitor --send-test-webhook")
 
     # A fix that tells the reader to retry against a different config sends them to check the wrong setup
     def test_the_files_this_run_was_given_are_carried_by_default(self, monkeypatch):
         monkeypatch.setattr(monitor, "CLI_CONFIG_PATH", "/etc/lastfm.conf")
         monkeypatch.setattr(monitor, "DOTENV_FILE", "/etc/lastfm.env")
-        assert monitor.render_command(["--send-test-email"]) == "lastfm_monitor --send-test-email --config-file /etc/lastfm.conf --env-file /etc/lastfm.env"
+        assert monitor.render_command(["--send-test-email"]) == runtime_command("lastfm_monitor --send-test-email --config-file /etc/lastfm.conf --env-file /etc/lastfm.env")
 
     def test_a_command_that_creates_a_new_file_carries_no_paths(self, monkeypatch):
         monkeypatch.setattr(monitor, "CLI_CONFIG_PATH", "/etc/lastfm.conf")
         monkeypatch.setattr(monitor, "DOTENV_FILE", "/etc/lastfm.env")
-        assert monitor.render_command(["--generate-config"], include_paths=False) == "lastfm_monitor --generate-config"
+        assert monitor.render_command(["--generate-config"], include_paths=False) == runtime_command("lastfm_monitor --generate-config")
 
     def test_an_explicit_path_wins_over_the_active_one(self, monkeypatch):
         monkeypatch.setattr(monitor, "DOTENV_FILE", "/etc/lastfm.env")
-        assert monitor.render_command(["--send-test-webhook"], env_path="/home/u/.env") == "lastfm_monitor --send-test-webhook --env-file /home/u/.env"
+        assert monitor.render_command(["--send-test-webhook"], env_path="/home/u/.env") == runtime_command("lastfm_monitor --send-test-webhook --env-file /home/u/.env")
 
     def test_a_path_with_a_space_survives_the_paste(self, monkeypatch):
         monkeypatch.setattr(monitor, "DOTENV_FILE", "/tmp/some dir/.env")
-        assert monitor.render_command(["--send-test-email"]) == "lastfm_monitor --send-test-email --env-file '/tmp/some dir/.env'"
+        assert monitor.render_command(["--send-test-email"]) == runtime_command("lastfm_monitor --send-test-email --env-file '/tmp/some dir/.env'")
 
     def test_a_placeholder_positional_stays_readable(self):
-        assert monitor.render_command(["<lastfm_username>"]) == "lastfm_monitor <lastfm_username>"
+        assert monitor.render_command(["<lastfm_username>"]) == runtime_command("lastfm_monitor <lastfm_username>")
 
     # "none" means dotenv loading is off, not that no file was named, so a retry has to read what this run read
     def test_a_reading_command_carries_the_dotenv_sentinel(self, monkeypatch):
         monkeypatch.setattr(monitor, "DOTENV_FILE", "none")
-        assert monitor.render_command(["--send-test-webhook"]) == "lastfm_monitor --send-test-webhook --env-file none"
+        assert monitor.render_command(["--send-test-webhook"]) == runtime_command("lastfm_monitor --send-test-webhook --env-file none")
 
     # The secret commands refuse the sentinel at their own argument gate, so carrying it would print a rejected command
     @pytest.mark.parametrize("flag", ["--set-lastfm-credentials", "--set-spotify-credentials", "--set-webhook-url"])
     def test_a_command_that_writes_the_dotenv_drops_the_sentinel(self, monkeypatch, flag):
         monkeypatch.setattr(monitor, "DOTENV_FILE", "none")
-        assert monitor.render_command([flag]) == f"lastfm_monitor {flag}"
+        assert monitor.render_command([flag]) == runtime_command(f"lastfm_monitor {flag}")
 
     def test_a_command_that_writes_the_dotenv_still_carries_a_real_path(self, monkeypatch):
         monkeypatch.setattr(monitor, "DOTENV_FILE", "/etc/lastfm.env")
-        assert monitor.render_command(["--set-webhook-url"]) == "lastfm_monitor --set-webhook-url --env-file /etc/lastfm.env"
+        assert monitor.render_command(["--set-webhook-url"]) == runtime_command("lastfm_monitor --set-webhook-url --env-file /etc/lastfm.env")
 
     # Writing the dotenv says nothing about the config file, which the command still only reads
     def test_a_command_that_writes_the_dotenv_still_carries_the_config(self, monkeypatch):
         monkeypatch.setattr(monitor, "CLI_CONFIG_PATH", "/etc/lastfm.conf")
         monkeypatch.setattr(monitor, "DOTENV_FILE", "none")
-        assert monitor.render_command(["--set-webhook-url"]) == "lastfm_monitor --set-webhook-url --config-file /etc/lastfm.conf"
+        assert monitor.render_command(["--set-webhook-url"]) == runtime_command("lastfm_monitor --set-webhook-url --config-file /etc/lastfm.conf")
 
     @pytest.mark.parametrize("arguments, writes", [(["--set-webhook-url"], True), (["--set-lastfm-credentials"], True), (["--send-test-webhook"], False), (["--generate-config"], False), ([], False)])
     def test_only_the_secret_commands_count_as_writing_the_dotenv(self, arguments, writes):

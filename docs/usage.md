@@ -13,7 +13,7 @@ Examples use the PyPI command. For a downloaded script, run commands from the di
 
 For example, `lastfm_monitor --setup` becomes `python3 lastfm_monitor.py --setup` on macOS or Linux. Use `python` on Windows. Replace placeholders such as `<lastfm_username>` with a Last.fm username.
 
-The manual-script prefix names the file rather than its path, so run it from the directory holding `lastfm_monitor.py`. From another directory, use the full path instead, for example `python3 /opt/lastfm-monitor/lastfm_monitor.py --setup`. The commands the tool prints after setup and Doctor use the same short form.
+The manual-script examples assume the current directory contains `lastfm_monitor.py`. Commands printed by setup, Doctor and recovery messages use the running interpreter and the full script path. Packaged installations use the running interpreter with `-m lastfm_monitor`.
 
 For first-time configuration, follow [Setup & First Run](setup-and-first-run.md). Use [Doctor Preflight](troubleshooting.md#doctor-preflight) to check a setup before monitoring.
 

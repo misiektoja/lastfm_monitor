@@ -1,5 +1,8 @@
 # Setup & First Run
 
+
+When rebuilding an existing configuration, setup keeps its saved `DOTENV_FILE` unless you pass `--env-file PATH`. A nonempty exported secret takes precedence over the dotenv file. An explicit empty value in that file still overrides the configuration, both after saving and on the next run. Quoted dotenv keys receive the same replacement confirmation as unquoted keys.
+
 ## Before You Start
 
 Install the tool using [Installation](installation.md). You will need a Last.fm username and the [Last.fm API key and shared secret](#lastfm-api-key-and-shared-secret). The wizard collects credentials through hidden prompts.

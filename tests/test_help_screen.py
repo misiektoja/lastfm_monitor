@@ -1,5 +1,6 @@
 """The --help screen: the shared group names and order, the one-shot help sentences and the examples block."""
 
+from command_expectations import runtime_command
 import re
 import subprocess
 import sys
@@ -91,7 +92,7 @@ class TestExamples:
     def test_the_wizard_is_the_first_example(self, help_screen):
         block = help_screen[help_screen.index("Examples:"):]
         first = [line.strip() for line in block.splitlines() if line.startswith("  ")][:2]
-        assert first == ["# Guided setup, recommended for the first run", "python3 lastfm_monitor.py --setup"]
+        assert first == ["# Guided setup, recommended for the first run", runtime_command("python3 lastfm_monitor.py --setup")]
 
     # Verifies the one-line description carries the repository link the way the sibling monitors print it
     def test_the_description_links_the_repository(self, help_screen):
@@ -113,7 +114,7 @@ class TestExamples:
         lines = help_screen[help_screen.index("Examples:"):].splitlines()
         commands = [line.strip() for line in lines if line.startswith("  ") and not line.startswith("  #")]
         assert len(commands) >= 10
-        assert all(command.startswith("python3 lastfm_monitor.py ") for command in commands)
+        assert all(command.startswith(runtime_command("python3 lastfm_monitor.py ")) for command in commands)
 
     def test_the_banner_is_printed_once(self, help_screen):
         assert help_screen.count(monitor.STARTUP_BANNER.strip("\n").splitlines()[-1]) == 1

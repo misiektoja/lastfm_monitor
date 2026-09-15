@@ -1,5 +1,6 @@
 """What a bare, mistaken or one-shot invocation prints: the welcome screen, the missing-target block, a refused argument combination and the screen clear."""
 
+from command_expectations import runtime_command
 import argparse
 import io
 import subprocess
@@ -119,17 +120,17 @@ class TestWelcomeScreen:
     def test_each_entry_is_a_label_then_its_indented_command(self, screen, label, command):
         lines = screen[1].splitlines()
         position = lines.index(label)
-        assert lines[position + 1] == f"    {command}"
+        assert lines[position + 1] == f"    {runtime_command(command)}"
         assert lines[position + 2] == ""
 
     # A pipx user must not read a command that only works from a clone
     def test_every_command_is_rendered_for_the_detected_install(self, screen, monkeypatch):
         commands = [line.strip() for line in screen[1].splitlines() if line.startswith("    ")]
-        assert commands and all(command.startswith("lastfm_monitor ") for command in commands)
+        assert commands and all(command.startswith(runtime_command("lastfm_monitor ")) for command in commands)
 
     def test_the_two_single_lines_are_aligned_with_each_other(self, screen):
         lines = [line for line in screen[1].splitlines() if line.startswith(("Full options:", "Guide:"))]
-        assert [line.index("lastfm_monitor") for line in lines[:1]] == [len("Full options: ")]
+        assert [line.index(runtime_command("lastfm_monitor")) for line in lines[:1]] == [len("Full options: ")]
         assert lines[1].index("https://") == len("Full options: ")
 
     def test_the_guide_opens_the_page_rather_than_one_of_its_sections(self, screen):
@@ -275,7 +276,7 @@ class TestConfigDiscoveryDisabled:
         monkeypatch.setattr(monitor, "CLI_CONFIG_PATH", "none")
         monkeypatch.setattr(monitor, "DOTENV_FILE", "none")
         monkeypatch.setenv(monitor.INSTALL_METHOD_ENV_VAR, monitor.INSTALL_METHOD_PYPI)
-        assert monitor.render_command(["<lastfm_username>"]) == "lastfm_monitor <lastfm_username> --config-file none --env-file none"
+        assert monitor.render_command(["<lastfm_username>"]) == runtime_command("lastfm_monitor <lastfm_username> --config-file none --env-file none")
 
     def test_a_real_run_prints_the_command_it_was_given(self, tmp_path):
         result = subprocess.run([sys.executable, str(PROJECT_ROOT / "lastfm_monitor.py"), "--config-file", "none", "--env-file", "none"], capture_output=True, text=True, cwd=tmp_path)

@@ -265,14 +265,15 @@ class TestTheSecretsTheWizardPutsInEffect:
         assert monitor.secrets_by_source() == [("dotenv file", ["LASTFM_API_KEY"]), ("environment", ["LASTFM_API_SECRET"])]
 
     # Without python-dotenv the entered values are applied straight from the wizard, and they still have a home
-    def test_the_entered_values_are_credited_when_the_file_cannot_be_read_back(self, tmp_path, monkeypatch):
+    def test_unwritten_values_are_not_credited_as_saved(self, tmp_path, monkeypatch):
         monkeypatch.setattr(monitor, "SECRET_SOURCES", {})
         state = monitor.WizardSetupState(str(tmp_path / "lastfm_monitor.conf"), str(tmp_path / ".env"), dict(monitor._config_template_defaults()))
         state.secret_updates = {"WEBHOOK_URL": "https://example.test/hooks/written"}
 
         monitor._wizard_apply_saved_values(state, env_path=None)
 
-        assert monitor.secrets_by_source() == [("dotenv file", ["WEBHOOK_URL"])]
+        assert monitor.secrets_by_source() == []
+        assert monitor.WEBHOOK_URL != state.secret_updates["WEBHOOK_URL"]
 
 
 class TestPerSectionEditing:
