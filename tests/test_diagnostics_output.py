@@ -156,6 +156,23 @@ def run_main_to_the_loop(tmp_path, arguments=()):
             monitor.main()
 
 
+# Verifies an empty export is treated as absent, so a shell-profile leftover does not blank the dotenv value
+def test_an_empty_export_does_not_shadow_the_dotenv_file(restored_globals, tmp_path):
+    config_path = tmp_path / "lastfm.conf"
+    config_path.write_text('LASTFM_API_SECRET = "lastfmapisecret00000000000000000"\nDISABLE_LOGGING = True\n', encoding="utf-8")
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"LASTFM_API_KEY={API_KEY}\n", encoding="utf-8")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.chdir(tmp_path)
+        patch.setenv("LASTFM_API_KEY", "")
+        patch.setattr(monitor, "lastfm_monitor_user", lambda *args, **kwargs: sys.exit(0))
+        patch.setattr(monitor, "check_internet", lambda *a, **k: True)
+        patch.setattr(monitor.sys, "argv", ["lastfm_monitor", "someuser", "--config-file", str(config_path), "--env-file", str(env_file)])
+        with pytest.raises(SystemExit):
+            monitor.main()
+        assert monitor.LASTFM_API_KEY == API_KEY
+
+
 # The only place a user who never opens --help learns the two modes exist
 class TestTheDefaultOutputNamesBothModes:
     def test_a_plain_run_says_where_more_detail_lives(self, restored_globals, tmp_path, capsys):
