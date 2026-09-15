@@ -887,7 +887,8 @@ class TestABlankSecretAnswer:
 
         monitor._wizard_collect_email_section(state, input_func=script, getpass_func=Script([""]))
 
-        assert checked == [""]
+        # The caller resolves the saved value, so the check signs in with it rather than leaving the fallback to do it
+        assert checked == ["saved-password"]
         assert state.secret_updates == {}
         assert not any("Replace" in prompt for prompt in script.prompts)
         assert env_path.read_text(encoding="utf-8") == "SMTP_PASSWORD=saved-password\n"
@@ -1062,3 +1063,35 @@ class TestTheDefaultsOnARerun:
         assert state.config_values["WEBHOOK_ACTIVE_NOTIFICATION"] is True
         assert state.config_values["WEBHOOK_ENABLED"] is True
         assert state.config_values["TRACK_SONGS"] is True
+
+
+# Setup reports the sign-in succeeded and then writes the files a restart reads, so the value it proves has to be
+# the value the next run resolves. Startup prefers an export over the dotenv file, and setup has to agree
+def test_the_effective_secret_follows_the_startup_precedence(tmp_path, monkeypatch):
+    env_path = tmp_path / ".env"
+    env_path.write_text('SMTP_PASSWORD="saved-in-file"\n', encoding="utf-8")
+    monkeypatch.delenv("SMTP_PASSWORD", raising=False)
+    monkeypatch.setattr(monitor, "SMTP_PASSWORD", "from-config-file", raising=False)
+
+    assert monitor.effective_secret_after_setup("SMTP_PASSWORD", env_path, {}) == ("saved-in-file", False)
+    assert monitor.effective_secret_after_setup("SMTP_PASSWORD", env_path, {"SMTP_PASSWORD": "accepted"}) == ("accepted", False)
+    monkeypatch.setenv("SMTP_PASSWORD", "exported")
+    assert monitor.effective_secret_after_setup("SMTP_PASSWORD", env_path, {"SMTP_PASSWORD": "accepted"}) == ("exported", True)
+    monkeypatch.delenv("SMTP_PASSWORD", raising=False)
+    assert monitor.effective_secret_after_setup("SMTP_PASSWORD", tmp_path / "absent.env", {}) == ("from-config-file", False)
+
+
+# Keeping the saved password used to check the one just typed, which is the one thrown away
+def test_a_declined_replacement_checks_the_password_that_is_kept(tmp_path, monkeypatch):
+    checked = []
+    env_path = tmp_path / ".env"
+    env_path.write_text('SMTP_PASSWORD="saved-in-file"\n', encoding="utf-8")
+    monkeypatch.delenv("SMTP_PASSWORD", raising=False)
+    monkeypatch.setattr(monitor, "_wizard_verify_smtp", lambda values, password, **kwargs: checked.append(password))
+    state = monitor.WizardSetupState(str(tmp_path / "lastfm_monitor.conf"), str(env_path), dict(monitor._config_template_defaults()))
+    state.env_path = env_path
+
+    monitor._wizard_collect_email_section(state, input_func=Script(["y", "smtp.example.test", "", "", "user", "from@example.test", "to@example.test", "n", "1"]), getpass_func=Script(["typed-new"]))
+
+    assert checked == ["saved-in-file"]
+    assert "SMTP_PASSWORD" not in state.secret_updates
