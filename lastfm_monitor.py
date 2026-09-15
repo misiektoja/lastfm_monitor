@@ -1432,6 +1432,11 @@ def colorize_links(text):
     return _sub_outside_color(_URL_RE, lambda mo: colorize("link", mo.group(0)), text)
 
 
+# Colours one line of a fix block the way the output stream colours it, keeping its guide line a link
+def colorize_fix_line(line):
+    return colorize_links(line) if line.lstrip().startswith("Guide: ") else colorize("info", line)
+
+
 # Truncates each line to a display width, expanding tabs and counting double-width characters correctly
 def truncate_string_per_line(message, truncate_width, tabsize=8):
     try:
@@ -7293,7 +7298,7 @@ def render_doctor_marker(status):
 def print_doctor_check(check):
     print(f"{render_doctor_marker(check.status)} {check.label}")
     if check.detail:
-        print(f"  {check.detail}")
+        print(f"  {colorize_links(check.detail)}")
 
 
 # Renders the heading and every non-empty section, with a fix line on the rows that are not a pass
@@ -7313,7 +7318,7 @@ def render_doctor_sections(report):
             if check.status != "PASS" and check.advice is not None:
                 # The fix carries its own guide line, so each line is indented and styled on its own rather
                 # than leaving one colour sequence open across the newline
-                lines.extend(f"  {colorize('info', advice_line)}" for advice_line in f"To fix: {check.advice.fix}".splitlines())
+                lines.extend(f"  {colorize_fix_line(advice_line)}" for advice_line in f"To fix: {check.advice.fix}".splitlines())
     return sanitize_error_text("\n".join(lines))
 
 
@@ -7327,7 +7332,7 @@ def render_doctor_summary(checks):
         summary_line = colorize("warning", f"  All critical checks passed with {warnings} warning(s). Review the warnings above.")
     else:
         summary_line = colorize("boolean_true", "  All checks passed. You are good to go!")
-    return "\n".join(("", colorize("header", "Summary"), summary_line, "", colorize("info", f"Guide: {DOCTOR_GUIDE_URL}")))
+    return "\n".join(("", colorize("header", "Summary"), summary_line, "", colorize_links(f"Guide: {DOCTOR_GUIDE_URL}")))
 
 
 # Returns the real terminal underneath the installed stream, so progress can move the cursor safely
