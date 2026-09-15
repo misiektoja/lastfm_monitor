@@ -61,6 +61,8 @@ To ignore any configuration file and run on the built-in defaults plus command-l
 lastfm_monitor <lastfm_username> --config-file none
 ```
 
+The startup summary reports `Discovery disabled` when it is in effect.
+
 A path that does not exist is still an error. Only the literal `none` selects no file.
 
 **New in v2.3:** The configuration file includes options to enable/disable music service URLs (Last.fm, Spotify, Apple Music, YouTube Music, Amazon Music, Deezer, Tidal) and lyrics service URLs (Genius, AZLyrics, Tekstowo.pl, Musixmatch, Lyrics.com) in console and email outputs.

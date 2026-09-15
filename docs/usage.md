@@ -24,7 +24,7 @@ Settings come from a configuration file when one is found. [Configuration File](
 
 If a run does not start, `--doctor` reports every check the tool makes before monitoring. See [Doctor Preflight](troubleshooting.md#doctor-preflight).
 
-Before monitoring starts the tool prints the settings in effect: the monitored user, the polling intervals, both alert channels, the files the run reads and writes, and each optional feature that is switched on. `--verbose` and `--debug` print the complete list instead, including the settings left at their defaults and where each secret came from. See [Verbose Output](troubleshooting.md#verbose-output).
+Before monitoring starts the tool prints the settings in effect: the monitored user, the polling intervals, both alert channels, the files the run reads and writes, and each optional feature that is switched on. `--verbose` and `--debug` print the complete list instead, including the settings left at their defaults and where each secret came from. That view also names the webhook service alerts go to and the mail server that sends them, with the recipient address masked, whether the delivery confirmations are printed and the process id, Python version and operating system the run is on. See [Verbose Output](troubleshooting.md#verbose-output).
 
 The log file always receives the complete list, whichever view the terminal was shown, so a log attached to a bug report carries every effective setting.
 
