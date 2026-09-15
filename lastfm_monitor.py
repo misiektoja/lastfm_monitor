@@ -359,6 +359,10 @@ VERBOSE_MODE = False
 # Can also be enabled via the --debug flag, which turns it on regardless of this setting
 DEBUG_MODE = False
 
+# Whether verbose output confirms each delivered email and webhook alert
+# Applies only when VERBOSE_MODE is enabled
+DELIVERY_CONFIRMATIONS = True
+
 # How often to print a "liveness check" message to the output; in seconds
 # Set to 0 to disable
 LIVENESS_CHECK_INTERVAL = 86400  # 24 hours
@@ -672,6 +676,7 @@ FRIENDS_CHANGE_COUNTER = 0
 FRIENDS_RETRY_INTERVAL = 0
 VERBOSE_MODE = False
 DEBUG_MODE = False
+DELIVERY_CONFIRMATIONS = True
 LASTFM_USERNAME_GLOBAL = ""
 
 exec(CONFIG_BLOCK, globals())
@@ -1765,7 +1770,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         debug_print("Email delivery", host=SMTP_HOST, port=SMTP_PORT, recipient=RECEIVER_EMAIL, outcome="failed", error=f"{type(e).__name__}: {e}")
         print_recovery_error(e, context="email")
         return 1
-    verbose_print(f"Email delivered to {RECEIVER_EMAIL}: {subject}")
+    verbose_delivery_print(f"Email delivered to {RECEIVER_EMAIL}: '{subject}'")
     return 0
 
 
@@ -2643,7 +2648,7 @@ def send_webhook(title: str, description: str, notification_type: str = "song", 
                 response = post_webhook_request(json=discord_payload, headers=request_headers)
             attempt_label = f"#{attempt + 1}/{WEBHOOK_MAX_ATTEMPTS}"
             if 200 <= response.status_code <= 299:
-                verbose_print(f"Webhook delivered through {webhook_provider_display_name(provider)}: {webhook_values['title']}")
+                verbose_delivery_print(f"Webhook delivered through {webhook_provider_display_name(provider)}: '{webhook_values['title']}'")
                 debug_print("Webhook delivery", provider=provider, host=webhook_destination_host(), attempt=attempt_label, status=response.status_code, outcome="OK")
                 return 0
             retryable = response.status_code == 429 or 500 <= response.status_code <= 599
@@ -2744,6 +2749,12 @@ def debug_print(_operation, **fields):
 def verbose_print(message):
     if VERBOSE_MODE:
         print(f"* {sanitize_error_text(message)}")
+
+
+# Prints one delivery confirmation in verbose mode unless DELIVERY_CONFIRMATIONS turns them off
+def verbose_delivery_print(message):
+    if DELIVERY_CONFIRMATIONS:
+        verbose_print(message)
 
 
 # Prints verbose-only notices as one block, so a standalone line is not left without the timestamp trailer

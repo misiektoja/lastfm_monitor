@@ -96,7 +96,7 @@ It reports a channel switched off because its settings cannot work, a tracked fi
 
 A feature that stays unavailable is reported once, when it stops working, rather than on every check that follows. The repeated failures are left to `--debug`. It is reported again when it starts working, but only when the failure itself was printed, so a recovery never refers to something you never saw.
 
-Verbose mode can also be turned on permanently with the `VERBOSE_MODE` configuration setting. The `--verbose` flag wins over a configuration file that sets `VERBOSE_MODE = False`.
+Verbose mode can also be turned on permanently with the `VERBOSE_MODE` configuration setting. Set `DELIVERY_CONFIRMATIONS = False` to keep verbose mode without the `* Email delivered` and `* Webhook delivered` lines, which is worth doing when alerts are frequent. The `--verbose` flag wins over a configuration file that sets `VERBOSE_MODE = False`.
 
 The two modes are independent. `--verbose` does not turn on debug output and `--debug` does not turn on verbose output. A run with neither ends its startup summary with a line naming both.
 
