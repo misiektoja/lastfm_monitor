@@ -211,6 +211,23 @@ class TestSetSmtpPassword:
         assert "mail-secret-value" not in str(raised.value)
         assert "mail-secret-value" not in capsys.readouterr().out
 
+    # Several providers quote the credentials back in the rejection reply, and the sign-in has already restored
+    # the previous password by then, so the value that was tried has to reach the redaction from the caller
+    def test_a_reply_quoting_the_password_is_redacted(self, tmp_path, configured_mail, capsys):
+        destination = tmp_path / ".env"
+        destination.write_text('SMTP_PASSWORD="old-value"\n', encoding="utf-8")
+
+        def echo(password, timeout=15):
+            raise monitor.smtplib.SMTPAuthenticationError(535, f"5.7.8 Not accepted. Sent: pass={password}".encode())
+
+        with pytest.raises(monitor.PrivateSettingsError) as raised:
+            monitor.run_set_smtp_password(env_file=destination, interactive=True, input_func=lambda prompt: "y", getpass_func=lambda prompt: "mail-secret-value", sign_in=echo)
+
+        assert "mail-secret-value" not in str(raised.value)
+        assert "<redacted>" in str(raised.value)
+        assert "did not accept the password" in str(raised.value)
+        assert "mail-secret-value" not in capsys.readouterr().out
+
     def test_a_declined_replacement_keeps_the_saved_password(self, tmp_path, configured_mail):
         destination = tmp_path / ".env"
         original = 'SMTP_PASSWORD="old-value"\n'

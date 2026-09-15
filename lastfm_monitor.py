@@ -925,7 +925,7 @@ import contextlib
 import functools
 import shutil
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, cast
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, cast
 import base64
 import hashlib
 import hmac
@@ -2090,10 +2090,12 @@ def known_secret_values() -> List[str]:
 
 
 # Redacts configured private values and common credential shapes from diagnostic text
-def sanitize_error_text(value: Any) -> str:
+def sanitize_error_text(value: Any, extra_secrets: Sequence[Any] = ()) -> str:
     text = str(value)
+    # A value being checked before it is saved is held by the caller and by no global, so it is passed in instead
+    entered = [secret for secret in extra_secrets if isinstance(secret, str) and len(secret) >= MIN_REDACTABLE_SECRET_LENGTH]
     # Longest first, so a secret that contains another one is not left half replaced
-    for secret in sorted(known_secret_values(), key=len, reverse=True):
+    for secret in sorted(known_secret_values() + entered, key=len, reverse=True):
         text = text.replace(secret, "<redacted>")
     patterns = (
         # A config parse error quotes the offending source line, which is how a password reaches the terminal and the log
@@ -5127,7 +5129,9 @@ def run_set_smtp_password(env_file=None, interactive=None, input_func=None, getp
     except PrivateSettingsError:
         raise
     except Exception as exc:
-        raise PrivateSettingsError(f"The mail server did not accept the password: {type(exc).__name__}: {sanitize_error_text(exc)}. The dotenv file was not changed") from None
+        # The sign-in restores the previous password before the failure reaches here, so the value that was tried
+        # is passed to the redaction explicitly rather than left to the global it would otherwise read
+        raise PrivateSettingsError(f"The mail server did not accept the password: {type(exc).__name__}: {sanitize_error_text(exc, (smtp_password,))}. The dotenv file was not changed") from None
     try:
         update_dotenv_file(destination, {"SMTP_PASSWORD": smtp_password})
     except PrivateSettingsError:
