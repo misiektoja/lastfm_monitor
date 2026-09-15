@@ -733,7 +733,8 @@ def drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles, check_interval=30,
     monkeypatch.setattr(monitor, "get_track_info", lambda *a, **k: (0, None, ""))
     monkeypatch.setattr(monitor, "get_spotify_apple_genius_search_urls", lambda *a, **k: tuple([""] * 13))
     if stub_notifications:
-        monkeypatch.setattr(monitor, "send_notification_channels", lambda *a, **k: (False, False))
+        # A stubbed delivery lands, since one that failed would put its channel on hold and print the hold
+        monkeypatch.setattr(monitor, "send_notification_channels", lambda *a, **k: (True, True))
 
     if friends_fail_after is not None:
         friends_calls = count(1)
@@ -1038,12 +1039,20 @@ class TestAMonitoringFailureAlertsBothChannels:
         assert "temporarily unavailable" in errors[0]["body"]
         assert "timed out" in errors[1]["body"]
 
-    # Each channel is tracked on its own, so the one that failed is retried while the one that landed is left alone
+    # Each channel is tracked on its own, so the one that failed is retried once its hold has passed while the one that landed is left alone
     def test_a_failed_channel_is_retried_and_a_delivered_one_is_not(self, monkeypatch, tmp_path, capsys):
         calls = recording_channels(monkeypatch, [(True, False), (False, True)])
-        drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=8, liveness=3600, fail_after=2, stub_notifications=False)
+        drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=20, liveness=3600, fail_after=2, stub_notifications=False)
         errors = [call for call in calls if call["type"] == "error"]
         assert [(call["email"], call["webhook"]) for call in errors] == [(True, True), (False, True)]
+
+    # A channel that failed is held for five minutes before the next attempt, so a broken mail server is not dialled on every check
+    def test_a_failed_channel_is_held_before_it_is_tried_again(self, monkeypatch, tmp_path, capsys):
+        calls = recording_channels(monkeypatch, [(True, False), (False, True)])
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=10, liveness=3600, fail_after=2, stub_notifications=False)
+        errors = [call for call in calls if call["type"] == "error"]
+        assert [(call["email"], call["webhook"]) for call in errors] == [(True, True)]
+        assert "* The webhook alert is on hold for 5 minutes after 1 attempt, then tried again" in transcript
 
     # A run that recovered and fails again is in a new outage, which deserves its own alert
     def test_a_new_outage_after_a_recovery_alerts_again(self, monkeypatch, tmp_path, capsys):

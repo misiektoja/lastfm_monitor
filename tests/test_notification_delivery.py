@@ -68,7 +68,7 @@ class TestWhatTheSenderReports:
 
 class TestAFailedChannelIsSentAgain:
     # Treating an attempt as a delivery loses the alert entirely, since the flag stops the next attempt
-    def test_the_failed_channel_is_tried_again_on_the_next_check(self, monkeypatch, tmp_path, capsys):
+    def test_the_failed_channel_is_tried_again_once_its_hold_has_passed(self, monkeypatch, tmp_path, capsys):
         monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
         monkeypatch.setattr(monitor, "DEBUG_MODE", False)
         deliveries = FakeDeliveries(email_results=[1, 0])
@@ -76,7 +76,10 @@ class TestAFailedChannelIsSentAgain:
         monkeypatch.setattr(monitor, "send_webhook", deliveries.send_webhook)
         monkeypatch.setattr(monitor, "ERROR_NOTIFICATION", True)
         monkeypatch.setattr(monitor, "webhook_event_enabled", lambda event: True)
-        drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=8, liveness=3600, fail_after=2, error_factory=rejected_key, stub_notifications=False)
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=8, liveness=3600, fail_after=2, error_factory=rejected_key, stub_notifications=False)
+        assert deliveries.emails == 1
+        assert "* The email alert is on hold for 5 minutes after 1 attempt, then tried again" in transcript
+        drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=16, liveness=3600, fail_after=2, error_factory=rejected_key, stub_notifications=False)
         assert deliveries.emails == 2
 
     # The channel that arrived must not be sent again while the other one is still being retried
@@ -111,7 +114,7 @@ class TestAFailedChannelIsSentAgain:
         monkeypatch.setattr(monitor, "send_webhook", deliveries.send_webhook)
         monkeypatch.setattr(monitor, "ERROR_NOTIFICATION", True)
         monkeypatch.setattr(monitor, "webhook_event_enabled", lambda event: True)
-        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=8, liveness=3600, fail_after=2, error_factory=rejected_key, stub_notifications=False).splitlines()
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=16, liveness=3600, fail_after=2, error_factory=rejected_key, stub_notifications=False).splitlines()
         retries = [number for number, line in enumerate(transcript) if line.startswith("Sending email notification")]
         assert len(retries) == 2
         assert transcript[retries[-1] + 1].startswith("Timestamp:")

@@ -196,7 +196,7 @@ If `WEBHOOK_ENABLED` is on but `WEBHOOK_URL` is not a complete HTTPS link, the t
 
 ### When One Channel Fails
 
-Email and webhook alerts are delivered independently, and the tool tracks which one arrived. If an error alert reaches the webhook but the mail server rejects the message, the next check sends the email again and leaves the webhook alone, so a failed channel is retried without delivering the same alert twice.
+Email and webhook alerts are delivered independently, and the tool tracks which one arrived. If an error alert reaches the webhook but the mail server rejects the message, a later check sends the email again and leaves the webhook alone, so a failed channel is retried without delivering the same alert twice. The retry waits 5 minutes at first and twice the previous wait after each further failure, up to an hour, so a mail server that is down is not dialled on every check.
 
 ## Storing Secrets
 

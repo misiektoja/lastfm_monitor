@@ -806,6 +806,44 @@ SPOTIFY_WEB_TOKEN_EXPIRY_WINDOW = 60
 LIVENESS_REMINDER_SECONDS = LIVENESS_CHECK_INTERVAL if LIVENESS_CHECK_INTERVAL > 0 else 0
 # How long a failure the tool can retry away must last before it is alerted, a failure it cannot is alerted at once
 ERROR_ALERT_AFTER_SECONDS = 120  # 2 minutes, the checks here run every few seconds
+# How long a channel that could not deliver an error alert waits before the next attempt, doubled on every further failure up to the cap
+ERROR_ALERT_RETRY_SECONDS = 300  # 5 minutes
+ERROR_ALERT_RETRY_MAX_SECONDS = 3600  # 1 hour
+
+
+# Tracks the error alert per channel: what was delivered, and how long a channel that failed waits before the next attempt
+class ErrorAlertState:
+    # Starts with nothing delivered and no channel on hold
+    def __init__(self) -> None:
+        self.email_sent = False
+        self.webhook_sent = False
+        self.email_failures = 0
+        self.webhook_failures = 0
+        self.email_retry_at = 0
+        self.webhook_retry_at = 0
+
+    # Forgets the delivered alert and any hold, so the next failure earns each channel a new one
+    def reset(self) -> None:
+        self.__init__()
+
+    # Tells whether a channel still owes the alert and its wait after a failed attempt, if any, has passed
+    def pending(self, channel: str, enabled, now: int) -> bool:
+        return bool(enabled) and not getattr(self, f"{channel}_sent") and now >= getattr(self, f"{channel}_retry_at")
+
+    # Records one attempt, holding a channel that failed for a growing wait so a broken server is not dialled on every check
+    def record(self, channel: str, attempted: bool, delivered: bool, now: int) -> None:
+        if not attempted:
+            return
+        if delivered:
+            setattr(self, f"{channel}_sent", True)
+            setattr(self, f"{channel}_failures", 0)
+            setattr(self, f"{channel}_retry_at", 0)
+            return
+        failures = getattr(self, f"{channel}_failures") + 1
+        delay = min(ERROR_ALERT_RETRY_SECONDS * 2 ** (failures - 1), ERROR_ALERT_RETRY_MAX_SECONDS)
+        setattr(self, f"{channel}_failures", failures)
+        setattr(self, f"{channel}_retry_at", now + delay)
+        print(f"* The {channel} alert is on hold for {display_time(delay)} after {failures} {'attempt' if failures == 1 else 'attempts'}, then tried again")
 
 stdout_bck = None
 csvfieldnames = ['Date', 'Artist', 'Track', 'Album']
@@ -5829,8 +5867,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
     email_sent = False
     webhook_sent = False
     # The error alert is tracked apart from the event alerts, once per channel and per failure category
-    error_email_sent = False
-    error_webhook_sent = False
+    error_alert = ErrorAlertState()
     error_delivery_code = None
 
     tracks_upper = {t.upper() for t in tracks}
@@ -6048,8 +6085,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             if outage_lasted is not None:
                 print_outage_recovery(username, outage_lasted)
                 alive_since = int(time.time())
-            error_email_sent = False
-            error_webhook_sent = False
+            error_alert.reset()
             error_delivery_code = None
             recovery_hint_tracker.reset()
             # Handle case where user still has no tracks
@@ -6775,8 +6811,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             # A failure that changes family is a different failure, so each channel earns a new alert for it, while an
             # internet outage that flaps between a timeout and an unreachable host stays one failure
             if outage_family(advice.code) != outage_family(error_delivery_code):
-                error_email_sent = False
-                error_webhook_sent = False
+                error_alert.reset()
                 error_delivery_code = advice.code
 
             # A failure is reported once it is confirmed, then left to the hourly reminder rather than repeated on every check
@@ -6795,8 +6830,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             # Attempted on every failing check rather than only on the report, so a channel that failed is tried again
             # A failure the tool can retry away is alerted once the outage has lasted ERROR_ALERT_AFTER_SECONDS, one it cannot at once
             alert_due = not advice.retryable or int(time.time()) - outage.since >= ERROR_ALERT_AFTER_SECONDS
-            error_email_enabled = alert_due and ERROR_NOTIFICATION and not error_email_sent
-            error_webhook_enabled = alert_due and webhook_event_enabled("error") and not error_webhook_sent
+            now = int(time.time())
+            error_email_enabled = alert_due and error_alert.pending("email", ERROR_NOTIFICATION, now)
+            error_webhook_enabled = alert_due and error_alert.pending("webhook", webhook_event_enabled("error"), now)
             if error_email_enabled or error_webhook_enabled:
                 if advice.code == "auth.api_key_invalid":
                     m_subject = f"lastfm_monitor: API key error! (user: {username})"
@@ -6805,8 +6841,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 m_body = f"{advice.summary}{nl_ch}{nl_ch}To fix: {advice.fix}{nl_ch}{nl_ch}Last.fm Monitor will retry in {display_time(sleep_interval)}.{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                 m_body_html = f"<html><head></head><body>{html_text(advice.summary)}<br><br>To fix: {html_text(advice.fix)}<br><br>Last.fm Monitor will retry in {escape(display_time(sleep_interval))}.{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
                 email_delivered, webhook_delivered = send_notification_channels("error", m_subject, m_body, m_body_html, email_enabled=error_email_enabled, webhook_enabled=error_webhook_enabled)
-                error_email_sent = error_email_sent or email_delivered
-                error_webhook_sent = error_webhook_sent or webhook_delivered
+                error_alert.record("email", error_email_enabled, email_delivered, now)
+                error_alert.record("webhook", error_webhook_enabled, webhook_delivered, now)
                 reported = True
 
             # One trailer for whatever this check printed, since a retry can be the only thing on the screen
