@@ -2294,12 +2294,12 @@ def unknown_failure_fix():
 
 
 # Maps one exception plus its status and calling context to stable recovery advice
-def classify_recovery_error(error=None, context="runtime", detail=""):
+def classify_recovery_error(error=None, context="runtime", detail="", extra_secrets=()):
     if isinstance(error, RecoveryError):
         return error.advice
     # Both are matched, since a caller that adds context would otherwise hide the error text the rules read
     message = " ".join(part for part in (str(detail or ""), str(error or "")) if part).lower()
-    safe_detail = sanitize_error_text(detail or error) if (detail or error) else ""
+    safe_detail = sanitize_error_text(detail or error, extra_secrets=extra_secrets) if (detail or error) else ""
     lastfm_status = recovery_lastfm_status(error)
     http_status = recovery_http_status(error)
 
@@ -2706,8 +2706,6 @@ def format_webhook_payload(template: Any, values: dict) -> Any:
             return values.get("color", 0xD92323)
         try:
             return template.format(**values)
-        except KeyError:
-            return template
         # A placeholder the payload cannot fill, such as {title[9]} or the positional {0}, is a setting
         # to correct rather than a delivery failure, so it names the template text that could not render
         except Exception as exc:
@@ -2722,7 +2720,9 @@ def render_discord_template(template, values):
             template = json.loads(template)
         except json.JSONDecodeError:
             try:
-                template = json.loads(str(format_webhook_payload(template, values)))
+                # Legacy templates doubled JSON braces for str.format, while quoted values remain templates
+                unescaped = re.sub(r'("(?:\\.|[^"\\])*")|(\{\{|\}\})', lambda match: match.group(1) if match.group(1) is not None else match.group(2)[0], template)
+                template = json.loads(unescaped)
             except json.JSONDecodeError as exc:
                 raise ValueError("WEBHOOK_TEMPLATE must be a dictionary or a JSON object string") from exc
     if not isinstance(template, dict):
@@ -3110,6 +3110,8 @@ def debug_swallowed_exception(context, exc):
 # Names the alert a feature feeds when that feature could not be read and reports whether the reader saw it
 def verbose_degraded_feature(feature, alert, error=None):
     global PENDING_NOTICE_BLOCK
+    if error is not None:
+        exit_if_out_of_file_descriptors(error)
     debug_print(feature, outcome="degraded", alert=alert, error=None if error is None else f"{type(error).__name__}: {error}")
     verbose_print(f"{feature} is unavailable, so {alert} cannot fire")
     # A degraded feature can be reported from inside a report, so the check closes the block instead of this line
@@ -3673,17 +3675,18 @@ def _lastfm_http_get_with_retry(url, attempts=3, base_delay=2.0):
                 debug_print("HTTP GET", url=url, timeout=f"{timeout}s", attempt=attempt_label, status=status, outcome="OK")
                 return response
         except (req.Timeout, req.ConnectionError) as e:
+            exit_if_out_of_file_descriptors(e)
             last_exc = e
             debug_print("HTTP GET", url=url, timeout=f"{timeout}s", attempt=attempt_label, outcome="failed", error=f"{type(e).__name__}: {e}")
         except req.HTTPError as e:
             # Non-retryable 4xx (except 429 handled above) propagates immediately
             debug_print("HTTP GET", url=url, timeout=f"{timeout}s", attempt=attempt_label, status=status, outcome="failed", error=f"{type(e).__name__}: {e}")
-            raise RuntimeError(f"Failed to fetch from Last.fm: {e}")
+            raise RuntimeError(f"Failed to fetch from Last.fm: {e}") from e
         if i < attempts - 1:
             delay = base_delay * (2 ** i)
             debug_print("Last.fm request retry", url=url, attempt=attempt_label, delay=f"{delay:g}s", status=status, outcome="failed")
             time.sleep(delay)
-    raise RuntimeError(f"Failed to fetch from Last.fm after {attempts} attempts: {last_exc}")
+    raise RuntimeError(f"Failed to fetch from Last.fm after {attempts} attempts: {last_exc}") from last_exc
 
 
 # Parses the "(N)" suffix from the h1 header on a followers/following page and returns N as int or None if not found
@@ -4019,13 +4022,17 @@ def load_friends_state(username, friends_type):
         try:
             with open(filename, 'r', encoding="utf-8") as f:
                 data = json.load(f)
-                saved_users = set(data) if isinstance(data, list) else set(data['users']) if isinstance(data, dict) and 'users' in data else set()
+                users = data if isinstance(data, list) else data.get('users') if isinstance(data, dict) else None
+                if not isinstance(users, list) or any(not isinstance(user, str) or not user.strip() for user in users):
+                    raise ValueError("expected a list of nonempty usernames or an object with that list in 'users'")
+                saved_users = set(users)
                 debug_print("Friends state load", path=filename, type=friends_type, users=len(saved_users), outcome="OK")
                 return saved_users
         except Exception as e:
             debug_print("Friends state load", path=filename, type=friends_type, outcome="failed", error=f"{type(e).__name__}: {e}")
-            print_recovery_error(e, context="file", detail=f"Cannot load the {friends_type} state from '{filename}': {e}")
-            return set()
+            print_recovery_error(e, context="file", detail=f"Cannot load the {friends_type} state from '{filename}': {e}. The next successful check will rebuild the baseline without change alerts")
+            exit_if_out_of_file_descriptors(e)
+            return None
     debug_print("Friends state load", path=filename, type=friends_type, outcome="skipped", reason="no saved state")
     return set()
 
@@ -4104,6 +4111,8 @@ def check_friends_changes(username, track_followings, track_followers, track_bio
             current_friends = lastfm_get_friends(username)
             current_states['followings'] = current_friends
 
+            if previous_friends is None:
+                previous_friends = current_friends
             added_friends = current_friends - previous_friends
             removed_friends = previous_friends - current_friends
 
@@ -4128,6 +4137,8 @@ def check_friends_changes(username, track_followings, track_followers, track_bio
             current_followers = lastfm_get_followers(username)
             current_states['followers'] = current_followers
 
+            if previous_followers is None:
+                previous_followers = current_followers
             added_followers = current_followers - previous_followers
             removed_followers = previous_followers - current_followers
 
@@ -4704,7 +4715,7 @@ def spotify_oauth_app_configured():
 
 
 # Returns an expiration-aware Spotify OAuth app token through Spotipy's cache handler
-def spotify_get_access_token(sp_client_id, sp_client_secret):
+def spotify_get_access_token(sp_client_id, sp_client_secret, validate_credentials=False):
     global SP_OAUTH_MEMORY_CACHE_HANDLER
     try:
         from spotipy.cache_handler import CacheFileHandler, MemoryCacheHandler
@@ -4712,7 +4723,10 @@ def spotify_get_access_token(sp_client_id, sp_client_secret):
     except ImportError as error:
         raise RuntimeError("Spotipy is required for the Spotify OAuth app backend") from error
 
-    if SP_TOKENS_FILE:
+    if validate_credentials:
+        cache_handler = MemoryCacheHandler()
+        cache_description = "fresh validation memory"
+    elif SP_TOKENS_FILE:
         cache_handler = CacheFileHandler(cache_path=SP_TOKENS_FILE)
         cache_description = "file"
     else:
@@ -5127,6 +5141,7 @@ def spotify_search_song_trackid_duration_oauth(access_token, artist, track, albu
         try:
             track_items = spotify_oauth_search_track_items(access_token, search_query, strategy)
         except (req.RequestException, RuntimeError, TypeError, ValueError) as error:
+            exit_if_out_of_file_descriptors(error)
             debug_print("Spotify OAuth app search", strategy=strategy, outcome="failed", error=f"{type(error).__name__}: {error}")
             continue
         sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(track_items, artist, track, cleaned_track=track_cleaned or None, original_album=album)
@@ -5160,6 +5175,7 @@ def spotify_search_song_trackid_duration(artist, track, album=""):
             try:
                 track_items.append(spotify_get_track_info_web(track_uri))
             except (req.RequestException, RuntimeError, TypeError, ValueError) as error:
+                exit_if_out_of_file_descriptors(error)
                 debug_print("Spotify getTrack candidate", outcome="failed", error=f"{type(error).__name__}: {error}")
 
         sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(track_items, artist, track, cleaned_track=track_cleaned or None, original_album=album)
@@ -6313,12 +6329,12 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             # Load existing state if available
             if TRACK_FOLLOWINGS and followings_file_exists:
                 followings_loaded = load_friends_state(username, 'followings')
-                followings_count = len(followings_loaded)
+                followings_count = len(followings_loaded or ())
                 print(f"* Loading followings for user {username} from file lastfm_{username}_followings.json ({followings_count})")
 
             if TRACK_FOLLOWERS and followers_file_exists:
                 followers_loaded = load_friends_state(username, 'followers')
-                followers_count = len(followers_loaded)
+                followers_count = len(followers_loaded or ())
                 print(f"* Loading followers for user {username} from file lastfm_{username}_followers.json ({followers_count})")
 
             if (TRACK_BIO or TRACK_DISPLAY_NAME) and profile_file_exists:
@@ -6333,12 +6349,12 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             # Announce baseline creation for missing files
             if TRACK_FOLLOWINGS and not followings_file_exists:
                 if os.path.isfile(f"lastfm_{username}_followings.json"):
-                    followings_count = len(load_friends_state(username, 'followings'))
+                    followings_count = len(load_friends_state(username, 'followings') or ())
                     print(f"* Saving followings for user {username} to file lastfm_{username}_followings.json ({followings_count})")
 
             if TRACK_FOLLOWERS and not followers_file_exists:
                 if os.path.isfile(f"lastfm_{username}_followers.json"):
-                    followers_count = len(load_friends_state(username, 'followers'))
+                    followers_count = len(load_friends_state(username, 'followers') or ())
                     print(f"* Saving followers for user {username} to file lastfm_{username}_followers.json ({followers_count})")
 
             if (TRACK_BIO or TRACK_DISPLAY_NAME) and not profile_file_exists and os.path.isfile(f"lastfm_{username}_profile.json"):
@@ -6370,6 +6386,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 # No changes detected during baseline build
                 print_cur_ts("\nTimestamp:\t\t\t")
         except Exception as e:
+            exit_if_out_of_file_descriptors(e)
             print_recovery_error(e, detail=f"Cannot complete the initial friend and profile check: {e}")
             print_cur_ts("\nTimestamp:\t\t\t")
 
@@ -7540,7 +7557,7 @@ def runtime_configuration_errors():
 
 # The values this file defines for the settings checked below, so a configuration file that makes one
 # unusable can be reported and then ignored instead of stopping the commands that exist to correct it
-BUILT_IN_SHAPE_SETTINGS = {name: globals()[name] for name in ('LF_LOGFILE', 'CSV_FILE', 'MONITOR_LIST_FILE', 'DOTENV_FILE', 'COLOR_THEME') if name in globals()}
+BUILT_IN_SHAPE_SETTINGS = {name: globals()[name] for name in ('LF_LOGFILE', 'CSV_FILE', 'MONITOR_LIST_FILE', 'DOTENV_FILE', 'COLOR_THEME', 'TRUNCATE_CHARS', 'SP_TOKENS_FILE') if name in globals()}
 
 # Shape errors whose settings were replaced with the built-in values, so doctor still names them
 DISCARDED_SETTING_ERRORS = []
@@ -7561,6 +7578,9 @@ def prepare_configured_paths(args):
         value = getattr(args, argument, None)
         if value:
             settings[name] = value
+    if getattr(args, "truncate", None) is not None:
+        settings["TRUNCATE_CHARS"] = args.truncate
+        globals()["TRUNCATE_CHARS"] = args.truncate
     errors = configuration_shape_errors(settings)
     if not errors:
         # Cleared here so a run that starts with usable settings cannot inherit an earlier run's report
@@ -7587,9 +7607,12 @@ def prepare_configured_paths(args):
 def configuration_shape_errors(settings=None):
     errors = list(DISCARDED_SETTING_ERRORS) if settings is None else []
     settings = globals() if settings is None else settings
-    for name in ('LF_LOGFILE', 'CSV_FILE', 'MONITOR_LIST_FILE', 'DOTENV_FILE'):
+    for name in ('LF_LOGFILE', 'CSV_FILE', 'MONITOR_LIST_FILE', 'DOTENV_FILE', 'SP_TOKENS_FILE'):
         if name in settings and not isinstance(settings[name], (str, os.PathLike)):
             errors.append(f"{name} must be a path string")
+    width = settings.get("TRUNCATE_CHARS", 0)
+    if not isinstance(width, int) or isinstance(width, bool) or width < 0:
+        errors.append("TRUNCATE_CHARS must be an integer zero or greater")
     theme = settings.get("COLOR_THEME", {})
     if not isinstance(theme, dict):
         errors.append("COLOR_THEME must be a dictionary of style strings")
@@ -7680,8 +7703,9 @@ def doctor_check_spotify_metadata(report):
     if not spotify_oauth_app_configured():
         return [make_doctor_check("Spotify metadata", "PASS", "The anonymous Spotify web player supplies track metadata", "No OAuth app is configured, which needs no credentials")]
     try:
-        spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET)
+        spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET, validate_credentials=True)
     except Exception as exc:
+        exit_if_out_of_file_descriptors(exc)
         advice = make_recovery_advice("auth.api_key_invalid", "Spotify did not accept the OAuth app credentials", recovery_fix_with_guide(f"Check SP_CLIENT_ID and SP_CLIENT_SECRET, or save a working pair with '{render_command(['--set-spotify-credentials'])}'", SPOTIFY_APP_GUIDE_URL), False, sanitize_error_text(exc))
         checks.append(make_doctor_check("Spotify metadata", "WARN", advice.summary, "Track metadata falls back to the anonymous Spotify web player", advice))
     else:
@@ -8583,7 +8607,8 @@ def _wizard_verify_lastfm_credentials(api_key, api_secret):
     try:
         pylast.LastFMNetwork(api_key, api_secret).get_top_artists(limit=1)
     except Exception as exc:
-        return classify_recovery_error(exc)
+        exit_if_out_of_file_descriptors(exc)
+        return classify_recovery_error(exc, extra_secrets=[api_key, api_secret])
     return None
 
 
@@ -8660,9 +8685,10 @@ def _wizard_collect_spotify_section(state, input_func=None, getpass_func=None):
             continue
         print("  Checking the credentials with Spotify ...")
         try:
-            spotify_get_access_token(client_id, client_secret)
+            spotify_get_access_token(client_id, client_secret, validate_credentials=True)
         except Exception as exc:
-            print(f"  Spotify did not accept the credentials: {sanitize_error_text(exc)}")
+            exit_if_out_of_file_descriptors(exc)
+            print(f"  Spotify did not accept the credentials: {sanitize_error_text(exc, extra_secrets=[client_id, client_secret])}")
             if not _wizard_offer_retry("Spotify app credentials", "The anonymous Spotify web player is used instead", input_func=input_func):
                 return
             continue

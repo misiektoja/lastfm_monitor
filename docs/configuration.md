@@ -138,7 +138,7 @@ Spotify metadata supplies the track duration, title, artists, album, URI and ext
 
 With `-r`, a successful duration from either Spotify backend is marked `S*`. Last.fm fallback duration is marked `L*`. Without `-r`, Last.fm remains the duration source while Spotify metadata can still resolve a track ID for `-g` playback.
 
-Path settings are validated before startup opens files. A monitoring run stops and names the setting to correct. `--doctor`, `--setup` and the `--set-...` commands report the same setting and continue on the built-in value, so it can still be repaired. Command-line path overrides still take precedence.
+Path settings are validated before startup opens files. A monitoring run stops and names the setting to correct. `--doctor`, `--setup` and the `--set-...` commands report the same setting and continue on the built-in value, so it can still be repaired. Command-line path overrides still take precedence. The optional `SP_TOKENS_FILE` cache path is validated too. `TRUNCATE_CHARS` must be an integer zero or greater. Use `0` to keep full lines or `999` to detect terminal width. A `--truncate` override also applies to Doctor.
 
 ## SMTP Settings
 
@@ -164,7 +164,7 @@ The message arrives as `lastfm_monitor: test email` and its body names the comma
 
 ## Webhook Settings
 
-A delivery keeps its original destination and credentials for every retry. Reloaded settings apply to the next delivery. Discord templates must produce a JSON object. Dictionary templates and JSON strings are supported, including strings with escaped format braces. A placeholder the alert cannot fill, such as `{title[0]}` or `{0}`, is reported with the template text that failed. Mentions remain disabled in every template.
+A delivery keeps its original destination and credentials for every retry. Reloaded settings apply to the next delivery. Discord templates must produce a JSON object. Dictionary templates and JSON strings are supported, including strings with escaped format braces. Unknown fields such as `{descripton}` and placeholders the alert cannot fill are reported with the template text that failed, before delivery. Legacy JSON strings with doubled object braces still work. Alert text is expanded once, so quotes and braces in a title remain literal text. Mentions remain disabled in every template.
 
 Webhook alerts work independently from email. Discord and ntfy are supported directly. Compatible services can use the Discord request format or the advanced payload and header settings.
 

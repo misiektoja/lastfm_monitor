@@ -323,7 +323,7 @@ class TestTheSpotifyMetadataSection:
         monkeypatch.setattr(monitor, "SP_CLIENT_ID", "abc123abc123abc123abc123abc123ab")
         monkeypatch.setattr(monitor, "SP_CLIENT_SECRET", "def456def456def456def456def456de")
         monkeypatch.setattr(monitor, "SP_TOKENS_FILE", "")
-        monkeypatch.setattr(monitor, "spotify_get_access_token", lambda *args: (_ for _ in ()).throw(RuntimeError("invalid_client")))
+        monkeypatch.setattr(monitor, "spotify_get_access_token", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("invalid_client")))
         rows = monitor.doctor_check_spotify_metadata(monitor.DoctorReport())
         assert rows[0].status == "WARN"
         assert "falls back to the anonymous Spotify web player" in rows[0].detail
@@ -333,7 +333,7 @@ class TestTheSpotifyMetadataSection:
         monkeypatch.setattr(monitor, "SP_CLIENT_ID", "abc123abc123abc123abc123abc123ab")
         monkeypatch.setattr(monitor, "SP_CLIENT_SECRET", "def456def456def456def456def456de")
         monkeypatch.setattr(monitor, "SP_TOKENS_FILE", "")
-        monkeypatch.setattr(monitor, "spotify_get_access_token", lambda *args: "a-token")
+        monkeypatch.setattr(monitor, "spotify_get_access_token", lambda *args, **kwargs: "a-token")
         rows = monitor.doctor_check_spotify_metadata(monitor.DoctorReport())
         assert rows[0].status == "PASS"
         assert rows[1].label == "Spotify tokens are cached in memory only"
@@ -344,7 +344,7 @@ class TestTheSpotifyMetadataSection:
         monkeypatch.setattr(monitor, "SP_CLIENT_ID", "abc123abc123abc123abc123abc123ab")
         monkeypatch.setattr(monitor, "SP_CLIENT_SECRET", "def456def456def456def456def456de")
         monkeypatch.setattr(monitor, "SP_TOKENS_FILE", str(tmp_path / "tokens.json"))
-        monkeypatch.setattr(monitor, "spotify_get_access_token", lambda *args: "a-token")
+        monkeypatch.setattr(monitor, "spotify_get_access_token", lambda *args, **kwargs: "a-token")
         rows = monitor.doctor_check_spotify_metadata(monitor.DoctorReport())
         assert [row.section for row in rows] == ["Spotify metadata", "Spotify metadata"]
 

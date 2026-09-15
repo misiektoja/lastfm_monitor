@@ -27,7 +27,11 @@ The report groups its rows into **Environment** for the Python version and the l
 
 Only a `[FAIL]` changes the exit code, which is `1` when anything failed and `0` otherwise, so the command can gate a deployment. The report ends with the command that starts monitoring using the same configuration and dotenv files you passed to doctor.
 
+Spotify app validation always requests a fresh token held only in memory. Existing token-cache files are neither read nor changed.
+
 The credentials themselves are never displayed. A row that reports a secret names the setting and its source, not its value.
+
+An unreadable or malformed friends list names the affected file and the expected username-list format. The next successful check rebuilds that baseline without follower or following change alerts. Older list-only files and unused count metadata still load.
 
 ## When Something Goes Wrong
 

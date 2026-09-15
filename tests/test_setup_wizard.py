@@ -791,7 +791,7 @@ class TestASavedCredentialIsSettledBeforeTheHiddenPrompt:
         assert state.secret_updates == {"LASTFM_API_KEY": "new-key", "LASTFM_API_SECRET": "new-secret"}
 
     def test_the_spotify_pair_is_asked_about_once(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(monitor, "spotify_get_access_token", lambda client_id, client_secret: "token")
+        monkeypatch.setattr(monitor, "spotify_get_access_token", lambda client_id, client_secret, **kwargs: "token")
         state = self.state_with_saved_secrets(tmp_path, ("SP_CLIENT_ID", "SP_CLIENT_SECRET"))
         script = Script(["y", "y", "n", "y", ""])
 
