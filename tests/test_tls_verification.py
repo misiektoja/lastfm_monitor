@@ -14,24 +14,6 @@ import lastfm_monitor as monitor
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (PROJECT_ROOT / "lastfm_monitor.py").read_text(encoding="utf-8")
 
-# Everything this tool sends a request through, so a new one added without the switch is a setting that lies
-OUTBOUND_CALLERS = ("req", "SPOTIFY_SESSION", "WEBHOOK_SESSION")
-
-
-# Returns every outbound request call in the module with the verify keyword it passes, if any
-def outbound_calls():
-    calls = []
-    for node in ast.walk(ast.parse(SOURCE)):
-        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
-            continue
-        caller = node.func.value
-        if not isinstance(caller, ast.Name) or caller.id not in OUTBOUND_CALLERS or node.func.attr not in ("get", "post", "request"):
-            continue
-        verify = next((keyword.value for keyword in node.keywords if keyword.arg == "verify"), None)
-        name = verify.id if isinstance(verify, ast.Name) else None
-        calls.append((f"{caller.id}.{node.func.attr} at line {node.lineno}", name))
-    return calls
-
 
 @pytest.fixture
 def restored_tls():
@@ -72,13 +54,6 @@ class TestTheContextBuilder:
 
 
 class TestEveryCallSiteReadsTheSwitch:
-    def test_the_module_still_makes_outbound_calls(self):
-        assert outbound_calls(), "no outbound request calls were found, so this guard checks nothing"
-
-    def test_every_outbound_call_passes_the_switch(self):
-        missing = [where for where, name in outbound_calls() if name != "VERIFY_SSL"]
-        assert missing == [], f"outbound calls that skip VERIFY_SSL: {missing}"
-
     # Anything that speaks TLS without going through requests needs the same switch, and mail was the one that kept verifying
     def test_the_mail_handshake_uses_the_shared_context(self):
         assert "smtp_object.starttls(context=tls_context())" in SOURCE
@@ -166,3 +141,43 @@ class TestConnectivitySettings:
         monkeypatch.setattr(monitor, "CHECK_INTERNET_URL", "https://example.invalid/probe")
         assert monitor.check_internet(url="https://other.invalid/", timeout=3) is False
         assert seen == {"url": "https://other.invalid/", "timeout": 3}
+
+
+HTTP_METHODS = frozenset(("get", "post", "put", "patch", "delete", "head", "options", "request"))
+# The expressions that carry the TLS decision, so a call passing anything else is a second opinion
+VERIFY_ARGUMENTS = frozenset(("VERIFY_SSL",))
+# A guard against the sweep silently matching nothing after a rename: the tool has 6 call sites today
+MINIMUM_HTTP_CALL_SITES = 6
+
+
+# Returns every name the module binds to a requests session, so a session added later is swept without editing this
+def session_receivers():
+    return {node.targets[0].id for node in ast.walk(ast.parse(SOURCE)) if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Call) and ast.unparse(node.value.func).endswith("Session")}
+
+
+# Returns every outbound HTTP call in the module as a line number paired with its keyword arguments
+def http_call_sites():
+    receivers = {"req", "requests"} | session_receivers()
+    for node in ast.walk(ast.parse(SOURCE)):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        receiver = node.func.value
+        if node.func.attr in HTTP_METHODS and isinstance(receiver, ast.Name) and receiver.id in receivers:
+            yield node.lineno, {keyword.arg: keyword.value for keyword in node.keywords}
+
+
+# Verifies every outbound request passes the setting, so a call site added later cannot keep verifying while it is off
+def test_every_outbound_request_passes_the_setting():
+    calls = list(http_call_sites())
+
+    assert len(calls) >= MINIMUM_HTTP_CALL_SITES, f"the sweep found {len(calls)} HTTP calls, so it no longer matches how requests are made"
+    missing = [line for line, keywords in calls if "verify" not in keywords or ast.unparse(keywords["verify"]) not in VERIFY_ARGUMENTS]
+    assert not missing, f"lastfm_monitor.py lines {missing} make an HTTP call that does not pass the TLS setting"
+
+
+# Verifies every outbound request carries a deadline, since a call without one hangs the monitoring loop indefinitely
+def test_every_outbound_request_carries_a_deadline():
+    # A call forwarding **kwargs takes its deadline from the helper that fills them in, which is not readable here
+    missing = [line for line, keywords in http_call_sites() if "timeout" not in keywords and None not in keywords]
+
+    assert not missing, f"lastfm_monitor.py lines {missing} make an HTTP call without a timeout"
