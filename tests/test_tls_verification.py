@@ -148,6 +148,8 @@ HTTP_METHODS = frozenset(("get", "post", "put", "patch", "delete", "head", "opti
 VERIFY_ARGUMENTS = frozenset(("VERIFY_SSL",))
 # A guard against the sweep silently matching nothing after a rename: the tool has 7 call sites today
 MINIMUM_HTTP_CALL_SITES = 7
+# Webhook delivery carries the payload and the scraper reads a literal last.fm URL, so neither may be redirected
+FIXED_DESTINATION_RECEIVERS = frozenset(("curl_req", "WEBHOOK_SESSION"))
 
 
 # Returns every name the module binds to a requests session, so a session added later is swept without editing this
@@ -155,7 +157,7 @@ def session_receivers():
     return {node.targets[0].id for node in ast.walk(ast.parse(SOURCE)) if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Call) and ast.unparse(node.value.func).endswith("Session")}
 
 
-# Returns every outbound HTTP call in the module as a line number paired with its keyword arguments
+# Returns every outbound HTTP call in the module as its receiver name, line number and keyword arguments
 def http_call_sites():
     # curl_req speaks to the Last.fm website through its own client, which no session assignment reveals
     receivers = {"req", "requests", "curl_req"} | session_receivers()
@@ -164,7 +166,7 @@ def http_call_sites():
             continue
         receiver = node.func.value
         if node.func.attr in HTTP_METHODS and isinstance(receiver, ast.Name) and receiver.id in receivers:
-            yield node.lineno, {keyword.arg: keyword.value for keyword in node.keywords}
+            yield receiver.id, node.lineno, {keyword.arg: keyword.value for keyword in node.keywords}
 
 
 # Verifies every outbound request passes the setting, so a call site added later cannot keep verifying while it is off
@@ -172,13 +174,22 @@ def test_every_outbound_request_passes_the_setting():
     calls = list(http_call_sites())
 
     assert len(calls) >= MINIMUM_HTTP_CALL_SITES, f"the sweep found {len(calls)} HTTP calls, so it no longer matches how requests are made"
-    missing = [line for line, keywords in calls if "verify" not in keywords or ast.unparse(keywords["verify"]) not in VERIFY_ARGUMENTS]
+    missing = [line for _, line, keywords in calls if "verify" not in keywords or ast.unparse(keywords["verify"]) not in VERIFY_ARGUMENTS]
     assert not missing, f"lastfm_monitor.py lines {missing} make an HTTP call that does not pass the TLS setting"
 
 
 # Verifies every outbound request carries a deadline, since a call without one hangs the monitoring loop indefinitely
 def test_every_outbound_request_carries_a_deadline():
     # A call forwarding **kwargs takes its deadline from the helper that fills them in, which is not readable here
-    missing = [line for line, keywords in http_call_sites() if "timeout" not in keywords and None not in keywords]
+    missing = [line for _, line, keywords in http_call_sites() if "timeout" not in keywords and None not in keywords]
 
     assert not missing, f"lastfm_monitor.py lines {missing} make an HTTP call without a timeout"
+
+
+# Verifies the requests whose destination must stay fixed refuse redirects, since both clients follow them by default
+def test_the_requests_that_must_keep_their_destination_refuse_redirects():
+    calls = [(line, keywords) for receiver, line, keywords in http_call_sites() if receiver in FIXED_DESTINATION_RECEIVERS]
+
+    assert len(calls) >= len(FIXED_DESTINATION_RECEIVERS), f"the sweep found {len(calls)} calls, so it no longer matches how these requests are made"
+    missing = [line for line, keywords in calls if ast.unparse(keywords.get("allow_redirects", ast.Constant(True))) != "False"]
+    assert not missing, f"lastfm_monitor.py lines {missing} let a redirect choose the host the request reaches"

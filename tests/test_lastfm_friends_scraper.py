@@ -43,10 +43,12 @@ PROFILE_HTML = b"""<!doctype html>
 
 class FakeResponse:
     # Stores the response fields used by the Last.fm scraper
-    def __init__(self, status_code=200, content=FOLLOWING_HTML, content_type="text/html; charset=utf-8"):
+    def __init__(self, status_code=200, content=FOLLOWING_HTML, content_type="text/html; charset=utf-8", location=None):
         self.status_code = status_code
         self.content = content
         self.headers = {'Content-Type': content_type}
+        if location is not None:
+            self.headers['Location'] = location
         self.url = "https://www.last.fm/user/NeonCipher/following"
 
     # Raises the HTTP error supplied by the website transport
@@ -106,8 +108,27 @@ def test_website_transport_policy(monkeypatch, verify):
     monkeypatch.setattr(monitor, "FUNCTION_TIMEOUT", 7)
     with patch.object(curl_requests, "get", return_value=FakeResponse()) as get, patch.object(monitor.req, "get") as ordinary_get:
         assert monitor.lastfm_get_friends("NeonCipher") == {"EchoInTheShell"}
-    get.assert_called_once_with("https://www.last.fm/user/NeonCipher/following", impersonate="chrome", headers={"Accept-Language": "en-US,en;q=0.9"}, timeout=14, verify=verify)
+    get.assert_called_once_with("https://www.last.fm/user/NeonCipher/following", impersonate="chrome", headers={"Accept-Language": "en-US,en;q=0.9"}, timeout=14, verify=verify, allow_redirects=False)
     ordinary_get.assert_not_called()
+
+
+@pytest.mark.parametrize("status", [301, 302, 307, 308])
+# Refuses a redirect instead of letting the response choose the host the scraper reads, and names where it pointed
+def test_a_redirect_is_refused_and_not_retried(status):
+    redirect = FakeResponse(status, content=b"", location="http://169.254.169.254/latest/meta-data/")
+    with patch.object(curl_requests, "get", return_value=redirect) as get, patch.object(monitor.time, "sleep") as sleep:
+        with pytest.raises(RuntimeError, match="169.254.169.254"):
+            monitor.lastfm_get_friends("NeonCipher")
+    # A redirect is a changed destination rather than a transient failure, so retrying it would only repeat the refusal
+    get.assert_called_once()
+    sleep.assert_not_called()
+
+
+# Names the refusal even when the response withholds the destination, so the error never reads as a parsing failure
+def test_a_redirect_without_a_location_is_still_refused():
+    with patch.object(curl_requests, "get", return_value=FakeResponse(302, content=b"")), patch.object(monitor.time, "sleep"):
+        with pytest.raises(RuntimeError, match="unspecified location"):
+            monitor.lastfm_get_profile("NeonCipher")
 
 
 @pytest.mark.parametrize("status", [200, 403])
