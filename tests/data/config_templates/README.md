@@ -20,5 +20,8 @@ which is what catches a renamed or removed setting that would reject an upgradin
 Versions before v2.1 had no configuration file and no `--generate-config`, so there is nothing to replay for
 them.
 
+`test_config_loading.py` pins the expected file list, so a release that changes `CONFIG_BLOCK` cannot be added
+without a template. When a release leaves the block untouched, add its tag to the row above instead of a new file.
+
 Never edit these files. A released template is a historical fact. When a setting is renamed, add the old name
 to `RETIRED_CONFIG_SETTINGS` instead.

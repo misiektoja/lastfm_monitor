@@ -103,9 +103,13 @@ TEMPLATE_DIRECTORY = monitor.Path(__file__).parent / "data" / "config_templates"
 HISTORICAL_TEMPLATES = sorted(TEMPLATE_DIRECTORY.glob("*.conf"), key=lambda path: tuple(int(part) for part in path.stem.split(".")))
 
 
+# Every tag whose template differs from its predecessor, so a release that changes CONFIG_BLOCK cannot skip the replay
+TEMPLATED_RELEASES = ("2.1", "2.1.1", "2.2", "2.3", "2.4", "2.4.1", "2.4.2", "2.5", "2.6", "2.6.1")
+
+
 # The repository ignores *.conf, so one missing negation would leave the replay silently running zero cases
 def test_the_released_templates_are_present():
-    assert len(HISTORICAL_TEMPLATES) >= 10
+    assert [path.stem for path in HISTORICAL_TEMPLATES] == list(TEMPLATED_RELEASES)
 
 
 @pytest.mark.parametrize("template", HISTORICAL_TEMPLATES, ids=lambda path: path.stem)
