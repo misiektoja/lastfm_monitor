@@ -19,7 +19,9 @@ dependencies = [
   "spotipy>=2.24.0",
   "python-dotenv>=0.19",
   "beautifulsoup4>=4.9.0",
-  "curl_cffi>=0.11.4",
+  # curl_cffi 0.15.0 fixed a redirect-based SSRF and dropped Python 3.9, so 3.9 keeps the last release that supports it
+  "curl_cffi>=0.15.0; python_version >= '3.10'",
+  "curl_cffi>=0.13.0; python_version < '3.10'",
 ]
 classifiers = [
   "Programming Language :: Python :: 3",
