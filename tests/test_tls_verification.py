@@ -146,8 +146,8 @@ class TestConnectivitySettings:
 HTTP_METHODS = frozenset(("get", "post", "put", "patch", "delete", "head", "options", "request"))
 # The expressions that carry the TLS decision, so a call passing anything else is a second opinion
 VERIFY_ARGUMENTS = frozenset(("VERIFY_SSL",))
-# A guard against the sweep silently matching nothing after a rename: the tool has 6 call sites today
-MINIMUM_HTTP_CALL_SITES = 6
+# A guard against the sweep silently matching nothing after a rename: the tool has 7 call sites today
+MINIMUM_HTTP_CALL_SITES = 7
 
 
 # Returns every name the module binds to a requests session, so a session added later is swept without editing this
@@ -157,7 +157,8 @@ def session_receivers():
 
 # Returns every outbound HTTP call in the module as a line number paired with its keyword arguments
 def http_call_sites():
-    receivers = {"req", "requests"} | session_receivers()
+    # curl_req speaks to the Last.fm website through its own client, which no session assignment reveals
+    receivers = {"req", "requests", "curl_req"} | session_receivers()
     for node in ast.walk(ast.parse(SOURCE)):
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
             continue
