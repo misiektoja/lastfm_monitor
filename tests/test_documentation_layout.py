@@ -23,11 +23,15 @@ def test_entry_pages_place_the_main_image_before_quick_start():
     for path in (ROOT / "README.md", ROOT / "docs/index.md"):
         text = path.read_text(encoding="utf-8")
         assert '<a id="-quick-install"></a>' not in text
-        assert text.count('<a id="-quick-install-run"></a>') == 1
+        anchor = '<a id="quick-install-run"></a>'
+        assert text.count(anchor) == 1
+        if path.name == "README.md":
+            # GitHub and PyPI both build this id from the heading, and PyPI reaches no other anchor
+            assert "](#-quick-install--run)" in text
         images = [match for match in re.finditer(r'(?:src="|!\[[^\]]*\]\()([^"\s)]+/assets/[^"\s)]+)', text) if match.group(1).endswith(f"/{ROOT.name}.png")]
         assert images, f"{path.name}: no main screenshot"
         assert len(images) == 1, f"{path.name}: repeated main screenshot"
-        assert images[0].start() < text.index('<a id="-quick-install-run"></a>') < text.index("## Features")
+        assert images[0].start() < text.index(anchor) < text.index("## Features")
 
 
 # Keep the main image and feature summary consistent between the entry pages
