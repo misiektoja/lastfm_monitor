@@ -47,4 +47,6 @@ def test_entry_pages_share_the_main_image_and_features():
     readme_features = re.search(feature_block, readme, re.MULTILINE | re.DOTALL)
     index_features = re.search(feature_block, index, re.MULTILINE | re.DOTALL)
     assert readme_features is not None and index_features is not None
-    assert readme_features.group(1).strip() == index_features.group(1).strip()
+    # the README pins an anchor above the next section, docs/index.md ends the page there
+    readme_block = re.sub(r'\n<a id="[^"]+"></a>\s*\Z', "", readme_features.group(1).strip()).strip()
+    assert readme_block == index_features.group(1).strip()
