@@ -738,7 +738,7 @@ TERMINAL_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#terminal-output"
 SPOTIFY_APP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#optional-spotify-oauth-app-setup"
 DOCTOR_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#doctor-preflight"
 DIAGNOSTICS_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#debug-output"
-INTERVALS_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#check-intervals"
+INTERVALS_GUIDE_URL = f"{DOCS_BASE_URL}/usage/#check-intervals"
 
 # A preflight check waits on the user, so it uses a shorter timeout than a delivery in the monitoring loop
 DOCTOR_SMTP_TIMEOUT = 5
