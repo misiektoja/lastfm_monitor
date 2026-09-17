@@ -3722,8 +3722,14 @@ def _lastfm_http_get_with_retry(url, attempts=3, base_delay=2.0):
         attempt_label = f"#{i + 1}/{attempts}"
         status = None
         try:
-            response = curl_req.get(url, impersonate="chrome", headers=_lastfm_scrape_headers(), timeout=timeout, verify=VERIFY_SSL)
+            response = curl_req.get(url, impersonate="chrome", headers=_lastfm_scrape_headers(), timeout=timeout, verify=VERIFY_SSL, allow_redirects=False)
             status = response.status_code
+            # Every scraped address is built as a literal https://www.last.fm URL, so a redirect is never part of a
+            # healthy fetch. Following one inside curl_cffi would let the response pick the host this request reaches
+            if 300 <= status < 400:
+                location = response.headers.get('Location') or 'an unspecified location'
+                debug_print("HTTP GET", url=url, timeout=f"{timeout}s", attempt=attempt_label, status=status, outcome="failed", error=f"unexpected redirect to {location}")
+                raise RuntimeError(f"Last.fm redirected the request to '{location}' instead of returning the page")
             retryable_error = _lastfm_retryable_response_error(response)
             if retryable_error:
                 last_exc = RuntimeError(retryable_error)
