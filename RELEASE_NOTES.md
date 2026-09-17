@@ -2,7 +2,7 @@
 
 This is a high-level summary of the most important changes.
 
-# Changes in 2.7 (TBD)
+# Changes in 2.7 (18 Sep 2026)
 
 Version **2.7** adds **guided setup**, a read-only **Doctor preflight check**, **profile change tracking** and **private SMTP password entry**. **Coloured output**, startup summaries and verbose/debug modes make monitoring easier to follow. Friend and profile tracking uses **Chrome impersonation** and defaults to **90-minute checks**. It also improves Spotify metadata recovery and protects saved history and credentials.
 
@@ -16,7 +16,6 @@ Version **2.7** adds **guided setup**, a read-only **Doctor preflight check**, *
 - **NEW:** **Clearer output and diagnostics** - Coloured output and a short startup summary show the active settings. `--verbose` adds operational updates and `--debug` adds technical traces. Secrets are redacted and logs retain the full summary. `--truncate N` limits screen width while logs retain full lines. It works without `wcwidth`, which improves Unicode width measurements
 - **IMPROVE:** **Clearer errors and recovery** - Persistent outages produce hourly reminders and recovery notices. Temporary failures trigger error alerts after two minutes, while rejected credentials alert immediately. Failed monitoring-error alerts retry per channel without repeating successful deliveries
 - **IMPROVE:** **Discord alerts match the email** - Discord now receives the same emphasis as the HTML email, with bold values and clickable links instead of plain text. ntfy keeps the plain body, since it would show the markers literally
-- **IMPROVE:** **Notification output** - Subjects omit program-name prefixes. Set `DELIVERY_CONFIRMATIONS = False` to hide delivery confirmations while keeping verbose diagnostics
 - **IMPROVE:** **Documentation and verifiable downloads** - A [searchable guide](https://misiektoja.github.io/lastfm_monitor/) covers setup, usage and troubleshooting. Releases include checksums and signed build attestations
 - **CONFIG CHANGE:** **Retired error aggregation settings** - `ERROR_500_NUMBER_LIMIT`, `ERROR_500_TIME_LIMIT`, `ERROR_NETWORK_ISSUES_NUMBER_LIMIT` and `ERROR_NETWORK_ISSUES_TIME_LIMIT` are ignored. Hourly outage reminders replace them. Existing configurations still load
 
