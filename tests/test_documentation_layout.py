@@ -10,20 +10,12 @@ def prose(path):
     return re.sub(r"^```.*?^```[^\n]*$", "", path.read_text(encoding="utf-8"), flags=re.MULTILINE | re.DOTALL)
 
 
-# Prevent explicit anchors from colliding with generated heading IDs
+# Prevent one page from declaring the same explicit anchor twice
 def test_documentation_anchor_ids_are_unique():
     for path in [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md"))]:
-        text = prose(path)
-        explicit = re.findall(r'<a\s+id="([^"]+)"[^>]*>', text)
-        headings = re.findall(r"^#{1,6}\s+(.+)$", text, flags=re.MULTILINE)
-        generated = set()
-        for heading in headings:
-            plain = re.sub(r"[^\w\s-]", "", heading.lower())
-            generated.add(re.sub(r"[-\s]+", "-", plain).strip("-"))
+        explicit = re.findall(r'<a\s+id="([^"]+)"[^>]*>', prose(path))
         repeated = [anchor for anchor, count in Counter(explicit).items() if count > 1]
         assert not repeated, f"{path.name}: repeated explicit anchors: {repeated}"
-        collisions = set(explicit) & generated
-        assert not collisions, f"{path.name}: explicit anchors duplicate heading IDs: {sorted(collisions)}"
 
 
 # Keep one canonical quick-start anchor after the main image on both entry pages

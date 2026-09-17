@@ -50,6 +50,10 @@ def page_anchors(path):
 ALL_ANCHORS = {path.name: page_anchors(path) for path in DOCS_DIR.glob("*.md")}
 
 
+# Navigation sections that close several pages by design, each pointing at the page that comes next
+SHARED_SECTIONS = frozenset({"Next Step"})
+
+
 class TestSiteStructure:
     def test_the_published_page_set_is_pinned(self):
         assert tuple(sorted(path.name for path in DOCS_DIR.glob("*.md"))) == EXPECTED_PAGES
@@ -71,7 +75,7 @@ class TestSiteStructure:
             for line in lines_outside_fences((DOCS_DIR / page).read_text(encoding="utf-8")):
                 if line.startswith("## "):
                     seen.setdefault(line[3:].strip(), []).append(page)
-        duplicated = {section: pages for section, pages in seen.items() if len(pages) > 1}
+        duplicated = {section: pages for section, pages in seen.items() if len(pages) > 1 and section not in SHARED_SECTIONS}
         assert duplicated == {}, f"sections on more than one page: {duplicated}"
 
 
