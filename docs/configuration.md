@@ -1,10 +1,15 @@
 # Configuration
 
+Examples on this page use the PyPI command `lastfm_monitor`. Manual script users should keep the shown options and use the matching prefix under [Command Format by Installation Method](usage.md#command-format-by-installation-method).
+
+<a id="configuration-file"></a>
 ## Configuration File
 
-Most settings can be configured via command-line arguments.
+You can pass most settings as command-line options or save them in a configuration file for later runs.
 
-If you want to have it stored persistently, generate a default config template and save it to a file named `lastfm_monitor.conf`:
+The easiest way to create this file is `lastfm_monitor --setup`.
+
+To edit every available setting yourself, generate a default configuration file:
 
 ```sh
 # On macOS, Linux or Windows Command Prompt (cmd.exe)
@@ -14,61 +19,50 @@ lastfm_monitor --generate-config > lastfm_monitor.conf
 lastfm_monitor --generate-config lastfm_monitor.conf
 ```
 
-> **IMPORTANT**: In Windows PowerShell, do not use `>` for this command. Some PowerShell versions write redirected text as UTF-16, which makes Last.fm Monitor report a "null bytes" error. Pass the filename to `--generate-config` so Last.fm Monitor writes a UTF-8 file itself.
+> **Windows PowerShell:** Pass the filename directly to `--generate-config`. PowerShell redirection can write UTF-16, which the tool rejects with a "null bytes" error.
 
-When you include the filename, Last.fm Monitor writes the template directly as UTF-8. This avoids PowerShell changing the file encoding during redirection.
+When the named file already exists, `--generate-config` asks before replacing it and keeps a timestamped `.bak` backup next to it. Add `--force` to replace it without the question.
 
-### Replacing an Existing Config
+The file contains a short explanation above each setting.
 
-Passing a filename never replaces an existing file silently. On a terminal the tool asks first. Outside one, in a script or a container, it stops and names `--force`:
+A configuration file is read as data, not executed. The tool accepts only `SETTING = value` lines where the name is one of the documented settings and the value is a plain literal such as a string, number, `True`, `False`, `None`, a list or a dictionary. Comments and blank lines are fine.
 
-```sh
-lastfm_monitor --generate-config lastfm_monitor.conf --force
-```
+Imports, function calls, expressions and unknown settings are rejected with the setting and line number to correct.
 
-Either way the previous file is copied to `lastfm_monitor.conf.<timestamp>.bak` before the new template is written, and the backup path is printed. Both files are readable only by their owner.
+If the same setting appears in more than one place, the item later in this list wins:
 
-Shell redirection works differently: `> lastfm_monitor.conf` truncates the file before the tool starts, so nothing can back it up. Pass the filename when the destination already exists.
+1. Built-in defaults
+2. The discovered or explicitly selected configuration file
+3. Values from the selected `.env` file
+4. Secret environment variables
+5. Command-line options
 
-Edit the `lastfm_monitor.conf` file and change any desired configuration options (detailed comments are provided for each).
+By default the tool looks for a configuration file named `lastfm_monitor.conf` in the current directory, the home directory (`~`) and the script directory. Use `--config-file` to name another location, or `--config-file none` to disable automatic config discovery for one run.
 
-By default the tool looks for a configuration file named `lastfm_monitor.conf` in:
+<a id="monitored-target"></a>
+## Monitored Target
 
-- current directory
-- home directory (`~`)
-- script directory
-
-### The Monitored User
-
-`LASTFM_USERNAME` in the config file saves the user to monitor, so the command needs no argument:
+The Last.fm username is a positional argument. It is required to start monitoring:
 
 ```sh
-lastfm_monitor
+lastfm_monitor <lastfm_username>
 ```
 
-A username passed on the command line overrides the saved one for that run. With neither, the tool prints the
-welcome screen instead of starting.
+Use the username as it appears in the profile URL, `https://www.last.fm/user/<lastfm_username>`.
 
-If you saved it under a different name or in a different directory, select it with `--config-file`:
+To stop repeating it, save it in the configuration file:
+
+```ini
+LASTFM_USERNAME = "lastfm_username"
+```
+
+Then `lastfm_monitor` alone starts monitoring that user. A positional argument still wins, so you can watch someone else for one run without editing the file:
 
 ```sh
-lastfm_monitor <lastfm_username> --config-file /path/lastfm_monitor_new.conf
+lastfm_monitor other_username
 ```
 
-To ignore any configuration file and run on the built-in defaults plus command-line flags, disable the search with `none`:
-
-```sh
-lastfm_monitor <lastfm_username> --config-file none
-```
-
-The startup summary reports `Discovery disabled` when it is in effect.
-
-A path that does not exist is still an error. Only the literal `none` selects no file.
-
-**New in v2.3:** The configuration file includes options to enable/disable music service URLs (Last.fm, Spotify, Apple Music, YouTube Music, Amazon Music, Deezer, Tidal) and lyrics service URLs (Genius, AZLyrics, Tekstowo.pl, Musixmatch, Lyrics.com) in console and email outputs.
-
-**New in v2.5:** The [track duration](usage.md#getting-track-duration-from-spotify) and [automatic playback](usage.md#automatic-playback-of-listened-tracks-in-the-spotify-client) features use the official OAuth app Web API when optional app credentials are configured. The anonymous web-player backend is the new automatic fallback and requires no Spotify credentials.
-
+<a id="spotify-metadata-backends"></a>
 ## Spotify Metadata Backends
 
 The [track duration feature](usage.md#getting-track-duration-from-spotify) and [automatic playback feature](usage.md#automatic-playback-of-listened-tracks-in-the-spotify-client) both need Spotify track metadata:
@@ -84,6 +78,7 @@ Version 2.5 uses this metadata order:
 2. Anonymous web-player search and Pathfinder `getTrack` metadata
 3. Last.fm duration as the final fallback
 
+<a id="optional-spotify-oauth-app-setup"></a>
 ### Optional Spotify OAuth App Setup
 
 Follow these steps if you want the official Spotify Web API to be the primary metadata backend:
@@ -128,59 +123,33 @@ The tool refreshes OAuth app access tokens automatically. The token cache path i
 
 If you store `SP_CLIENT_ID` and `SP_CLIENT_SECRET` in a dotenv file, you can update them and send `SIGHUP` to reload the values without restarting the tool. See [Storing Secrets](#storing-secrets) and [Signal Controls](usage.md#signal-controls-macoslinuxunix).
 
-The OAuth backend relies on Spotipy's expiration-aware Client Credentials cache. It does not call a separate Web API endpoint to validate tokens. If credentials are absent, token retrieval fails or OAuth search returns incomplete metadata, the anonymous backend runs automatically.
-
-A rejected OAuth search stops alternate-query attempts. A 401 refreshes the token once. A 403 or a second 401 pauses searches for that app for five minutes. A 429 pauses them for the full `Retry-After` interval, or 60 seconds when that header is unusable. Track lookups use the anonymous web backend during these pauses. A successful request with no suitable match can still try alternate queries.
-
-The tool fetches Spotify server time before generating the required v61 TOTP parameters. It caches the anonymous token until its expiration window and discovers the current persisted-query hashes from the active web-player bundle. An HTTP 401 refreshes the token once. A rejected persisted query refreshes its hash once.
-
-The v61 version and cipher bytes ship as the `SPOTIFY_TOTP_VERSION` and `SPOTIFY_TOTP_SECRET_CIPHER_BYTES` config options. If Spotify rotates the secret you can update them from the config file using the [spotify_monitor_secret_grabber](https://github.com/misiektoja/spotify_monitor/blob/dev/debug/spotify_monitor_secret_grabber.py) tool without a code change.
+The tool fetches Spotify server time before generating the required v61 TOTP parameters. The v61 version and cipher bytes ship as the `SPOTIFY_TOTP_VERSION` and `SPOTIFY_TOTP_SECRET_CIPHER_BYTES` config options. If Spotify rotates the secret you can update them from the config file using the [spotify_monitor_secret_grabber](https://github.com/misiektoja/spotify_monitor/blob/dev/debug/spotify_monitor_secret_grabber.py) tool without a code change.
 
 Spotify metadata supplies the track duration, title, artists, album, URI and external URL. Last.fm duration remains the final fallback when Spotify web metadata is unavailable or incomplete.
 
 With `-r`, a successful duration from either Spotify backend is marked `S*`. Last.fm fallback duration is marked `L*`. Without `-r`, Last.fm remains the duration source while Spotify metadata can still resolve a track ID for `-g` playback.
 
-Path settings are validated before startup opens files. A monitoring run stops and names the setting to correct. `--doctor`, `--setup` and the `--set-...` commands report the same setting and continue on the built-in value, so it can still be repaired. Command-line path overrides still take precedence. The optional `SP_TOKENS_FILE` cache path is validated too. `TRUNCATE_CHARS` must be an integer zero or greater. Use `0` to keep full lines or `999` to detect terminal width. A `--truncate` override also applies to Doctor.
-
+<a id="smtp-settings"></a>
 ## SMTP Settings
 
-Private password entry preserves leading and trailing spaces. The exact value checked with the mail server is saved.
+Email notifications need SMTP server details for the sending account. Add them to `lastfm_monitor.conf` or use the setup wizard. Setup checks the login without sending an email. To replace only the password, run `lastfm_monitor --set-smtp-password`. Password entry is hidden and preserves spaces.
 
-If you want to use email notifications functionality, configure SMTP settings in the `lastfm_monitor.conf` file.
-
-Save the password itself through a hidden prompt instead of editing the dotenv file by hand:
-
-```sh
-lastfm_monitor --set-smtp-password
-```
-
-The command signs in to the configured mail server and writes the password only if the server accepts it. Nothing is sent. Configure `SMTP_HOST`, `SMTP_USER`, `SENDER_EMAIL` and `RECEIVER_EMAIL` first, since the sign-in needs them. An exported `SMTP_PASSWORD` wins over the saved one at startup, so the command says so after saving rather than leaving you with a value the next run will not read.
-
-Verify your SMTP settings by using `--send-test-email` flag (the tool will try to send a test email notification):
+Send one test message to verify the settings:
 
 ```sh
 lastfm_monitor --send-test-email
 ```
 
-The message arrives as `lastfm_monitor: test email` and its body names the command that sent it, so a mailbox holding alerts from more than one monitor says which is which. With the mail settings incomplete, the command reports what is missing instead of attempting a send.
+Configure `SMTP_HOST`, `SMTP_USER`, `SENDER_EMAIL` and `RECEIVER_EMAIL` before saving the password, since the sign-in needs them. An exported `SMTP_PASSWORD` wins over the saved one at startup.
 
+<a id="webhook-settings"></a>
 ## Webhook Settings
 
-Discord templates must produce a JSON object. Dictionary templates and JSON strings are supported, including legacy strings with doubled object braces. Unsupported placeholders are reported before delivery. Alert text is kept literal and mentions are disabled. Reloaded settings apply to the next delivery.
+Last.fm Monitor can send activity alerts through Discord or the native [ntfy publish API](https://docs.ntfy.sh/publish/). Webhook alerts work with or without email. Run `lastfm_monitor --setup`, choose webhook alerts and select Discord or ntfy.
 
-Webhook alerts work independently from email. Discord and ntfy are supported directly. Compatible services can use the Discord request format or the advanced payload and header settings.
+`WEBHOOK_PROVIDER` defaults to `"discord"`. Standard Discord and public `ntfy.sh` URLs are recognized automatically, including after a `SIGHUP` reload. Set the provider explicitly for a self-hosted ntfy server or a compatible endpoint. For one run, use `--webhook-provider discord` or `--webhook-provider ntfy`.
 
-First save the private destination through a hidden prompt:
-
-```sh
-lastfm_monitor --set-webhook-url
-```
-
-The command validates that the destination is a complete HTTPS URL then updates only `WEBHOOK_URL` in `.env`. Existing values require confirmation. Use `--env-file PATH` to select another private settings file.
-
-Set `WEBHOOK_ENABLED = True` in `lastfm_monitor.conf` and choose `WEBHOOK_PROVIDER = "discord"` or `WEBHOOK_PROVIDER = "ntfy"`. Standard Discord and ntfy.sh URLs select the provider automatically, including after a `SIGHUP` reload. Other destinations use the configured provider.
-
-Enable the events you want through the `WEBHOOK_*_NOTIFICATION` settings. Last.fm Monitor supports active, inactive, monitored track, every song, loop, offline entry, follower, following and error alerts. Matching command-line switches are listed under [Webhook Notifications](usage.md#webhook-notifications).
+Set `WEBHOOK_ENABLED = True` in `lastfm_monitor.conf` then enable the events you want through the `WEBHOOK_*_NOTIFICATION` settings. Last.fm Monitor supports active, inactive, monitored track, every song, loop, offline entry, follower, following and error alerts. Matching command-line switches are listed under [Webhook Notifications](usage.md#webhook-notifications).
 
 Test delivery without starting monitoring:
 
@@ -188,26 +157,120 @@ Test delivery without starting monitoring:
 lastfm_monitor --send-test-webhook
 ```
 
-For automation or one-run tests, `--webhook-url URL` overrides the saved destination and enables webhooks. This value may remain visible in shell history or process listings, so `--set-webhook-url` is recommended for normal setup. `--webhook-provider {discord,ntfy}` overrides the request format for one run.
+<a id="ntfy"></a>
+### ntfy
 
-Protected ntfy topics can use `NTFY_ACCESS_TOKEN` from an environment variable or dotenv file. The token is sent with Bearer authentication. A custom `Authorization` header can also be supplied through `WEBHOOK_HEADERS`.
+For ntfy.sh or a self-hosted ntfy server:
 
-`WEBHOOK_USERNAME`, `WEBHOOK_AVATAR_URL`, `WEBHOOK_TEMPLATE`, `WEBHOOK_TRANSFORMS` and `WEBHOOK_HEADERS` provide the same Discord-format customization model as Spotify Monitor. Header values and template values support placeholders such as `{title}`, `{description}`, `{version}`, `{color}`, `{timestamp}`, `{username}` and `{avatar_url}`. `NTFY_SHORT = True` uses compact activity text on smaller screens without changing Discord or email content.
+1. Choose a hard-to-guess topic such as `lastfm-monitor-long-random-value`.
+2. In the setup wizard, paste either the bare ntfy.sh topic name or its complete topic URL such as `https://ntfy.sh/lastfm-monitor-long-random-value`. A bare topic name is expanded to an ntfy.sh URL. For a self-hosted server, use the complete HTTPS topic URL.
+3. Public `ntfy.sh` URLs are recognized automatically. Set the provider in `lastfm_monitor.conf` for a self-hosted ntfy server:
 
-`WEBHOOK_TEMPLATE`, `WEBHOOK_USERNAME` and `WEBHOOK_AVATAR_URL` apply only to Discord and are ignored when `WEBHOOK_PROVIDER` is `"ntfy"`. The ntfy provider needs no template: it sends the alert body as a native ntfy message with the subject as its title. Customize ntfy delivery through `WEBHOOK_HEADERS` (for example `X-Priority` or `X-Tags`).
+```ini
+WEBHOOK_PROVIDER = "ntfy"
+```
 
-Discord alerts carry the same emphasis as the HTML email, since Discord renders markdown in an embed. Bold values stay bold and links stay clickable. Only Discord gets that wording: ntfy receives the plain body, because it would show the markers literally.
+4. When configuring without the setup wizard, save the complete topic URL privately:
+
+```sh
+lastfm_monitor --set-webhook-url
+```
+
+The ntfy provider needs no template. Last.fm Monitor sends the alert body as a native UTF-8 ntfy message and sends the alert subject as its title. Long messages are truncated with a visible marker so they remain notifications rather than attachments.
 
 Last.fm Monitor does not attach artwork to ntfy alerts because it does not retrieve a trusted artwork source. Webhook delivery remains text-only.
 
-### When Alerts Are Switched Off
+For compact activity notifications on phones and smartwatches, enable the short ntfy format in `lastfm_monitor.conf`:
 
-If `WEBHOOK_ENABLED` is on but `WEBHOOK_URL` is not a complete HTTPS link, the tool says so once at startup and turns webhook alerts off, rather than failing on every alert for the rest of the run.
+```ini
+NTFY_SHORT = True
+```
 
-### When One Channel Fails
+The default is `False`. This setting affects only ntfy. Discord and email content remain unchanged.
 
-Error alerts are delivered independently by email and webhook. If one channel fails, only that channel is retried. Retries start after 5 minutes and double after each failure, up to an hour.
+For a protected topic, the setup wizard can collect an ntfy access token through a hidden prompt. It saves the token in `.env` without displaying it. For manual setup, add the token to `.env`:
 
+```ini
+NTFY_ACCESS_TOKEN="tk_your_ntfy_access_token"
+```
+
+Last.fm Monitor sends this value as `Authorization: Bearer <token>`. `NTFY_ACCESS_TOKEN` takes precedence over an `Authorization` entry in `WEBHOOK_HEADERS`.
+
+For compatibility with advanced webhook integrations, custom headers are also supported in `lastfm_monitor.conf`:
+
+```ini
+WEBHOOK_HEADERS = {
+    "X-Webhook-Title": "{title}",
+}
+```
+
+Header values support the same placeholders as `WEBHOOK_TEMPLATE`. They must be strings without line breaks. Headers apply to both Discord and ntfy. Prefer `NTFY_ACCESS_TOKEN` in `.env` for Bearer authentication. Basic authentication is available through a custom `Authorization` header. Customize ntfy delivery further through `WEBHOOK_HEADERS`, for example `X-Priority` or `X-Tags`.
+
+<a id="discord"></a>
+### Discord
+
+If you are new to Discord, follow these steps to get your private webhook URL:
+
+1. Open your Discord server and choose the channel that should receive the alerts.
+2. Click **Edit Channel** then open **Integrations** > **Webhooks**.
+3. Click **New Webhook**, choose a name if you want then click **Copy Webhook URL**.
+4. Return to the terminal and run:
+
+```sh
+lastfm_monitor --set-webhook-url
+```
+
+Paste the copied link at the hidden prompt. The command validates that the destination is a complete HTTPS URL then updates only `WEBHOOK_URL` in `.env`, so it does not appear in your command history. Replacing an existing value requires confirmation. Use `--env-file PATH` to select another private settings file. Treat this link like a password because anyone who has it can post through it.
+
+For a one-run override, `--webhook-url URL` uses a complete HTTPS destination without changing `.env` and enables webhooks for that run. The URL may remain visible in shell history or process listings, so prefer `--set-webhook-url` for normal setup.
+
+Keep the default provider in `lastfm_monitor.conf`:
+
+```ini
+WEBHOOK_PROVIDER = "discord"
+```
+
+Discord alerts carry the same emphasis as the HTML email, since Discord renders markdown in an embed. Bold values stay bold and links stay clickable. Only Discord gets that wording: ntfy receives the plain body, because it would show the markers literally.
+
+<a id="advanced-discord-format-customization"></a>
+### Advanced Discord-format customization
+
+`WEBHOOK_USERNAME` and `WEBHOOK_AVATAR_URL` change the sender name and HTTPS avatar for Discord-format payloads:
+
+```ini
+WEBHOOK_USERNAME = "Last.fm Monitor"
+WEBHOOK_AVATAR_URL = "https://example.com/path/avatar.png"
+```
+
+`WEBHOOK_TEMPLATE` controls the Discord-format request body. The generated configuration contains the safe default template. It supports these placeholders:
+
+- `{title}`
+- `{description}`
+- `{version}`
+- `{image_url}`
+- `{fields}` and `{fields_str}`
+- `{color}`
+- `{timestamp}`
+- `{username}`
+- `{avatar_url}`
+
+Discord templates must produce a JSON object. Use a dictionary or a JSON string encoding an object, including legacy strings with doubled object braces. Lists, non-JSON strings and unsupported placeholders are rejected before delivery. Alert text is kept literal and all payloads replace `allowed_mentions` with `{"parse": []}` so alert text cannot trigger Discord mentions. Reloaded settings apply to the next delivery.
+
+`WEBHOOK_TRANSFORMS` applies string methods to shared placeholder values before the template and headers are rendered:
+
+```ini
+WEBHOOK_TRANSFORMS = [
+    ("title", "upper"),
+    ("description", "replace", "**", ""),
+    ("description", "strip"),
+]
+```
+
+The tuple format is `(field_to_target, method_name, *optional_arguments)`. Invalid templates, avatar URLs, transforms or formatted headers fail before a webhook request is attempted. `WEBHOOK_TEMPLATE`, `WEBHOOK_USERNAME` and `WEBHOOK_AVATAR_URL` apply only to the Discord request format and are ignored when `WEBHOOK_PROVIDER` is `"ntfy"`. ntfy continues to use its native publish API while transformations and header placeholders use the same shared title and description values.
+
+Topics on the public ntfy.sh service are public unless protected through an account reservation. Treat an unprotected topic name like a password and do not reuse the example topic above.
+
+<a id="storing-secrets"></a>
 ## Storing Secrets
 
 It is recommended to store secrets like `LASTFM_API_KEY`, `LASTFM_API_SECRET`, `SP_CLIENT_ID`, `SP_CLIENT_SECRET`, `SMTP_PASSWORD`, `WEBHOOK_URL` or `NTFY_ACCESS_TOKEN` as either an environment variable or in a dotenv file.
@@ -273,38 +336,7 @@ lastfm_monitor <lastfm_username> --env-file none
 
 As a fallback, you can also store secrets in the configuration file or source code.
 
-### Which Source Wins
-
-The same secret can be set in several places. The later source in this list wins:
-
-1. the configuration file, or the settings in the script itself
-2. the dotenv file
-3. an exported environment variable
-4. a command-line argument such as `-u`, `-w`, `-z` or `--webhook-url`
-
-A nonempty exported secret takes priority over the dotenv file at startup and after `SIGHUP`. An explicit command-line value has the highest priority.
-
-A forgotten `export` can shadow the file invisibly, so `--debug` names each secret and the source it resolved from, never the value:
-
-```text
-[DEBUG 12:00:00] Secret resolution: name=LASTFM_API_KEY, source=environment, value=set, chars=32
-[DEBUG 12:00:00] Secret resolution: name=SMTP_PASSWORD, source=dotenv file, value=set
-[DEBUG 12:00:00] Secret sources: source=dotenv file, names=SMTP_PASSWORD
-[DEBUG 12:00:00] Secret sources: source=environment, names=LASTFM_API_KEY
-```
-
-A secret still holding its `your_...` placeholder counts as unset and is left out. Lengths appear only for the secrets whose length the provider issues, never for a password you chose.
-
-Secret commands update the selected value without changing other dotenv settings. Clearing a value removes its assignment.
-
-### Reloading secrets and backup contents
-
-On macOS, Linux and Unix, `SIGHUP` reloads file-supplied secrets. Command-line values take priority, followed by nonempty environment values exported before startup, dotenv entries and configuration fallbacks. Change an argument or export and restart to replace those values. Removing a file entry uses the next available source or clears the secret. An unreadable or invalid file leaves working credentials unchanged. Empty exports are ignored. An empty dotenv entry overrides the configuration.
-
-Setup keeps the saved `DOTENV_FILE` unless you pass `--env-file PATH`. If you change files, setup asks you to review credentials again. Existing values in the new file, including empty values, stay unless you replace them. Retained credentials fill missing entries when you save. The old file stays intact.
-
-Setup moves retained credentials from older configuration files into the selected dotenv file unless that file already defines the same key. It leaves the original configuration in place if it cannot preserve those credentials. Setup creates a timestamped configuration backup with inline secrets removed. General `--generate-config` backups can contain inline credentials. Replaced dotenv secrets are not backed up.
-
+<a id="tls-verification"></a>
 ## TLS Verification
 
 Every connection the tool makes verifies the server's certificate: Last.fm, the Spotify metadata backends, webhook delivery, the mail server handshake and the startup connectivity check.
@@ -317,14 +349,7 @@ VERIFY_SSL = False
 
 The tool then says so at startup, because an intercepted connection can no longer be told apart from the real service. Leave it at the default `True` everywhere else.
 
-## Terminal Output
-
-The tool clears the terminal when monitoring starts. Set `CLEAR_SCREEN` to `False` to keep whatever is already on the screen.
-
-The screen is never cleared when output is redirected to a file or a pipe, in debug mode, or for a command that prints a result and exits, such as `--doctor`, `--help` and the test senders.
-
-Two settings add detail to what a run prints. `VERBOSE_MODE` adds the decisions the run made and `DEBUG_MODE` adds timestamped technical traces. Both are off by default, both are independent of each other and both have a flag that wins over the file, `--verbose` and `--debug`. `DELIVERY_CONFIRMATIONS` is on by default and controls whether verbose mode confirms each delivered email and webhook alert. See [Verbose Output](troubleshooting.md#verbose-output) and [Debug Output](troubleshooting.md#debug-output).
-
+<a id="terminal-colours"></a>
 ## Terminal Colours
 
 `COLORED_OUTPUT` controls whether terminal output is coloured. It defaults to `True` and is read before the first line is printed, so a configured value applies from the version line onwards. `--no-color` disables colour for one run. Colour also switches itself off when output is redirected or piped, when `TERM` is unset or `dumb` and when the standard [`NO_COLOR`](https://no-color.org/) environment variable is set. Log files are always written with the escape sequences stripped.
@@ -386,39 +411,3 @@ Warning and signal lines mark their opening word rather than being painted end t
 On Windows, install the optional `colorama` package for the best results in the classic Command Prompt. Windows Terminal needs nothing extra.
 
 To colour saved log files when you view them later, see [Coloring Log Output with GRC](usage.md#coloring-log-output-with-grc).
-
-## Check Intervals
-
-If you want to customize music polling intervals, use `-k` and `-c` flags (or corresponding configuration options):
-
-```sh
-lastfm_monitor <lastfm_username> -k 2 -c 10
-```
-
-* `LASTFM_ACTIVE_CHECK_INTERVAL`, `-k`: check interval when the user is online, i.e. currently playing (seconds)
-* `LASTFM_CHECK_INTERVAL`, `-c`: check interval when the user is considered offline, i.e. not playing music (seconds)
-
-If you want to change the time required to mark the user as inactive (the timer starts once the user stops playing the music), use `-o` flag (or `LASTFM_INACTIVITY_CHECK` configuration option):
-
-```sh
-lastfm_monitor <lastfm_username> -o 120
-```
-
-Friend and profile tracking checks every **90 minutes** by default (`FRIENDS_CHECK_INTERVAL = 5400`). Set `FRIENDS_CHECK_INTERVAL` or `--friends-check-interval` in seconds to change it. Existing saved values still apply. This timer covers followings, followers, the About Me bio and the display name. It is independent from the music polling intervals.
-
-To avoid false notifications caused by transient Last.fm responses, friend and profile changes are only confirmed after a number of consecutive checks (default: 3). You can configure this via the `FRIENDS_CHANGE_COUNTER` option or `--friends-change-counter` flag. This setting also controls the threshold for suppressing repeated error messages.
-
-You can also configure the retry timeout used when confirming transient changes or errors via `FRIENDS_RETRY_INTERVAL` configuration option or `--friends-retry-interval` flag.
-
-### Liveness Reminder
-
-While nothing changes, the tool prints one reminder that it is still running:
-
-```
-* Monitoring healthy for <lastfm_username>. The user is inactive with no activity change since the last check
-Liveness check, timestamp:	Mon 08 Sep 2026, 09:15:05
-```
-
-The reminder is timed in seconds, so it arrives at the same rate whether the user is listening or not. Set `LIVENESS_CHECK_INTERVAL` to change it (default: 86400, i.e. 24 hours), or to 0 to switch it off.
-
-Anything the tool prints about the user restarts the countdown, so a busy run stays quiet.

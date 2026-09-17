@@ -1,6 +1,6 @@
 # Usage
 
-<a id="command-format"></a>
+<a id="command-format-by-installation-method"></a>
 ## Command Format by Installation Method
 
 Examples use the PyPI command. For a downloaded script, run commands from the directory containing `lastfm_monitor.py` and keep the same arguments:
@@ -17,6 +17,7 @@ Activate the tool's virtual environment before running these commands. For a dow
 
 For first-time configuration, follow [Setup & First Run](setup-and-first-run.md). Use [Doctor Preflight](troubleshooting.md#doctor-preflight) to check a setup before monitoring.
 
+<a id="monitoring-mode"></a>
 ## Monitoring Mode
 
 To monitor specific user activity, just type Last.fm username as a command-line argument (`lastfm_username` in the example below):
@@ -41,7 +42,7 @@ Settings come from a configuration file when one is found. [Configuration File](
 
 If a run does not start, `--doctor` reports every check the tool makes before monitoring. See [Doctor Preflight](troubleshooting.md#doctor-preflight).
 
-The startup summary shows the target, polling intervals, alerts, output files and enabled features. Use `--verbose` or `--debug` for all settings and secret sources. See [Verbose Output](troubleshooting.md#verbose-output).
+The startup summary shows the target, polling intervals, alerts, output files and enabled features. Use `--verbose` or `--debug` for all settings and secret sources. See [Verbose and Debug Output](troubleshooting.md#verbose-and-debug-output).
 
 The log file always receives the complete list, whichever view the terminal was shown, so a log attached to a bug report carries every effective setting.
 
@@ -57,14 +58,49 @@ The tool runs until interrupted (`Ctrl+C`). Use `tmux` or `screen` for persisten
 
 You can monitor multiple Last.fm users by running multiple copies of the script.
 
-The tool automatically saves its output to `lastfm_monitor_<username>.log` file. It can be changed in the settings via `LF_LOGFILE` configuration option or disabled completely via `DISABLE_LOGGING` / `-d` flag.
+The tool automatically saves its output to `lastfm_monitor_<lastfm_username>.log` file. It can be changed in the settings via `LF_LOGFILE` configuration option or disabled completely via `DISABLE_LOGGING` / `-d` flag.
 
 Screen output can be capped with `TRUNCATE_CHARS` or the `--truncate N` flag, which cuts each printed line to that many characters. `999` auto-detects the terminal width. The log file keeps the full line either way.
 
 Set `ASCII_LOG_SEPARATORS` to `"Auto"` (default) to use ASCII separator-only lines on Windows, `"On"` to use them on every operating system or `"Off"` to preserve Unicode separators in logs everywhere. Terminal separators stay Unicode. Log files and all other logged text remain UTF-8.
 
-The tool also saves the last activity information (artist, track, timestamp) to `lastfm_<username>_last_activity.json` file and the number and list of followings and followers to `lastfm_<username>_followings.json` and `lastfm_<username>_followers.json` files (if tracking is enabled), so this data can be reused if the tool is restarted.
+The tool also saves the last activity information (artist, track, timestamp) to `lastfm_<lastfm_username>_last_activity.json` file and the number and list of followings and followers to `lastfm_<lastfm_username>_followings.json` and `lastfm_<lastfm_username>_followers.json` files (if tracking is enabled), so this data can be reused if the tool is restarted.
 
+<a id="terminal-output"></a>
+## Terminal Output
+
+Use `--help` for examples grouped by task and matched to your installation.
+
+Monitoring mode prints the settings that are actually in effect before the first check.
+
+Optional features appear once you switch them on.
+
+Use `--verbose` or `--debug` for the full startup summary, including output paths, notification settings, secret sources and runtime information.
+
+Use `--truncate N` or `TRUNCATE_CHARS` to limit screen line width. Set it to `999` to detect the terminal width automatically. Truncation does not change log files and is ignored when logging is disabled with `-d`.
+
+The tool clears the terminal when monitoring starts. Set `CLEAR_SCREEN` to `False` to keep whatever is already on the screen.
+
+The screen is never cleared when output is redirected to a file or a pipe, in debug mode, or for a command that prints a result and exits, such as `--doctor`, `--help` and the test senders.
+
+Two settings add detail to what a run prints. `VERBOSE_MODE` adds the decisions the run made and `DEBUG_MODE` adds timestamped technical traces. Both are off by default, both are independent of each other and both have a flag that wins over the file, `--verbose` and `--debug`. `DELIVERY_CONFIRMATIONS` is on by default and controls whether verbose mode confirms each delivered email and webhook alert. See [Verbose and Debug Output](troubleshooting.md#verbose-and-debug-output).
+
+<a id="coloured-terminal-output"></a>
+### Coloured Terminal Output
+
+Last.fm Monitor colours live terminal output and help by default. Saved log files stay plain text.
+
+Turn colour off for one run with `--no-color` or permanently with `COLORED_OUTPUT = False`. Colour is also disabled for redirected output, `NO_COLOR` or an unsupported terminal. See [Terminal Colours](configuration.md#terminal-colours) for details and Windows support.
+
+Override individual colours with `COLOR_THEME`. It is merged over the built-in theme, so you only name the parts you want to change:
+
+```ini
+COLOR_THEME = { "track": "bright_magenta bold", "username": "green" }
+```
+
+See [Terminal Colours](configuration.md#terminal-colours) for every theme key and the accepted colour and style names.
+
+<a id="listing-mode"></a>
 ## Listing Mode
 
 There is another mode of the tool that prints the recently listened tracks for the user (`-l` flag).
@@ -83,6 +119,7 @@ If you want to not only display, but also save the list of recently listened tra
 lastfm_monitor <lastfm_username> -l -n 10 -b lastfm_tracks_username.csv
 ```
 
+<a id="email-notifications"></a>
 ## Email Notifications
 
 To enable email notifications when a user becomes active:
@@ -185,7 +222,7 @@ To track changes to the editable **About You** text shown publicly as **About Me
 lastfm_monitor <lastfm_username> --track-bio --track-display-name
 ```
 
-Set `PROFILE_NOTIFICATION` to `True` or add `--notify-profile` to send email for confirmed profile changes. Each field is independently controlled through `TRACK_BIO` / `--track-bio` and `TRACK_DISPLAY_NAME` / `--track-display-name`. The baseline is stored in `lastfm_<username>_profile.json`.
+Set `PROFILE_NOTIFICATION` to `True` or add `--notify-profile` to send email for confirmed profile changes. Each field is independently controlled through `TRACK_BIO` / `--track-bio` and `TRACK_DISPLAY_NAME` / `--track-display-name`. The baseline is stored in `lastfm_<lastfm_username>_profile.json`.
 
 You can also decide to use Last.fm or Spotify URL in "Last played:" / "Track:" field in HTML email notifications (see `USE_LASTFM_URL_IN_LAST_PLAYED` config option).
 
@@ -195,6 +232,7 @@ Example email:
 
 ![lastfm_monitor_email_notifications](https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/assets/lastfm_monitor_email_notifications.png)
 
+<a id="webhook-notifications"></a>
 ## Webhook Notifications
 
 Webhook event choices mirror email controls while remaining independent. Enable the master switch in the config file or for one run:
@@ -232,6 +270,7 @@ Email and webhook delivery attempts remain independent. When loop, monitored-tra
 
 See [Webhook Settings](configuration.md#webhook-settings) for Discord, ntfy, private URL setup, test delivery and advanced request customization.
 
+<a id="csv-export"></a>
 ## CSV Export
 
 If you want to save all listened songs to a CSV file, set `CSV_FILE` or use `-b` flag:
@@ -242,6 +281,7 @@ lastfm_monitor <lastfm_username> -b lastfm_tracks_username.csv
 
 The file will be automatically created if it does not exist.
 
+<a id="lastfm-wrapped-tool"></a>
 ## Last.fm Wrapped Tool
 
 The *[lastfm_wrapped.py](https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/tools/lastfm_wrapped.py)* script generates Spotify Wrapped-style statistics from CSV files created by `lastfm_monitor.py`.
@@ -280,6 +320,7 @@ The tool displays:
 - Top tracks (by play count)
 - Top albums (by play count)
 
+<a id="automatic-playback-of-listened-tracks-in-the-spotify-client"></a>
 ## Automatic Playback of Listened Tracks in the Spotify Client
 
 If you want the tool to automatically play the tracks listened to by the user in your local Spotify client:
@@ -318,6 +359,7 @@ For **Windows** set `SPOTIFY_WINDOWS_PLAYING_METHOD` to one of the following val
 
 The recommended defaults should work for most people.
 
+<a id="progress-indicator"></a>
 ## Progress Indicator
 
 If you want to see a real-time progress indicator showing the exact minute and second of the track the user is currently listening to:
@@ -332,6 +374,7 @@ lastfm_monitor <lastfm_username> -p
 
 For this functionality to work correctly, it is suggested to set the active check interval (`LASTFM_ACTIVE_CHECK_INTERVAL` / `-k` flag) to a low value (such as 2-5 seconds).
 
+<a id="getting-track-duration-from-spotify"></a>
 ## Getting Track Duration from Spotify
 
 If you want the tool to fetch the track duration from Spotify instead of Last.fm, which very often reports the wrong duration (or none at all):
@@ -354,6 +397,7 @@ lastfm_monitor <lastfm_username> -r -q
 
 Duration marks are not displayed if the functionality to retrieve track duration from Spotify is disabled.
 
+<a id="private-mode-detection-in-spotify"></a>
 ## Private Mode Detection in Spotify
 
 The tool includes functionality to detect when private mode is potentially used in Spotify and even estimates the duration of its usage. It is enabled by default and is not configurable.
@@ -366,6 +410,45 @@ However, keep in mind that this is not 100% accurate. I have observed duplicate 
 
 ![lastfm_monitor_private_mode](https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/assets/lastfm_monitor_private_mode.png)
 
+<a id="check-intervals"></a>
+## Check Intervals
+
+If you want to customize the polling intervals, use the `-k` and `-c` flags (or the corresponding configuration options):
+
+```sh
+lastfm_monitor <lastfm_username> -k 2 -c 10
+```
+
+* `LASTFM_ACTIVE_CHECK_INTERVAL`, `-k`: check interval when the user is online, i.e. currently playing (seconds)
+* `LASTFM_CHECK_INTERVAL`, `-c`: check interval when the user is considered offline, i.e. not playing music (seconds)
+
+If you want to change the time required to mark the user as inactive (the timer starts once the user stops playing the music), use `-o` flag (or `LASTFM_INACTIVITY_CHECK` configuration option):
+
+```sh
+lastfm_monitor <lastfm_username> -o 120
+```
+
+Friend and profile tracking checks every **90 minutes** by default (`FRIENDS_CHECK_INTERVAL = 5400`). Set `FRIENDS_CHECK_INTERVAL` or `--friends-check-interval` in seconds to change it. Existing saved values still apply. This timer covers followings, followers, the About Me bio and the display name. It is independent from the music polling intervals.
+
+To avoid false notifications caused by transient Last.fm responses, friend and profile changes are only confirmed after a number of consecutive checks (default: 3). You can configure this via the `FRIENDS_CHANGE_COUNTER` option or `--friends-change-counter` flag. This setting also controls the threshold for suppressing repeated error messages.
+
+You can also configure the retry timeout used when confirming transient changes or errors via `FRIENDS_RETRY_INTERVAL` configuration option or `--friends-retry-interval` flag.
+
+<a id="liveness-reminder"></a>
+### Liveness Reminder
+
+While nothing changes, the tool prints one reminder that it is still running:
+
+```
+* Monitoring healthy for <lastfm_username>. The user is inactive with no activity change since the last check
+Liveness check, timestamp:	Mon 08 Sep 2026, 09:15:05
+```
+
+The reminder is timed in seconds, so it arrives at the same rate whether the user is listening or not. Set `LIVENESS_CHECK_INTERVAL` to change it (default: 86400, i.e. 24 hours), or to 0 to switch it off.
+
+Anything the tool prints about the user restarts the countdown, so a busy run stays quiet.
+
+<a id="signal-controls-macoslinuxunix"></a>
 ## Signal Controls (macOS/Linux/Unix)
 
 The tool has several signal handlers implemented which allow to change behavior of the tool without a need to restart it with new configuration options / flags.
@@ -393,6 +476,7 @@ pkill -USR1 -f "lastfm_monitor <lastfm_username>"
 
 As Windows supports limited number of signals, this functionality is available only on Linux/Unix/macOS.
 
+<a id="coloring-log-output-with-grc"></a>
 ## Coloring Log Output with GRC
 
 You can use [GRC](https://github.com/garabik/grc) to color logs.
@@ -412,5 +496,5 @@ Now copy the [conf.monitor_logs](https://raw.githubusercontent.com/misiektoja/la
 Example:
 
 ```sh
-grc tail -F -n 100 lastfm_monitor_<username>.log
+grc tail -F -n 100 lastfm_monitor_<lastfm_username>.log
 ```
