@@ -740,6 +740,7 @@ SPOTIFY_APP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#optional-spotify-oauth-
 DOCTOR_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#doctor-preflight"
 DIAGNOSTICS_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#verbose-and-debug-output"
 INTERVALS_GUIDE_URL = f"{DOCS_BASE_URL}/usage/#check-intervals"
+WEBSITE_TRACKING_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#lastfm-website-tracking"
 
 # A preflight check waits on the user, so it uses a shorter timeout than a delivery in the monitoring loop
 DOCTOR_SMTP_TIMEOUT = 5
@@ -2220,7 +2221,7 @@ RECOVERY_CODES = frozenset({
     "secret.missing", "secret.entry",
     "auth.api_key_invalid",
     "network.unavailable", "network.timeout",
-    "lastfm.rate_limited", "lastfm.unavailable", "lastfm.challenge",
+    "lastfm.rate_limited", "lastfm.unavailable", "lastfm.challenge", "lastfm.website_error",
     "target.missing", "target.invalid", "target.not_found", "target.not_visible",
     "smtp.invalid", "smtp.authentication", "smtp.connection",
     "webhook.invalid", "webhook.rejected", "webhook.rate_limited", "webhook.connection",
@@ -2298,6 +2299,12 @@ def recovery_lastfm_status(error):
     return None
 
 
+# Returns the HTTP status named in an error message, since the scraped website pages report their status as text rather than on an exception
+def recovery_text_http_status(message):
+    match = re.search(r"\bhttp (?:code |status )?(\d{3})\b", message)
+    return int(match.group(1)) if match else None
+
+
 # Yields the exception and each cause or context up to max_depth, to walk an exception chain
 def iter_exc_chain(error, max_depth=8):
     current = error
@@ -2336,6 +2343,7 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
     safe_detail = sanitize_error_text(detail or error, extra_secrets=extra_secrets) if (detail or error) else ""
     lastfm_status = recovery_lastfm_status(error)
     http_status = recovery_http_status(error)
+    text_status = recovery_text_http_status(message)
 
     def advice(code, summary, fix, retryable, guide_url=None):
         return make_recovery_advice(code, summary, recovery_fix_with_guide(fix, guide_url) if guide_url else fix, retryable, safe_detail)
@@ -2426,8 +2434,11 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
         return advice("lastfm.unavailable", "The Last.fm API is temporarily unavailable", "This is usually a Last.fm outage. The tool will keep retrying", True, DIAGNOSTICS_GUIDE_URL)
 
     if "last.fm returned a browser verification page" in message:
-        return advice("lastfm.challenge", "Last.fm is asking for browser verification", "The tool will keep retrying. If this persists, update curl_cffi and check the Last.fm page in a browser", True, f"{DOCS_BASE_URL}/troubleshooting/#lastfm-website-tracking")
-    if http_status == 429 or "http code 429" in message or "429 client" in message or "rate limit" in message or "too many requests" in message:
+        return advice("lastfm.challenge", "Last.fm is asking for browser verification", "The tool will keep retrying. If this persists, update curl_cffi and check the Last.fm page in a browser", True, WEBSITE_TRACKING_GUIDE_URL)
+    # Last.fm answers the scraped pages with statuses above the HTTP range, which no standard rule below would recognise
+    if text_status is not None and text_status >= 600:
+        return advice("lastfm.website_error", f"Last.fm answered the website request with a nonstandard HTTP {text_status}", "Only friend and profile tracking reads those pages, so music monitoring is unaffected. The tool will keep retrying with a growing wait. If this lasts, update curl_cffi and open the Last.fm page in a browser", True, WEBSITE_TRACKING_GUIDE_URL)
+    if http_status == 429 or text_status == 429 or "429 client" in message or "rate limit" in message or "too many requests" in message:
         return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. Increase the check intervals if this repeats", True, INTERVALS_GUIDE_URL)
     if "invalid api key" in message or "api key suspended" in message or "invalid method signature" in message:
         return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", f"Save a working pair with '{render_command(['--set-lastfm-credentials'])}'", False, LASTFM_API_GUIDE_URL)
@@ -2435,7 +2446,7 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
         return advice("target.not_visible", "The monitored user hides their recent listening information", "Ask the user to turn off 'Hide recent listening information' in their Last.fm privacy settings", False, PRIVACY_GUIDE_URL)
     if "user not found" in message or "no user with that name" in message or http_status == 404:
         return advice("target.not_found", safe_detail or "Last.fm has no user with that name", "Check the username, since a deleted or renamed account cannot be monitored", False, USAGE_GUIDE_URL)
-    if (http_status is not None and http_status >= 500) or re.search(r"http code 5\d\d", message) or "temporarily unavailable" in message or "service unavailable" in message or "bad gateway" in message:
+    if (http_status is not None and http_status >= 500) or (text_status is not None and text_status >= 500) or "temporarily unavailable" in message or "service unavailable" in message or "bad gateway" in message:
         return advice("lastfm.unavailable", "The Last.fm API is temporarily unavailable", "This is usually a Last.fm outage. The tool will keep retrying", True, DIAGNOSTICS_GUIDE_URL)
     if "timed out" in message or "timeout" in message:
         return advice("network.timeout", "The Last.fm request timed out", "Check connectivity. The tool will keep retrying", True, DIAGNOSTICS_GUIDE_URL)
