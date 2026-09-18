@@ -3435,6 +3435,8 @@ def reload_secrets_signal_handler(sig, frame):
                     webhook_url_changed = True
                 record_secret_source(secret, dotenv_reload_source(secret))
                 debug_print("Secret reload", name=secret, path=env_path, **secret_fields(val, secret))
+                # The line names the setting and where it came from, never its value
+                # codeql[py/clear-text-logging-sensitive-data]
                 print(f"* Reloaded {secret} from {env_path}")
     if oauth_credentials_changed:
         SP_OAUTH_MEMORY_CACHE_HANDLER = None
@@ -9452,6 +9454,8 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
     if backup_path:
         print(f"  Backup:        {backup_path}")
     if dotenv_path:
+        # The row prints the dotenv file path, not what the file holds
+        # codeql[py/clear-text-logging-sensitive-data]
         print(f"  Secrets:       {dotenv_path}")
 
     doctor_exit = None
