@@ -708,7 +708,7 @@ class FakeNetwork:
 
 
 # Runs the real monitoring loop on a fake clock advanced by each patched sleep and returns what it printed
-def drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles, check_interval=30, liveness=0, fail_after=None, fail_recover_after=None, error_factory=None, friends_fail_after=None, friends_recover_after=None, friends_failing_calls=None, stub_notifications=True):
+def drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles, check_interval=30, liveness=0, fail_after=None, fail_recover_after=None, error_factory=None, friends_fail_after=None, friends_recover_after=None, friends_failing_calls=None, friends_check_interval=None, friends_call_log=None, stub_notifications=True):
     if friends_failing_calls is not None:
         friends_fail_after = 0
 
@@ -722,7 +722,7 @@ def drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles, check_interval=30,
     monkeypatch.setattr(monitor, "LIVENESS_CHECK_INTERVAL", liveness)
     monkeypatch.setattr(monitor, "LIVENESS_REMINDER_SECONDS", liveness)
     monkeypatch.setattr(monitor, "TRACK_FOLLOWINGS", friends_fail_after is not None)
-    monkeypatch.setattr(monitor, "FRIENDS_CHECK_INTERVAL", check_interval if friends_fail_after is not None else 0)
+    monkeypatch.setattr(monitor, "FRIENDS_CHECK_INTERVAL", (friends_check_interval or check_interval) if friends_fail_after is not None else 0)
     monkeypatch.setattr(monitor, "FRIENDS_RETRY_INTERVAL", check_interval)
     monkeypatch.setattr(monitor, "FRIENDS_CHANGE_COUNTER", 3)
     monkeypatch.setattr(monitor, "TRACK_FOLLOWERS", False)
@@ -742,6 +742,8 @@ def drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles, check_interval=30,
 
         def failing_friends(_username):
             call = next(friends_calls)
+            if friends_call_log is not None:
+                friends_call_log.append(clock.now)
             if friends_failing_calls is not None:
                 failing = call in friends_failing_calls
             else:
@@ -960,6 +962,59 @@ class TestARecoveryIsNewsOnlyIfTheFailureWas:
     def test_a_run_that_never_failed_says_nothing_about_recovering(self, verbose_on, monkeypatch, tmp_path, capsys):
         transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=5, friends_fail_after=99)
         assert "available again" not in transcript
+
+
+class TestALastingFriendsOutageBacksOff:
+    def test_the_backoff_doubles_from_the_retry_interval_and_stops_at_the_check_interval(self, monkeypatch):
+        monkeypatch.setattr(monitor, "FRIENDS_RETRY_INTERVAL", 90)
+        monkeypatch.setattr(monitor, "FRIENDS_CHECK_INTERVAL", 10800)
+        assert [monitor.friends_error_retry_seconds(streak) for streak in range(1, 9)] == [90, 180, 360, 720, 1440, 2880, 5760, 10800]
+        # An outage lasting for days must not shift the interval into an astronomical number
+        assert monitor.friends_error_retry_seconds(400) == 10800
+
+    # A retry interval above the check interval throttles the confirmation phase on purpose, so the error path keeps it as the floor
+    def test_a_retry_interval_above_the_check_interval_is_kept(self, monkeypatch):
+        monkeypatch.setattr(monitor, "FRIENDS_RETRY_INTERVAL", 300)
+        monkeypatch.setattr(monitor, "FRIENDS_CHECK_INTERVAL", 60)
+        assert monitor.friends_error_retry_seconds(1) == 300
+        assert monitor.friends_error_retry_seconds(9) == 300
+
+    # A scraped page that Last.fm refuses for hours used to be re-requested at the confirmation pace, which is
+    # hundreds of requests against a host already turning them away, whatever the configured check interval said
+    def test_a_lasting_outage_stops_polling_at_the_confirmation_pace(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        calls = []
+        drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=190, friends_fail_after=1, friends_check_interval=1200, friends_call_log=calls)
+        # The first entry is the startup baseline, which succeeds before the outage starts
+        gaps = [later - earlier for earlier, later in zip(calls[1:], calls[2:])]
+        assert gaps == [30, 60, 120, 240, 480, 960, 1200, 1200]
+
+    # Counting attempts spaced the repeats evenly only while the retry interval was fixed
+    def test_the_repeat_report_follows_the_clock_not_the_attempt_count(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        monkeypatch.setattr(monitor, "OUTAGE_REMINDER_SECONDS", 1800)
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=190, friends_fail_after=1, friends_check_interval=1200)
+        reports = [line for line in transcript.splitlines() if line.startswith("* Error:")]
+        assert len(reports) == 3
+        assert reports[0].endswith("(next check in 2 minutes)")
+
+    # Nothing before the threshold is printed, so a short outage still passes unseen
+    def test_the_first_report_still_waits_for_the_confirmation_threshold(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=8, friends_fail_after=1, friends_recover_after=3)
+        assert "* Error:" not in transcript
+
+    # The recovering check left the regular timestamp stale, so the next iteration ran a second full check at once
+    def test_a_recovery_restarts_the_regular_cadence(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        calls = []
+        drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=100, friends_fail_after=1, friends_recover_after=2, friends_check_interval=1200, friends_call_log=calls)
+        assert calls[2] - calls[1] == 30
+        assert calls[3] - calls[2] == 1200
 
 
 # Raises one failure category for the first run of failing checks and another one after it
