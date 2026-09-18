@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.7
+v2.7.1
 
 Tool implementing real-time tracking of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -19,7 +19,7 @@ curl_cffi (optional, only for friends and profile tracking)
 colorama (optional, only for coloured output in the classic Windows Command Prompt)
 """
 
-VERSION = "2.7"
+VERSION = "2.7.1"
 
 # ---------------------------
 # CONFIGURATION SECTION START
