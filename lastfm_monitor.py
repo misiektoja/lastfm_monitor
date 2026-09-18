@@ -572,6 +572,7 @@ FRIENDS_CHANGE_COUNTER = 3
 # Timeout used when confirming transient changes; in seconds
 # If this is set higher than FRIENDS_CHECK_INTERVAL, it effectively throttles the checks
 # during the confirmation phase
+# After a failed check it is doubled on every further failure, up to FRIENDS_CHECK_INTERVAL
 # Can also be set using the --friends-retry-interval flag
 FRIENDS_RETRY_INTERVAL = 90
 """
@@ -4175,6 +4176,13 @@ def friends_check_enabled():
     return TRACK_FOLLOWINGS or TRACK_FOLLOWERS or TRACK_BIO or TRACK_DISPLAY_NAME
 
 
+# Returns how long to wait after consecutive failed friend and profile checks, doubling the retry interval up to the regular check cadence so a lasting Last.fm outage is not polled at the confirmation pace
+def friends_error_retry_seconds(error_streak):
+    ceiling = max(FRIENDS_CHECK_INTERVAL, FRIENDS_RETRY_INTERVAL)
+    # The shift is bounded because the streak grows for as long as the outage lasts
+    return min(FRIENDS_RETRY_INTERVAL * (2 ** min(max(error_streak - 1, 0), 16)), ceiling)
+
+
 # Persists the exact states produced by one successful shared timer check
 def save_friends_check_states(username, current_states):
     for key in ('followings', 'followers'):
@@ -6517,6 +6525,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
     friends_pending_changes = None
     friends_streak = 0
     friends_failure_announced = False
+    friends_error_alert_ts = 0
     # A blip of one check is confirmed by the next before it is printed, since the checks here are seconds apart
     outage = OutageReporter(confirm_checks=1 if VERBOSE_MODE else 2)
     recovery_hint_tracker = RecoveryHintTracker()
@@ -6554,7 +6563,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         changes, current_states = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, save_state=False, raise_on_error=True)
 
                         # Reset error streak on any successful check
-                        if friends_streak < 0:
+                        recovered_from_errors = friends_streak < 0
+                        if recovered_from_errors:
                             failed_checks = abs(friends_streak)
                             debug_print("Friends/profile check", outcome="OK", failures=failed_checks)
                             # A recovery is only news if the failure was, so an outage nobody saw clears in silence
@@ -6562,6 +6572,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                                 print(f"* Friends/profile check is available again after {failed_checks} failed check{'' if failed_checks == 1 else 's'}, so friend and profile change alerts can fire again")
                                 print_cur_ts("Timestamp:\t\t\t")
                             friends_streak = 0
+                            friends_error_alert_ts = 0
 
                         if changes:
                             if changes == friends_pending_changes:
@@ -6607,7 +6618,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
                             friends_streak = 0
                             friends_pending_changes = None
-                            if not is_retry:
+                            # A check that ended an outage is a full read of the current state, so it restarts the regular
+                            # cadence instead of leaving a stale timestamp that makes the next iteration check again at once
+                            if not is_retry or recovered_from_errors:
                                 friends_check_last_ts = current_ts
                                 # Refresh baseline timestamps with the exact data fetched by this check
                                 save_friends_check_states(username, current_states)
@@ -6615,6 +6628,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         if friends_streak == 0:
                             # Start measuring error streak (negative values)
                             friends_streak = -1
+                            friends_error_alert_ts = 0
                             # Nothing else is printed until the streak reaches its alert threshold, which reads as a check that stopped running
                             friends_failure_announced = verbose_degraded_feature("Friends/profile check", "friend and profile change alerts", e)
                         elif friends_streak < 0:
@@ -6634,15 +6648,17 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         else:
                             # Error streak logic (negative streak)
                             current_error_streak = abs(friends_streak)
-
-                            # Throttling: Alert on threshold, then every 10 attempts
-                            if current_error_streak == FRIENDS_CHANGE_COUNTER or (current_error_streak > FRIENDS_CHANGE_COUNTER and (current_error_streak - FRIENDS_CHANGE_COUNTER) % 10 == 0):
-                                friends_failure_announced = True
-                                print_recovery_error(e, detail=f"Cannot confirm the friend and profile state (attempt {current_error_streak}): {e}")
-                                print_cur_ts("Timestamp:\t\t\t")
-
-                            retry_interval = FRIENDS_RETRY_INTERVAL
+                            retry_interval = friends_error_retry_seconds(current_error_streak)
                             friends_next_check_ts = current_ts + retry_interval
+
+                            # The first report waits for the confirmation threshold, then a lasting outage reminds on a clock
+                            # rather than on every Nth attempt, whose spacing changes with the backoff
+                            reminder_due = friends_error_alert_ts == 0 or (current_ts - friends_error_alert_ts) >= OUTAGE_REMINDER_SECONDS
+                            if current_error_streak >= FRIENDS_CHANGE_COUNTER and reminder_due:
+                                friends_failure_announced = True
+                                friends_error_alert_ts = current_ts
+                                print_recovery_error(e, detail=f"Cannot confirm the friend and profile state (attempt {current_error_streak}): {e}", retry_note=f"next check in {display_time(retry_interval)}")
+                                print_cur_ts("Timestamp:\t\t\t")
 
             debug_print("Now playing and recent tracks fetch", user=username)
             recent_tracks = lastfm_get_recent_tracks(username, network, 1)
