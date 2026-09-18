@@ -64,7 +64,7 @@ Follower, following and profile checks use `curl_cffi` with Chrome impersonation
 
 If browser verification persists, [update the installation and its dependencies](installation.md#upgrading) and check the same Last.fm profile in a browser. Opening it there does not share browser cookies with the monitor. Keep the saved tracking files. Changing API credentials does not fix a website challenge.
 
-Temporary website errors, including HTTP 600, also use bounded retries. Use `--debug` to see the HTTP status and retry attempts. The normal friend and profile check interval defaults to 90 minutes. Explicit saved intervals still apply.
+Temporary website errors, including HTTP 600, also use bounded retries. Last.fm answers these pages with statuses outside the standard range, so a lasting failure is reported as `Last.fm answered the website request with a nonstandard HTTP 600`. Use `--debug` to see the HTTP status and retry attempts. The normal friend and profile check interval defaults to 90 minutes. Explicit saved intervals still apply.
 
 When the errors keep coming, the wait between checks doubles after each failed attempt until it reaches `FRIENDS_CHECK_INTERVAL`, so an outage lasting hours is not requested at the `FRIENDS_RETRY_INTERVAL` pace. The failure is reported once, then at most once an hour, and a recovery line is printed when the checks work again. Music monitoring is unaffected, since it uses the Last.fm API rather than the website.
 
