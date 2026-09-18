@@ -4,10 +4,11 @@ This is a high-level summary of the most important changes.
 
 # Changes in 2.7.1 (TBD)
 
-Version **2.7.1** keeps the alert a failing check sends inside that check's report on screen and reports an alert channel that still holds the values from the sample configuration as unset.
+Version **2.7.1** keeps the alert a failing check sends inside that check's report on screen, reports an alert channel that still holds the values from the sample configuration as unset and slows the friend and profile checks down while Last.fm keeps refusing them.
 
 **Bug fixes**:
 
+- **BUGFIX:** **Friend and profile checks back off while they keep failing** - A lasting Last.fm website failure was retried every **`FRIENDS_RETRY_INTERVAL`** seconds whatever **`FRIENDS_CHECK_INTERVAL`** was set to, so a run configured to check every 3 hours kept requesting the refused pages every 90 seconds and printed the same error every tenth attempt. The wait now doubles after each failed attempt up to the regular check interval, the error is repeated at most once an hour and the report names when the next check is due. A check that ends the outage restarts the regular interval instead of running again on the next cycle
 - **BUGFIX:** **Alert deliveries stay inside their report** - The hourly **`Monitoring degraded`** reminder closed its report before the error alert was sent, so **`Sending email notification to ...`** and its webhook equivalent landed under the separator and started a second, headless block. The reminder now closes below its delivery lines, keeping one check's report in one block
 - **BUGFIX:** **Unset alert channels are reported as unset** - The verbose startup summary read the values the sample configuration ships as a real destination, so a run that had never been given a mail server printed **`Email transport: your_smtp_server_ssl:587`**, a recipient of **`your_receiver_email`** and a webhook provider of **`Discord`**. Those rows now read **`Not configured`** and the channel rollup above them reads **`Off (not configured)`** rather than naming alert types nothing could deliver
 
