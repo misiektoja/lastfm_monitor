@@ -188,6 +188,18 @@ def test_permanent_http_failure_is_not_retried(status):
     sleep.assert_not_called()
 
 
+# Names the nonstandard status Last.fm answers the website with, which carries no response object to read it from
+def test_a_lasting_nonstandard_status_is_reported_as_a_website_failure():
+    with patch.object(curl_requests, "get", return_value=FakeResponse(status_code=600)), patch.object(monitor.time, "sleep"):
+        with pytest.raises(RuntimeError, match="after 3 attempts") as raised:
+            monitor._lastfm_http_get_with_retry("https://www.last.fm/user/NeonCipher/following")
+    advice = monitor.classify_recovery_error(raised.value)
+    assert advice.code == "lastfm.website_error"
+    assert "600" in advice.summary
+    assert advice.retryable is True
+    assert monitor.WEBSITE_TRACKING_GUIDE_URL in advice.fix
+
+
 @pytest.mark.parametrize("fetch", [monitor.lastfm_get_friends, monitor.lastfm_get_followers, monitor.lastfm_get_profile])
 # Keeps missing transport guidance intact across the public parsing functions
 def test_missing_curl_dependency_reports_installation(monkeypatch, fetch):

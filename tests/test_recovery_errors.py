@@ -143,6 +143,30 @@ class TestLastfmStatusMapping:
         assert monitor.classify_recovery_error(pylast.WSError(None, "not a code", "Invalid API key")).code == "auth.api_key_invalid"
 
 
+class TestAStatusNamedInTheMessage:
+    # The scraped website pages report their status as text, so a rule reading only the exception left every one of them unknown
+    @pytest.mark.parametrize("message, expected", [
+        ("Failed to fetch from Last.fm after 3 attempts: HTTP 600 from Last.fm", "lastfm.website_error"),
+        ("Failed to fetch from Last.fm after 3 attempts: HTTP 503 from Last.fm", "lastfm.unavailable"),
+        ("Failed to fetch from Last.fm after 3 attempts: HTTP 429 from Last.fm", "lastfm.rate_limited"),
+        ("Connection to the API failed with HTTP code 500", "lastfm.unavailable"),
+    ])
+    def test_a_status_written_into_the_message_is_classified(self, message, expected):
+        assert monitor.classify_recovery_error(RuntimeError(message)).code == expected
+
+    @pytest.mark.parametrize("message", ["cannot open http://example.invalid/500/page", "saved 600 scrobbles", "error 503 in the page body"])
+    def test_only_a_number_following_the_word_http_is_read_as_a_status(self, message):
+        assert monitor.recovery_text_http_status(message) is None
+
+    # Music monitoring reads the API rather than the website, so a scraping failure must not be reported as an API outage
+    def test_a_website_failure_names_the_feature_it_affects(self):
+        advice = monitor.classify_recovery_error(RuntimeError("Failed to fetch from Last.fm after 3 attempts: HTTP 600 from Last.fm"))
+        assert "600" in advice.summary
+        assert "music monitoring is unaffected" in advice.fix
+        assert monitor.WEBSITE_TRACKING_GUIDE_URL in advice.fix
+        assert advice.retryable is True
+
+
 class TestRetryability:
     @pytest.mark.parametrize("error, retryable", [
         (pylast.WSError(None, "29", "Rate limit exceeded"), True),
