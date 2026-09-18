@@ -2,6 +2,34 @@
 
 This is a high-level summary of the most important changes.
 
+# Changes in 2.7 (18 Sep 2026)
+
+Version **2.7** adds **guided setup**, a read-only **Doctor preflight check**, **profile change tracking** and **private SMTP password entry**. **Coloured output**, startup summaries and verbose/debug modes make monitoring easier to follow. Friend and profile tracking uses **Chrome impersonation** and defaults to **90-minute checks**. It also improves Spotify metadata recovery and protects saved history and credentials.
+
+**Features and improvements**:
+
+- **NEW:** **Guided setup** - `--setup` wizard collects the user, intervals, credentials, tracking, notifications and output files. Review or edit answers before saving and confirm replacements. Reruns preserve saved settings and move retained credentials to the private dotenv file. A first run without a saved target offers setup
+- **NEW:** **Saved target** - Set `LASTFM_USERNAME` to start monitoring without arguments. A command-line username overrides it for that run
+- **NEW:** **Profile change tracking** - `--track-display-name` and `--track-bio` watch the public display name and About Me text. Both are off by default. Tracked values persist across restarts, with optional email and webhook alerts
+- **NEW:** **Doctor preflight check** - `--doctor` checks configuration, Last.fm access, optional Spotify integration, notifications and output destinations with suggested fixes. It writes no files and sends test notifications only after confirmation
+- **NEW:** **Private SMTP password setup** - `--set-smtp-password` takes a hidden password and checks it with the mail server before saving. Guided setup also checks email credentials without sending a message
+- **NEW:** **Clearer output and diagnostics** - Coloured output and a short startup summary show the active settings. `--verbose` adds operational updates and `--debug` adds technical traces. Secrets are redacted and logs retain the full summary. `--truncate N` limits screen width while logs retain full lines. It works without `wcwidth`, which improves Unicode width measurements
+- **IMPROVE:** **Clearer errors and recovery** - Persistent outages produce hourly reminders and recovery notices. Temporary failures trigger error alerts after two minutes, while rejected credentials alert immediately. Failed monitoring-error alerts retry per channel without repeating successful deliveries
+- **IMPROVE:** **Discord alerts match the email** - Discord now receives the same emphasis as the HTML email, with bold values and clickable links instead of plain text. ntfy keeps the plain body, since it would show the markers literally
+- **IMPROVE:** **Documentation and verifiable downloads** - A [searchable guide](https://misiektoja.github.io/lastfm_monitor/) covers setup, usage and troubleshooting. Releases include checksums and signed build attestations
+- **CONFIG CHANGE:** **Retired error aggregation settings** - `ERROR_500_NUMBER_LIMIT`, `ERROR_500_TIME_LIMIT`, `ERROR_NETWORK_ISSUES_NUMBER_LIMIT` and `ERROR_NETWORK_ISSUES_TIME_LIMIT` are ignored. Hourly outage reminders replace them. Existing configurations still load
+
+**Bug fixes**:
+
+- **BUGFIX:** **Restored friend and profile checks** - Website tracking uses the new `curl_cffi` dependency with Chrome impersonation. Browser challenges retain saved tracking data for retry. The default interval is now 90 minutes. Existing saved intervals still apply
+- **BUGFIX:** **Spotify metadata recovery** - Repeated authentication failures or denied OAuth searches temporarily use web metadata instead of repeating failed queries. Permission failures retry after five minutes and rate limits respect the server's delay. `VERIFY_SSL` also covers Spotify token requests
+- **BUGFIX:** **Protected history and readable follower alerts** - Damaged activity records are reported before replacement. Timestamps ahead of the clock are retained with corrected timing. Unusable friends lists rebuild without false change alerts and follower emails put each changed user on its own line
+- **BUGFIX:** **Safer configuration loading** - Configuration files are read as settings instead of executed as Python. Plain values and references to other settings still work. Replace imports, function calls and calculations with plain settings
+- **BUGFIX:** **Safer configuration and secret updates** - `--generate-config FILE` confirms replacement and creates a backup. Non-interactive replacement requires `--force`. Shell redirection with `>` bypasses these protections. Exported secrets work without a dotenv file. Command-line credentials and nonempty startup exports retain priority after `SIGHUP`. Change those values and restart to replace them. Reloads apply changed or removed file-owned secrets
+- **BUGFIX:** **Safer alerts and output** - Webhook retries keep their original destination and credentials. Discord templates cannot enable mentions and invalid templates are rejected before delivery. Error messages redact credentials, including SMTP rejection replies. Webhooks refuse redirects and upstream text cannot clear or retitle the terminal. Emails accepted by the mail server no longer become false failures if closing the connection fails, avoiding duplicate retries
+
+Smaller fixes and development changes are listed in the [full change history](https://github.com/misiektoja/lastfm_monitor/compare/v2.6.2...v2.7).
+
 # Changes in 2.6.2 (04 Aug 2026)
 
 **Bug fixes**:

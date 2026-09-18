@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.6.2
+v2.7
 
 Tool implementing real-time tracking of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -14,10 +14,12 @@ python-dateutil
 pyotp
 spotipy (optional, only for Spotify-related features)
 python-dotenv (optional)
-beautifulsoup4 (optional, only for followers/followings tracking)
+beautifulsoup4 (optional, only for friends and profile tracking)
+curl_cffi (optional, only for friends and profile tracking)
+colorama (optional, only for coloured output in the classic Windows Command Prompt)
 """
 
-VERSION = "2.6.2"
+VERSION = "2.7"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -38,6 +40,10 @@ CONFIG_BLOCK = """
 #   - Hard-code it in the code or config file
 LASTFM_API_KEY = "your_lastfm_api_key"
 LASTFM_API_SECRET = "your_lastfm_api_secret"
+
+# Last.fm username to monitor
+# A username given on the command line overrides this value
+LASTFM_USERNAME = ""
 
 # Spotify Client Credentials OAuth Flow (OAuth app) is optional
 # When configured, the official Web API is tried before the anonymous web-player backend
@@ -155,9 +161,11 @@ WEBHOOK_PROVIDER = "discord"
 WEBHOOK_URL = "your_webhook_url"
 
 # Discord display name (leave empty to use the webhook default)
+# Applies only when WEBHOOK_PROVIDER is "discord" (ignored by the ntfy provider)
 WEBHOOK_USERNAME = "Last.fm Monitor"
 
 # Discord avatar URL (leave empty to use the webhook default)
+# Applies only when WEBHOOK_PROVIDER is "discord" (ignored by the ntfy provider)
 WEBHOOK_AVATAR_URL = ""
 
 # Whether to send a webhook notification when the user becomes active
@@ -192,6 +200,10 @@ WEBHOOK_FOLLOWERS_NOTIFICATION = False
 # Can also be enabled via the --webhook-followings flag
 WEBHOOK_FOLLOWINGS_NOTIFICATION = False
 
+# Whether to send a webhook notification when the user's bio or display name changes
+# Can also be enabled via the --webhook-profile flag
+WEBHOOK_PROFILE_NOTIFICATION = False
+
 # Whether to send a webhook notification on monitoring errors
 # Can also be enabled via --webhook-errors or disabled via --no-webhook-error-notify
 WEBHOOK_ERROR_NOTIFICATION = True
@@ -200,11 +212,22 @@ WEBHOOK_ERROR_NOTIFICATION = True
 # Values support the same placeholders as WEBHOOK_TEMPLATE
 WEBHOOK_HEADERS = {}
 
+# Optional ntfy access token for Bearer authentication
+# Prefer an environment variable or dotenv file instead of storing this token here
+NTFY_ACCESS_TOKEN = ""
+
+# Whether to use compact ntfy alert titles and bodies for smaller screens
+# Discord webhook and email content remain unchanged
+NTFY_SHORT = False
+
 # ----------------------------
 # Advanced Webhook Settings
 # ----------------------------
 
 # Discord-format webhook request payload template
+# Applies only when WEBHOOK_PROVIDER is "discord". The "ntfy" provider needs no template and ignores this
+# value: it sends the alert body as a native ntfy message with the subject as its title. Use WEBHOOK_HEADERS
+# to add ntfy options such as priority or tags
 # Supported placeholders include title, description, version, fields, fields_str, color, timestamp,
 # username and avatar_url
 WEBHOOK_TEMPLATE = {
@@ -234,14 +257,6 @@ WEBHOOK_TEMPLATE = {
 #       ("description", "strip"),
 #   ]
 WEBHOOK_TRANSFORMS = []
-
-# Optional ntfy access token for Bearer authentication
-# Prefer an environment variable or dotenv file instead of storing this token here
-NTFY_ACCESS_TOKEN = ""
-
-# Whether to use compact ntfy alert titles and bodies for smaller screens
-# Discord webhook and email content remain unchanged
-NTFY_SHORT = False
 
 # How often to check for user activity when the user is considered offline (not playing music); in seconds
 # Can also be set using the -c flag
@@ -286,7 +301,7 @@ RECENT_TRACKS_NUMBER = 10
 
 # How many recently listened songs to display in the inactive notification email
 # Set to 0 to disable the recently listened songs list
-INACTIVE_EMAIL_RECENT_SONGS_COUNT = 5
+INACTIVE_EMAIL_RECENT_SONGS_COUNT = 10
 
 # Method used to play the song listened by the tracked user in local Spotify client under macOS
 # (i.e. when TRACK_SONGS / -g functionality is enabled)
@@ -334,13 +349,9 @@ SP_USER_GOT_OFFLINE_TRACK_ID = ""
 # Set to 0 to keep playing indefinitely until manually paused
 SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE = 5  # 5 seconds
 
-# Enable debug mode for full technical logging (can also be enabled via --debug flag)
-# Shows every API request and internal state changes
-DEBUG_MODE = False
-
 # How often to print a "liveness check" message to the output; in seconds
 # Set to 0 to disable
-LIVENESS_CHECK_INTERVAL = 43200  # 12 hours
+LIVENESS_CHECK_INTERVAL = 86400  # 24 hours
 
 # URL used to verify internet connectivity at startup
 CHECK_INTERNET_URL = 'https://ws.audioscrobbler.com/'
@@ -348,17 +359,10 @@ CHECK_INTERNET_URL = 'https://ws.audioscrobbler.com/'
 # Timeout used when checking initial internet connectivity; in seconds
 CHECK_INTERNET_TIMEOUT = 5
 
-# Threshold for displaying Last.fm 50x errors - it is to suppress sporadic issues with Last.fm API endpoint
-# Adjust the values according to the LASTFM_CHECK_INTERVAL and LASTFM_ACTIVE_CHECK_INTERVAL timers
-# If more than 15 Last.fm API related errors in 2 minutes, show an alert
-ERROR_500_NUMBER_LIMIT = 15
-ERROR_500_TIME_LIMIT = 120  # 2 min
-
-# Threshold for displaying network errors - it is to suppress sporadic issues with internet connectivity
-# Adjust the values according to the LASTFM_CHECK_INTERVAL and LASTFM_ACTIVE_CHECK_INTERVAL timers
-# If more than 15 network related errors in 2 minutes, show an alert
-ERROR_NETWORK_ISSUES_NUMBER_LIMIT = 15
-ERROR_NETWORK_ISSUES_TIME_LIMIT = 120  # 2 min
+# Whether to verify TLS certificates on every connection the tool makes, including Last.fm, Spotify, webhooks and the mail server
+# Turn this off only on a network that intercepts TLS with its own certificate authority, since an intercepted
+# connection then cannot be told apart from the real service
+VERIFY_SSL = True
 
 # CSV file to write every scrobble
 # Can also be set using the -b flag
@@ -388,11 +392,95 @@ DISABLE_LOGGING = False
 #   "Off"  - preserve Unicode separators in logs
 ASCII_LOG_SEPARATORS = "Auto"
 
+# Max characters per line when printing to screen to avoid line wrapping
+# Does not affect log file output
+# Set to 999 to auto-detect terminal width
+# Applies only when DISABLE_LOGGING is False
+# Can also be set via the --truncate flag
+TRUNCATE_CHARS = 0
+
 # Width of horizontal line
 HORIZONTAL_LINE = 113
 
 # Whether to clear the terminal screen after starting the tool
+# Ignored when output is redirected, in debug mode and for commands that print a result and exit
 CLEAR_SCREEN = True
+
+# Whether to use coloured output in the terminal (auto-disabled if the terminal
+# does not appear to support colours or when output is redirected to a file)
+# Can also be disabled via the --no-color flag
+COLORED_OUTPUT = True
+
+# Colour theme used for different parts of the output
+# Keys are logical names used by the tool, values are colour/style strings
+# You can combine multiple attributes with spaces or '+', for example:
+#   "bright_cyan bold", "yellow", "red underline", "bright_magenta bold underline", "red bold blink"
+# Valid colour names: black, red, green, yellow, blue, magenta, cyan, white,
+# and their bright_ variants (bright_red, bright_green, ...).
+# The defaults below are what the tool uses while this block stays commented out. Uncomment it to override
+# them and keep only the lines you want to change, so the rest keep following the tool's own defaults.
+# COLOR_THEME = {
+#     # Headings and commands the wizard tells you to run
+#     "header": "bright_cyan",
+#     "section": "bright_white",
+#     # Identity
+#     "username": "bright_cyan underline",
+#     "id": "bright_magenta",
+#     # Listening status values
+#     "status_active": "green",
+#     "status_inactive": "red",
+#     "status_offline": "red",
+#     # Music info
+#     "artist": "bright_yellow",
+#     "track": "bright_yellow",
+#     "album": "yellow",
+#     "duration": "green",
+#     # Activity info
+#     "status_change": "yellow",
+#     # Misc
+#     "timestamp_label": "",
+#     "timestamp_value": "cyan",
+#     "info": "cyan",
+#     "warning": "yellow",
+#     "error": "red",
+#     "signal": "yellow",
+#     "email": "bright_cyan",
+#     "webhook": "bright_blue",
+#     # Dates
+#     "date": "magenta",
+#     "date_range": "magenta",
+#     # Boolean values
+#     "boolean_true": "green",
+#     "boolean_false": "red",
+#     # Counters and differences
+#     "count_up": "green",
+#     "count_down": "red",
+#     "link": "blue underline",
+#     # Help screen
+#     "help_heading": "bright_cyan bold",
+#     "help_usage": "bright_white bold",
+#     "help_option": "bright_green",
+#     "help_metavar": "yellow",
+#     "help_placeholder": "bright_magenta",
+#     "help_command": "bright_white",
+#     "help_comment": "bright_black",
+#     "help_default": "bright_black",
+# }
+
+# Whether to print extra startup and runtime detail
+# Independent of DEBUG_MODE, so enable both to see everything
+# Can also be enabled via the --verbose flag, which turns it on regardless of this setting
+VERBOSE_MODE = False
+
+# Whether to print timestamped diagnostic detail, including outbound calls,
+# each notification delivery attempt and the technical cause of failures
+# Independent of VERBOSE_MODE, so enable both to see everything
+# Can also be enabled via the --debug flag, which turns it on regardless of this setting
+DEBUG_MODE = False
+
+# Whether verbose output confirms each delivered email and webhook alert
+# Applies only when VERBOSE_MODE is enabled
+DELIVERY_CONFIRMATIONS = True
 
 # Value added/subtracted via signal handlers to adjust inactivity timeout (LASTFM_INACTIVITY_CHECK); in seconds
 LASTFM_INACTIVITY_CHECK_SIGNAL_VALUE = 30  # 30 seconds
@@ -451,9 +539,17 @@ TRACK_FOLLOWINGS = False
 # Can also be enabled via the --track-followers flag
 TRACK_FOLLOWERS = False
 
-# How often to check for followers/followings changes; in seconds
+# Whether to track changes in the user's About You bio
+# Can also be enabled via the --track-bio flag
+TRACK_BIO = False
+
+# Whether to track changes in the user's display name
+# Can also be enabled via the --track-display-name flag
+TRACK_DISPLAY_NAME = False
+
+# How often to check for friend and profile changes in seconds
 # Can also be set using the --friends-check-interval flag
-FRIENDS_CHECK_INTERVAL = 900  # 15 minutes
+FRIENDS_CHECK_INTERVAL = 5400  # 90 minutes
 
 # Whether to send an email when followers change
 # Can also be enabled via the --notify-followers flag
@@ -463,7 +559,11 @@ FOLLOWERS_NOTIFICATION = False
 # Can also be enabled via the --notify-followings flag
 FOLLOWINGS_NOTIFICATION = False
 
-# Number of consecutive checks required to confirm a change in followers/followings
+# Whether to send an email when the user's bio or display name changes
+# Can also be enabled via the --notify-profile flag
+PROFILE_NOTIFICATION = False
+
+# Number of consecutive checks required to confirm a friend or profile change
 # to avoid false notifications caused by transient API glitches
 # Also used as the threshold for suppressing repeated error messages
 # Can also be set using the --friends-change-counter flag
@@ -484,6 +584,7 @@ FRIENDS_RETRY_INTERVAL = 90
 # Do not change values below - modify them in the configuration section or config file instead
 LASTFM_API_KEY = ""
 LASTFM_API_SECRET = ""
+LASTFM_USERNAME = ""
 SP_CLIENT_ID = ""
 SP_CLIENT_SECRET = ""
 SP_TOKENS_FILE = ""
@@ -516,12 +617,13 @@ WEBHOOK_SONG_ON_LOOP_NOTIFICATION = False
 WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION = False
 WEBHOOK_FOLLOWERS_NOTIFICATION = False
 WEBHOOK_FOLLOWINGS_NOTIFICATION = False
+WEBHOOK_PROFILE_NOTIFICATION = False
 WEBHOOK_ERROR_NOTIFICATION = False
 WEBHOOK_HEADERS = {}
-WEBHOOK_TEMPLATE = {}
-WEBHOOK_TRANSFORMS = []
 NTFY_ACCESS_TOKEN = ""
 NTFY_SHORT = False
+WEBHOOK_TEMPLATE = {}
+WEBHOOK_TRANSFORMS = []
 LASTFM_CHECK_INTERVAL = 0
 LASTFM_ACTIVE_CHECK_INTERVAL = 0
 LASTFM_INACTIVITY_CHECK = 0
@@ -545,25 +647,24 @@ SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE = 0
 LIVENESS_CHECK_INTERVAL = 0
 CHECK_INTERNET_URL = ""
 CHECK_INTERNET_TIMEOUT = 0
-ERROR_500_NUMBER_LIMIT = 0
-ERROR_500_TIME_LIMIT = 0
-ERROR_NETWORK_ISSUES_NUMBER_LIMIT = 0
-ERROR_NETWORK_ISSUES_TIME_LIMIT = 0
+VERIFY_SSL = True
 CSV_FILE = ""
 MONITOR_LIST_FILE = ""
 DOTENV_FILE = ""
 LF_LOGFILE = ""
 DISABLE_LOGGING = False
 ASCII_LOG_SEPARATORS = "Auto"
+TRUNCATE_CHARS = 0
 HORIZONTAL_LINE = 0
+# Counts the reports printed so far, so a check can tell whether it said anything before the banner claims it was quiet
+REPORTS_PRINTED = 0
 CLEAR_SCREEN = False
+COLORED_OUTPUT = False
+COLOR_THEME: dict = {}
+VERBOSE_MODE = False
+DEBUG_MODE = False
+DELIVERY_CONFIRMATIONS = True
 LASTFM_INACTIVITY_CHECK_SIGNAL_VALUE = 0
-ENABLE_GENIUS_LYRICS_URL = False
-ENABLE_AZLYRICS_URL = False
-ENABLE_TEKSTOWO_URL = False
-ENABLE_MUSIXMATCH_URL = False
-ENABLE_LYRICS_COM_URL = False
-USE_LASTFM_URL_IN_LAST_PLAYED = False
 ENABLE_SPOTIFY_URL = False
 ENABLE_LASTFM_URL = False
 ENABLE_LASTFM_ALBUM_URL = False
@@ -572,23 +673,107 @@ ENABLE_YOUTUBE_MUSIC_URL = False
 ENABLE_AMAZON_MUSIC_URL = False
 ENABLE_DEEZER_URL = False
 ENABLE_TIDAL_URL = False
+ENABLE_GENIUS_LYRICS_URL = False
+ENABLE_AZLYRICS_URL = False
+ENABLE_TEKSTOWO_URL = False
+ENABLE_MUSIXMATCH_URL = False
+ENABLE_LYRICS_COM_URL = False
+USE_LASTFM_URL_IN_LAST_PLAYED = False
 TRACK_FOLLOWINGS = False
 TRACK_FOLLOWERS = False
+TRACK_BIO = False
+TRACK_DISPLAY_NAME = False
 FRIENDS_CHECK_INTERVAL = 0
 FOLLOWERS_NOTIFICATION = False
 FOLLOWINGS_NOTIFICATION = False
+PROFILE_NOTIFICATION = False
 FRIENDS_CHANGE_COUNTER = 0
 FRIENDS_RETRY_INTERVAL = 0
-DEBUG_MODE = False
 LASTFM_USERNAME_GLOBAL = ""
 
 exec(CONFIG_BLOCK, globals())
+
+# True once monitoring has printed its header, so a verbose notice after that closes its own block
+MONITORING_ACTIVE = False
+
+# True while a check has printed verbose lines that still need the timestamp trailer under them
+PENDING_NOTICE_BLOCK = False
+
+# The tool's own name, printed where a message has to say which monitor sent it
+TOOL_NAME = "lastfm_monitor"
 
 # Default name for the optional config file
 DEFAULT_CONFIG_FILENAME = "lastfm_monitor.conf"
 
 # List of secret keys to load from env/config
 SECRET_KEYS = ("LASTFM_API_KEY", "LASTFM_API_SECRET", "SP_CLIENT_ID", "SP_CLIENT_SECRET", "SMTP_PASSWORD", "WEBHOOK_URL", "NTFY_ACCESS_TOKEN")
+
+# Where each secret's effective value came from, recorded as precedence is applied rather than reconstructed afterwards
+SECRET_SOURCES = {}
+
+# The sources a secret can resolve from, in the order precedence applies them
+SECRET_SOURCE_ORDER = ("config file", "dotenv file", "environment", "command line")
+
+# Secrets whose length the provider issues, so reporting it discloses nothing a pasted support transcript should not carry
+FIXED_LENGTH_SECRET_KEYS = ("LASTFM_API_KEY", "LASTFM_API_SECRET", "SP_CLIENT_ID", "SP_CLIENT_SECRET")
+
+# Below this length a configured value is as likely to be an ordinary word as a credential, so replacing it would corrupt the text it appears in
+MIN_REDACTABLE_SECRET_LENGTH = 12
+
+# Documentation links, kept as constants so messages, help text and the guides they point at cannot drift apart
+PROJECT_URL = "https://github.com/misiektoja/lastfm_monitor"
+DOCS_BASE_URL = "https://misiektoja.github.io/lastfm_monitor"
+GUIDE_URL = f"{DOCS_BASE_URL}/"
+INSTALLATION_GUIDE_URL = f"{DOCS_BASE_URL}/installation/"
+QUICK_START_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/"
+LASTFM_API_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/#lastfm-api-key-and-shared-secret"
+PRIVACY_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/#user-privacy-settings"
+CONFIG_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#configuration-file"
+SECRETS_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#storing-secrets"
+SMTP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#smtp-settings"
+WEBHOOK_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#webhook-settings"
+TLS_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#tls-verification"
+USAGE_GUIDE_URL = f"{DOCS_BASE_URL}/usage/#monitoring-mode"
+TERMINAL_GUIDE_URL = f"{DOCS_BASE_URL}/usage/#terminal-output"
+SPOTIFY_APP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#optional-spotify-oauth-app-setup"
+DOCTOR_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#doctor-preflight"
+DIAGNOSTICS_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#verbose-and-debug-output"
+INTERVALS_GUIDE_URL = f"{DOCS_BASE_URL}/usage/#check-intervals"
+
+# A preflight check waits on the user, so it uses a shorter timeout than a delivery in the monitoring loop
+DOCTOR_SMTP_TIMEOUT = 5
+
+# One wording per test message, shared with the sibling monitors. The subject names the tool because the
+# message lands beside the real alerts, and the body names the command because it can arrive minutes later
+TEST_EMAIL_SUBJECT = "Last.fm Monitor test email"
+TEST_EMAIL_BODY = "This test email was sent by --send-test-email. Your SMTP settings work."
+TEST_WEBHOOK_TITLE = "Last.fm Monitor test webhook"
+TEST_WEBHOOK_BODY = "This test notification was sent by --send-test-webhook. Your webhook settings work."
+DOCTOR_TEST_EMAIL_SUBJECT = "Last.fm Monitor doctor test email"
+DOCTOR_TEST_EMAIL_BODY = "This test email was sent after approval in --doctor. Your SMTP delivery settings work."
+DOCTOR_TEST_WEBHOOK_TITLE = "Last.fm Monitor doctor test webhook"
+DOCTOR_TEST_WEBHOOK_BODY = "This test notification was sent after approval in --doctor. Your webhook delivery settings work."
+
+# Check labels shared with the sibling monitors, so one report reads the same as the next
+SMTP_READY_CHECK_LABEL = "SMTP connection and login succeeded"
+WEBHOOK_READY_CHECK_LABEL = "Webhook URL, headers and alert choices look valid"
+EMAIL_UNUSABLE_CHECK_LABEL = "Email alerts are enabled but unusable"
+
+# Pages where the user creates or views the credentials this tool reads
+LASTFM_API_REGISTRATION_URL = "https://www.last.fm/api/account/create"
+LASTFM_API_ACCOUNTS_URL = "https://www.last.fm/api/accounts"
+SPOTIFY_DASHBOARD_URL = "https://developer.spotify.com/dashboard"
+
+# The accepted form of the positional target, shared by the welcome screen and the invalid-target error
+LASTFM_TARGET_FORMS = "username exactly as it appears on the user's Last.fm profile page"
+
+# Commands that write a secret to the dotenv file and exit
+SECRET_ACTION_FLAGS = ("--set-webhook-url", "--set-lastfm-credentials", "--set-spotify-credentials", "--set-smtp-password")
+
+# Install methods the tool can detect, used to tailor every command it prints
+INSTALL_METHOD_PYPI = "pip"
+INSTALL_METHOD_SCRIPT = "manual"
+INSTALL_METHOD_ENV_VAR = "LASTFM_MONITOR_INSTALL_METHOD"
 
 # Strings removed from track names for generating proper Genius search URLs
 re_search_str = r'remaster|extended|original mix|remix|rework|vocal mix|original soundtrack|radio( |-)edit|\(feat\.|( \(.*version\))|( - .*version)'
@@ -599,6 +784,8 @@ FUNCTION_TIMEOUT = 5  # 5 seconds
 
 # Reuses Spotipy's in-memory OAuth cache when no cache file is configured
 SP_OAUTH_MEMORY_CACHE_HANDLER = None
+SP_OAUTH_SEARCH_COOLDOWNS = {}
+SPOTIFY_OAUTH_SEARCH_RECHECK_SECONDS = 300
 
 # Spotify Web API endpoint used for OAuth app track search
 SPOTIFY_OAUTH_SEARCH_URL = "https://api.spotify.com/v1/search"
@@ -620,25 +807,58 @@ SPOTIFY_WEB_QUERY_URL = "https://api-partner.spotify.com/pathfinder/v2/query"
 SPOTIFY_WEB_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 SPOTIFY_WEB_TOKEN_EXPIRY_WINDOW = 60
 
-LIVENESS_CHECK_COUNTER = LIVENESS_CHECK_INTERVAL / LASTFM_CHECK_INTERVAL
+# Seconds rather than checks, because an active user is polled on a different interval than an inactive one
+LIVENESS_REMINDER_SECONDS = LIVENESS_CHECK_INTERVAL if LIVENESS_CHECK_INTERVAL > 0 else 0
+# How long a failure the tool can retry away must last before it is alerted, a failure it cannot is alerted at once
+ERROR_ALERT_AFTER_SECONDS = 120  # 2 minutes, the checks here run every few seconds
+# How long a channel that could not deliver an error alert waits before the next attempt, doubled on every further failure up to the cap
+ERROR_ALERT_RETRY_SECONDS = 300  # 5 minutes
+ERROR_ALERT_RETRY_MAX_SECONDS = 3600  # 1 hour
+
 
 stdout_bck = None
 csvfieldnames = ['Date', 'Artist', 'Track', 'Album']
 
 CLI_CONFIG_PATH = None
 
+# Set once when --config-file selects the 'none' sentinel, so no caller falls back to the search path
+CONFIG_DISCOVERY_DISABLED = False
+
+# The settings a configuration file actually assigned, so a built-in default is never mistaken for a choice
+CONFIGURED_SETTING_NAMES = set()
+
 # to solve the issue: 'SyntaxError: f-string expression part cannot include a backslash'
 nl_ch = "\n"
 
+STARTUP_BANNER = r"""
+ .---------------.    _              _      __
+|    _______     |   | |    __ _ ___| |_   / _|_ __ ___
+|   / _____ \    |   | |   / _` / __| __| | |_| '_ ` _ \
+|  | |  o  | |   |   | |__| (_| \__ \ |_ _|  _| | | | | |
+|   \_______/    |   |_____\__,_|___/\__(_)_| |_| |_| |_|
+ '---------------'
+                      __  __             _ _
+                     |  \/  | ___  _ __ (_) |_ ___  _ __
+                     | |\/| |/ _ \| '_ \| | __/ _ \| '__|
+                     | |  | | (_) | | | | | || (_) | |
+                     |_|  |_|\___/|_| |_|_|\__\___/|_|"""
+
 
 import sys
+import contextvars
 
-if sys.version_info < (3, 9):
-    print("* Error: Python version 3.9 or higher required !")
+# The lowest Python this tool supports, kept as one constant so the runtime gate, the documentation
+# and the packaging metadata cannot drift apart
+MINIMUM_PYTHON_VERSION = (3, 9)
+MINIMUM_PYTHON_VERSION_TEXT = ".".join(str(part) for part in MINIMUM_PYTHON_VERSION)
+
+if sys.version_info < MINIMUM_PYTHON_VERSION:
+    print(f"* Error: Python version {MINIMUM_PYTHON_VERSION_TEXT} or higher required !")
+    print(f"To fix: Upgrade to Python {MINIMUM_PYTHON_VERSION_TEXT} or newer, since this is Python {sys.version.split()[0]}")
+    print(f"Guide: {INSTALLATION_GUIDE_URL}")
     sys.exit(1)
 
 import time
-import string
 import textwrap
 import json
 import os
@@ -646,6 +866,10 @@ from datetime import datetime
 from dateutil import relativedelta
 import calendar
 import requests as req
+try:
+    from curl_cffi import requests as curl_req
+except ImportError:
+    curl_req = None
 import signal
 import smtplib
 import ssl
@@ -653,23 +877,33 @@ from email.header import Header
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import argparse
+import ast
 import csv
+import importlib.util
 try:
     import pylast
 except ModuleNotFoundError:
-    raise SystemExit("Error: Couldn't find the pyLast library !\n\nTo install it, run:\n    pip install pylast\n\nOnce installed, re-run this tool. For more help, visit:\nhttps://github.com/pylast/pylast")
-from urllib.parse import quote_plus, quote, urljoin, urlsplit
+    raise SystemExit(f"Error: Couldn't find the pyLast library !\n\nTo install it, run:\n    pip install pylast\n\nOnce installed, re-run this tool.\n\nGuide: {INSTALLATION_GUIDE_URL}")
+from urllib.parse import quote_plus, quote, unquote, urljoin, urlsplit
+try:
+    from colorama import init as colorama_init  # type: ignore[import]
+except ImportError:
+    colorama_init = None
 import subprocess
 import platform
 import re
 import ipaddress
 import getpass
+import shlex
 import tempfile
 from itertools import tee, islice, chain
-from html import escape
+from collections import namedtuple
+from html import escape, unescape
+import contextlib
+import functools
 import shutil
 from pathlib import Path
-from typing import Any, Callable, List, Optional, Tuple, cast
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, cast
 import base64
 import hashlib
 import hmac
@@ -677,10 +911,54 @@ from email.utils import parsedate_to_datetime
 import pyotp
 
 
-SPOTIFY_SESSION = req.Session()
+# Tracks the error alert per channel: what was delivered, and how long a channel that failed waits before the next attempt
+class ErrorAlertState:
+    # Starts with nothing delivered and no channel on hold
+    def __init__(self) -> None:
+        self.email_sent = False
+        self.webhook_sent = False
+        self.email_failures = 0
+        self.webhook_failures = 0
+        self.email_retry_at = 0
+        self.webhook_retry_at = 0
+
+    # Forgets the delivered alert and any hold, so the next failure earns each channel a new one
+    def reset(self) -> None:
+        self.__init__()
+
+    # Tells whether a channel still owes the alert and its wait after a failed attempt, if any, has passed
+    def pending(self, channel: str, enabled, now: int) -> bool:
+        return bool(enabled) and not getattr(self, f"{channel}_sent") and now >= getattr(self, f"{channel}_retry_at")
+
+    # Records one attempt, holding a channel that failed for a growing wait so a broken server is not dialled on every check
+    def record(self, channel: str, attempted: bool, delivered: bool, now: int) -> None:
+        if not attempted:
+            return
+        if delivered:
+            setattr(self, f"{channel}_sent", True)
+            setattr(self, f"{channel}_failures", 0)
+            setattr(self, f"{channel}_retry_at", 0)
+            return
+        failures = getattr(self, f"{channel}_failures") + 1
+        delay = min(ERROR_ALERT_RETRY_SECONDS * 2 ** (failures - 1), ERROR_ALERT_RETRY_MAX_SECONDS)
+        setattr(self, f"{channel}_failures", failures)
+        setattr(self, f"{channel}_retry_at", now + delay)
+        print(f"* The {channel} alert is on hold for {display_time(delay)} after {failures} {'attempt' if failures == 1 else 'attempts'}, then tried again")
+
+
+# Applies the configured TLS policy to Spotify requests including Spotipy token exchanges
+class SpotifyAuthSession(req.Session):
+    # Overrides library verification arguments before Requests merges its settings
+    def request(self, method, url, *args, **kwargs):
+        kwargs["verify"] = VERIFY_SSL
+        return super().request(method, url, *args, **kwargs)
+
+
+SPOTIFY_SESSION = SpotifyAuthSession()
 WEBHOOK_SESSION = req.Session()
 
 from requests.adapters import HTTPAdapter
+import urllib3
 from urllib3.util.retry import Retry
 
 # Cap server-provided Retry-After to avoid long blocking sleeps on 429 responses
@@ -741,20 +1019,716 @@ def normalize_log_separators(message):
     return re.sub(r"(?m)^─+$", lambda match: match.group(0).replace("─", "-"), message)
 
 
+# Matches the escape sequences a terminal acts on: CSI, OSC and the two-character forms
+ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[@-Z\\-_])")
+
+# The only escape sequence this tool emits is an SGR colour/style change, so it is the only one worth keeping
+SGR_SEQUENCE_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+# Drops every remaining control character except tab and newline. A carriage return would let Last.fm-supplied
+# text overwrite an already printed line, and the doctor progress line that uses one writes to the terminal directly
+TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+# Removes terminal control sequences, since track, artist and profile text arrives from Last.fm rather than the tool
+# An SGR colour change is kept, because this tool's own colours re-enter the same writer and cannot be told apart
+# here from an upstream one. A bare SGR sequence only changes how the rest of the line looks, so it stays inert
+def sanitize_terminal_text(message):
+    if not isinstance(message, str) or not message:
+        return message
+    parts = []
+    position = 0
+    for match in SGR_SEQUENCE_RE.finditer(message):
+        parts.append(TERMINAL_CONTROL_RE.sub("", ANSI_ESCAPE_RE.sub("", message[position:match.start()])))
+        parts.append(match.group(0))
+        position = match.end()
+    parts.append(TERMINAL_CONTROL_RE.sub("", ANSI_ESCAPE_RE.sub("", message[position:])))
+    return "".join(parts)
+
+
+# Internal flag and style map for colour handling
+COLOR_ENABLED = False
+_COLOR_STYLES: dict = {}
+
+# Default built-in colour theme. Values can be overridden via COLOR_THEME in config
+DEFAULT_COLOR_THEME = {
+    # Headings and commands the wizard tells you to run
+    "header": "bright_cyan",
+    "section": "bright_white",
+    # Identity
+    "username": "bright_cyan underline",
+    "id": "bright_magenta",
+    # Listening status values
+    "status_active": "green",
+    "status_inactive": "red",
+    "status_offline": "red",
+    # Music info
+    "artist": "bright_yellow",
+    "track": "bright_yellow",
+    "album": "yellow",
+    "duration": "green",
+    # Activity info
+    "status_change": "yellow",
+    # Misc
+    "timestamp_label": "",
+    "timestamp_value": "cyan",
+    "info": "cyan",
+    "warning": "yellow",
+    "error": "red",
+    "signal": "yellow",
+    "email": "bright_cyan",
+    "webhook": "bright_blue",
+    # Dates
+    "date": "magenta",
+    "date_range": "magenta",
+    # Boolean values
+    "boolean_true": "green",
+    "boolean_false": "red",
+    # Counters and differences
+    "count_up": "green",
+    "count_down": "red",
+    "link": "blue underline",
+    # Help screen
+    "help_heading": "bright_cyan bold",
+    "help_usage": "bright_white bold",
+    "help_option": "bright_green",
+    "help_metavar": "yellow",
+    "help_placeholder": "bright_magenta",
+    "help_command": "bright_white",
+    "help_comment": "bright_black",
+    "help_default": "bright_black",
+}
+
+# Styles that can paint a whole line, and the value styles a painted line can enclose. A value drawn in its
+# block's own colour would disappear inside it, so the two sets are kept disjoint. Warnings and signals are
+# not on the block list: both were yellow, which is the album colour, so they mark their own opening words
+# instead of painting the line and the values inside keep carrying the meaning
+BLOCK_STYLE_PARTS = ("error", "email", "webhook", "info")
+NAME_STYLE_PARTS = ("username", "id", "artist", "track", "album", "link")
+
+ANSI_RESET = "\033[0m"
+
+# Mapping of style names to ANSI SGR codes
+_STYLE_CODES = {
+    "bold": "1",
+    "dim": "2",
+    "underline": "4",
+    "blink": "5",
+    "black": "30",
+    "red": "31",
+    "green": "32",
+    "yellow": "33",
+    "blue": "34",
+    "magenta": "35",
+    "cyan": "36",
+    "white": "37",
+    "bright_black": "90",
+    "bright_red": "91",
+    "bright_green": "92",
+    "bright_yellow": "93",
+    "bright_blue": "94",
+    "bright_magenta": "95",
+    "bright_cyan": "96",
+    "bright_white": "97",
+}
+
+# Output labels whose value is coloured with one theme style, the longer label first so a prefix cannot win
+_LABEL_STYLES = (
+    (("Last.fm user:", "Target:"), "username"),
+    (("Last track duration:", "Duration:"), "duration"),
+    (("Last track:", "Track:"), "track"),
+    (("Last album:", "Album:"), "album"),
+)
+
+# Pre-compiled regexes used for line-level colourisation
+_FROM_TO_COUNT_RE = re.compile(r"(from\s+)(\d+)(\s+to\s+)(\d+)")
+_DIFF_COUNT_UP_RE = re.compile(r"(\(\+\d+\))")
+_DIFF_COUNT_DOWN_RE = re.compile(r"(\(-\d+\))")
+# The monitored account named inside a sentence. A Last.fm handle carries no spaces, so the name ends at the
+# first one, and the prose forms 'the user is active' or 'user to monitor' keep their next word plain
+_USER_TAG_RE = re.compile(r"((?:Last\.fm user|for user|by user|of user|Monitoring user|listened by))([\t ]+)([\w.-]{2,})")
+
+# A labelled 'user' field names its value directly, so the key=value diagnostic field 'user=john' tags any value
+_USER_FIELD_RE = re.compile(r"(\buser)(=)([\w.-]+)")
+
+# A key=value diagnostic field whose key ends in '_id' carries a machine identifier, such as a Spotify track ID
+_ID_FIELD_RE = re.compile(r"(\b[a-z][a-z_]*_id)(=)([\w.:-]+)")
+
+# The token right before a quoted value decides what it is. Only these say the value is an account name, and
+# every other quoted value this tool prints is a path, a package or a menu answer, so it stays plain
+_QUOTED_USERNAME_CONTEXT_RE = re.compile(r"\buser\s+$|\blistened by\s+$|\btracks of\s+$", re.IGNORECASE)
+_DURATION_RE = re.compile(r"~?\b[0-9]{1,20}[ \t]{1,20}(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)\b", re.IGNORECASE)
+_LONG_DATE_RE = re.compile(r"\b(?:\w{3}\s+)?\d{1,2}\s+\w{3}(?:\s+\d{2,4})?[\s,]*\d{2}:\d{2}(:\d{2})?(\s*[AP]M)?\b", re.IGNORECASE)
+_TIME_ONLY_RE = re.compile(r"(?<![\w:])(~?(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?:\s*[AP]M)?)(?![\w:])", re.IGNORECASE)
+_SHORT_RANGE_DATE_RE = re.compile(r"\(\w{3}\s+\d{1,2}\s+\w{3}\s+\d{2}:\d{2}(\s*[AP]M)?\s*-\s*\d{2}:\d{2}(\s*[AP]M)?\)", re.IGNORECASE)
+_DATE_RANGE_RE = re.compile(r"\b\w{3}\s+\d{1,2}\s+\w{3}\s+\d{2}:\d{2}(\s*[AP]M)?\s*-\s*\d{2}:\d{2}(\s*[AP]M)?\b", re.IGNORECASE)
+_HOUR_RANGE_RE = re.compile(r"\b\d{2}:\d{2}(\s*[AP]M)?\s*-\s*\d{2}:\d{2}(\s*[AP]M)?\b", re.IGNORECASE)
+# Sentence punctuation, a closing bracket or a closing quote right after a link is not part of it
+_URL_RE = re.compile(r"(https?://[^\s\]]+?)(?=[.,;:!?'\")>]*(?:[\s\]]|$))")
+_PERCENTAGE_RE = re.compile(r"\(\d{1,3}%")
+_BOOLEAN_TRUE_RE = re.compile(r"\bTrue\b|\bEnabled\b")
+_BOOLEAN_FALSE_RE = re.compile(r"\bFalse\b|\bDisabled\b")
+# The TLS row reports a word rather than a boolean, and its off state is the one setting that weakens
+# a security property, so the state word is coloured like a boolean
+_TLS_STATE_RE = re.compile(r"^(\* TLS verification:\s+)(On|Off)(.*)$")
+_NOTIFICATION_SUMMARY_STATE_RE = re.compile(r"^(\* Notifications \((?:email|webhook)\):\s+)(On|Off)(.*)$")
+# The opening word of a warning line, marked on its own so the rest of the line keeps its own value colours
+_WARNING_LABEL_RE = re.compile(r"^\*+\s*(Warning:|Caution:)")
+# The signal a handler reports, which is the one value on the line worth marking
+_SIGNAL_NAME_RE = re.compile(r"(?<=^\* Signal )(\w+)(?= received$)")
+# Words that report a problem. The same word used as a key in a 'key=value' diagnostic detail names a setting
+# such as 'timeout=15' or a counter such as 'failures=3', so it leaves its line unpainted
+_ERROR_KEYWORD_RE = re.compile(r"\b(?:failures?|failed|forbidden|timeout)\b(?!\s*=)")
+# A debug trace line records what the tool tried, including attempts that fail and are then handled, so it keeps
+# its own colours instead of being painted as the failure it reports
+_DEBUG_LINE_RE = re.compile(r"^\[debug \d{2}:\d{2}:\d{2}\]")
+# Doctor status markers, coloured with the same theme parts the sibling tools use for them
+_DOCTOR_MARK_RE = re.compile(r"^\[(PASS|WARN|FAIL|SKIP)\]")
+# Quoted names such as track and album titles. At least one word character is required so a run of punctuation
+# between two apostrophes is not read as a name. The closing quote has to be followed by whitespace, punctuation
+# or the end of the line, so a title's own apostrophe does not end it early: "Tom Clancy's Rainbow Six Siege"
+_QUOTED_CONTENT_RE = re.compile(r"(')([^\n]*?\w[^\n]*?)(')(?=[\s.,;:!?)\]]|$)")
+
+# Quoted values shaped like a file name or a filesystem path stay plain, since a log or state destination is
+# not content. Track and album titles routinely contain slashes and dots, so only these two shapes are excluded
+_QUOTED_FILE_LIKE_RE = re.compile(r"^[~.]?[\\/]|^[A-Za-z]:[\\/]|\.[A-Za-z0-9]{1,8}$")
+
+# A quoted '<name>' inside a printed command is the placeholder the reader has to replace, not a track title
+_QUOTED_PLACEHOLDER_RE = re.compile(r"^<[^<>]*>$")
+
+# A quoted command-line option is an instruction to retype, not a name
+_QUOTED_OPTION_RE = re.compile(r"^-")
+
+# A quoted piece of a URL, such as the '?code=' a prompt points at. Only a leading '?' or '&' counts, so a title
+# may end in a question mark and a title such as 'Peaches & Cream' is still a name
+_QUOTED_URL_PART_RE = re.compile(r"^[?&]|://")
+
+# Follower and following listing rows, for example "- someuser [ https://www.last.fm/user/someuser ]"
+_LIST_ITEM_NAME_RE = re.compile(r"^\s*-\s+([\w.-]+)(\s+\[)")
+_PLAYBACK_STOPPED_RE = re.compile(r"\b(SKIPPED|PAUSED)\b")
+_PLAYBACK_STARTED_RE = re.compile(r"\b(RESUMED|LOOP)\b")
+_PLAYBACK_CHANGED_RE = re.compile(r"\b(CONT)\b")
+_ACTIVE_WORD_RE = re.compile(r"\b(ACTIVE|PRIVATE MODE)\b")
+_INACTIVE_WORD_RE = re.compile(r"\b(INACTIVE)\b")
+_OFFLINE_WORD_RE = re.compile(r"\b(OFFLINE)\b")
+
+
+# Builds an ANSI escape sequence from a style description string
+def _build_ansi_sequence(style_str):
+    if not isinstance(style_str, str) or not style_str:
+        return ""
+    codes = [_STYLE_CODES[part] for part in re.split(r"[+ ]+", style_str.strip().lower()) if part in _STYLE_CODES]
+    if not codes:
+        return ""
+    return f"\033[{';'.join(codes)}m"
+
+
+# Detects whether the given output stream likely supports ANSI colours
+def _stream_supports_color(stream):
+    if not hasattr(stream, "isatty") or not stream.isatty():
+        return False
+    if os.getenv("NO_COLOR"):
+        return False
+    # On Windows with colorama, skip the TERM check since colorama handles the ANSI translation itself
+    if not (colorama_init and platform.system() == "Windows"):
+        if os.getenv("TERM", "").lower() in ("", "dumb", "unknown"):
+            return False
+    # A piped stdin means the output is likely being captured, so colour codes would land in a file
+    if hasattr(sys.stdin, "isatty") and not sys.stdin.isatty():
+        return False
+    return True
+
+
+# Initializes colour handling from the configured setting and the terminal's capabilities
+def init_color_output(stream):
+    global COLOR_ENABLED, _COLOR_STYLES
+
+    # colorama is started first on Windows, since it can turn on the ANSI support the isatty check then sees
+    if colorama_init and platform.system() == "Windows":
+        try:
+            colorama_init(autoreset=False)
+        except Exception as e:
+            debug_print("Colorama initialisation", outcome="failed", error=f"{type(e).__name__}: {e}")
+
+    COLOR_ENABLED = bool(globals().get("COLORED_OUTPUT", False)) and _stream_supports_color(stream)
+
+    if not COLOR_ENABLED:
+        _COLOR_STYLES = {}
+        return
+
+    user_theme = globals().get("COLOR_THEME") if isinstance(globals().get("COLOR_THEME"), dict) else {}
+    theme = {**DEFAULT_COLOR_THEME, **(user_theme or {})}
+    _COLOR_STYLES = {name: sequence for name, sequence in ((name, _build_ansi_sequence(style)) for name, style in theme.items()) if sequence}
+
+
+# Applies a configured colour style, named by logical part, to the given text
+def colorize(part, text):
+    if not COLOR_ENABLED:
+        return text
+    start = _COLOR_STYLES.get(part)
+    if not start:
+        return text
+    return f"{start}{text}{ANSI_RESET}"
+
+
+# Splits a recognized output label from its value without applying a backtracking expression
+def _split_output_label(value, labels):
+    body = value.rstrip("\n")
+    cursor = len(body) - len(body.lstrip())
+    if body[cursor:cursor + 1] == "*":
+        cursor += 1
+        cursor += len(body[cursor:]) - len(body[cursor:].lstrip())
+    for label in labels:
+        if not body.startswith(label, cursor):
+            continue
+        value_start = cursor + len(label)
+        value_start += len(body[value_start:]) - len(body[value_start:].lstrip())
+        if value_start == cursor + len(label):
+            return None
+        return body[:value_start], body[value_start:]
+    return None
+
+
+# Applies a whole-line style while preserving the highlights already inside the line
+def _apply_style_nested(line, style_name):
+    start_style = _COLOR_STYLES.get(style_name)
+    if not start_style:
+        return line
+    # An internal reset returns to the block style instead of to plain text, so the rest of the line keeps it
+    line = f"{start_style}{line}{ANSI_RESET}"
+    line = line.replace(ANSI_RESET, f"{ANSI_RESET}{start_style}")
+    if line.endswith(f"{ANSI_RESET}{start_style}"):
+        line = line[:-len(start_style)]
+    return line
+
+
+# Applies one substitution only to the parts of a line that are not already inside a colour span, so a later
+# rule cannot reclaim text an earlier rule has already coloured
+def _sub_outside_color(pattern, replacement, line):
+    if ANSI_RESET not in line:
+        return pattern.sub(replacement, line)
+    parts = []
+    position = 0
+    inside = False
+    for match in SGR_SEQUENCE_RE.finditer(line):
+        segment = line[position:match.start()]
+        parts.append(segment if inside else pattern.sub(replacement, segment))
+        parts.append(match.group(0))
+        inside = match.group(0) != ANSI_RESET
+        position = match.end()
+    trailing = line[position:]
+    parts.append(trailing if inside else pattern.sub(replacement, trailing))
+    return "".join(parts)
+
+
+# Colours one quoted account name, leaving the value alone when its shape or the token before it says otherwise
+def _colorize_quoted_name(match):
+    name = match.group(2)
+    if not _QUOTED_USERNAME_CONTEXT_RE.search(match.string[:match.start()]):
+        return match.group(0)
+    if _QUOTED_FILE_LIKE_RE.search(name) or _QUOTED_PLACEHOLDER_RE.match(name) or _QUOTED_OPTION_RE.match(name) or _QUOTED_URL_PART_RE.search(name):
+        return match.group(0)
+    return f"{match.group(1)}{colorize('username', name)}{match.group(3)}"
+
+
+# Colors a count transition using decimal text comparison without unbounded integer conversion
+def _colorize_count_change(match):
+    before, after = ("".join(str(int(digit)) for digit in match.group(index)).lstrip("0") or "0" for index in (2, 4))
+    style = "count_up" if (len(after), after) >= (len(before), before) else "count_down"
+    return f"{match.group(1)}{colorize(style, match.group(2))}{match.group(3)}{colorize(style, match.group(4))}"
+
+
+# Applies the colour rules to a single output line
+def _colorize_line(line):
+    lowered = line.lower()
+
+    # Notification summary rows carry their own On/Off state word
+    notification_match = _NOTIFICATION_SUMMARY_STATE_RE.match(line)
+    if notification_match:
+        prefix, state, suffix = notification_match.groups()
+        return f"{prefix}{colorize('boolean_true' if state == 'On' else 'boolean_false', state)}{suffix}"
+
+    # The TLS row reports its state as a word rather than as a boolean
+    tls_match = _TLS_STATE_RE.match(line)
+    if tls_match:
+        prefix, state, suffix = tls_match.groups()
+        return f"{prefix}{colorize('boolean_true' if state == 'On' else 'boolean_false', state)}{suffix}"
+
+    # Doctor status markers keep the rest of their line plain so long labels stay readable
+    doctor_match = _DOCTOR_MARK_RE.match(line)
+    if doctor_match:
+        return colorize(DOCTOR_MARK_STYLES[doctor_match.group(1)], doctor_match.group(0)) + line[doctor_match.end():]
+
+    # Timestamp lines get a plain label and a coloured value
+    labeled_value = _split_output_label(line, ("Timestamp:", "Liveness check, timestamp:"))
+    if labeled_value:
+        label, rest = labeled_value
+        return f"{colorize('timestamp_label', label)}{colorize('timestamp_value', rest)}" + ("\n" if line.endswith("\n") else "")
+
+    # Any '<something> URL:' row is a link, checked before the label table so 'Last.fm album URL:' is not an album
+    if _split_output_label(line, ("URL:",)) or " URL:" in line:
+        return _sub_outside_color(_URL_RE, lambda mo: colorize("link", mo.group(0)), line)
+
+    # Labelled music rows keep their label plain and colour only the value
+    for labels, style_name in _LABEL_STYLES:
+        labeled_value = _split_output_label(line, labels)
+        if not labeled_value:
+            continue
+        label, rest = labeled_value
+        return f"{label}{colorize(style_name, rest)}" + ("\n" if line.endswith("\n") else "")
+
+    # A follower or following listing row names one account followed by its profile link
+    line = _sub_outside_color(_LIST_ITEM_NAME_RE, lambda mo: f"{mo.group(0)[:mo.start(1) - mo.start(0)]}{colorize('username', mo.group(1))}{mo.group(2)}", line)
+
+    # Highlight the monitored account named inside a sentence, and the identifiers in a diagnostic field
+    line = _sub_outside_color(_USER_TAG_RE, lambda mo: f"{mo.group(1)}{mo.group(2)}{colorize('username', mo.group(3))}", line)
+    line = _sub_outside_color(_USER_FIELD_RE, lambda mo: f"{mo.group(1)}{mo.group(2)}{colorize('username', mo.group(3))}", line)
+    line = _sub_outside_color(_ID_FIELD_RE, lambda mo: f"{mo.group(1)}{mo.group(2)}{colorize('id', mo.group(3))}", line)
+
+    # Highlight counters and their differences
+    line = _sub_outside_color(_FROM_TO_COUNT_RE, _colorize_count_change, line)
+    line = _sub_outside_color(_DIFF_COUNT_UP_RE, lambda mo: colorize("count_up", mo.group(0)), line)
+    line = _sub_outside_color(_DIFF_COUNT_DOWN_RE, lambda mo: colorize("count_down", mo.group(0)), line)
+
+    # Highlight durations and listening percentages
+    line = _sub_outside_color(_DURATION_RE, lambda mo: colorize("duration", mo.group(0)), line)
+    line = _sub_outside_color(_PERCENTAGE_RE, lambda mo: f"({colorize('count_up', mo.group(0)[1:])}", line)
+
+    # Highlight date ranges before single dates so a range is not split into two dates
+    line = _sub_outside_color(_SHORT_RANGE_DATE_RE, lambda mo: colorize("date_range", mo.group(0)), line)
+    line = _sub_outside_color(_DATE_RANGE_RE, lambda mo: colorize("date_range", mo.group(0)), line)
+    line = _sub_outside_color(_HOUR_RANGE_RE, lambda mo: colorize("date_range", mo.group(0)), line)
+    line = _sub_outside_color(_LONG_DATE_RE, lambda mo: colorize("date", mo.group(0)), line)
+    line = _sub_outside_color(_TIME_ONLY_RE, lambda mo: colorize("date", mo.group(0)), line)
+
+    # Highlight links
+    line = _sub_outside_color(_URL_RE, lambda mo: colorize("link", mo.group(0)), line)
+
+    # Highlight a quoted account name. A line that is only a quoted string is a free-form description, so it
+    # stays plain instead of being read as a name
+    if not line.lstrip().startswith("'"):
+        line = _sub_outside_color(_QUOTED_CONTENT_RE, _colorize_quoted_name, line)
+
+    # Highlight boolean values
+    line = _sub_outside_color(_BOOLEAN_TRUE_RE, lambda mo: colorize("boolean_true", mo.group(0)), line)
+    line = _sub_outside_color(_BOOLEAN_FALSE_RE, lambda mo: colorize("boolean_false", mo.group(0)), line)
+
+    # Mark the opening word of a warning and the name of a reported signal, rather than painting the whole line
+    line = _sub_outside_color(_WARNING_LABEL_RE, lambda mo: mo.group(0)[:mo.start(1) - mo.start(0)] + colorize("warning", mo.group(1)), line)
+    line = _sub_outside_color(_SIGNAL_NAME_RE, lambda mo: colorize("signal", mo.group(0)), line)
+
+    # Highlight playback and presence keywords
+    line = _sub_outside_color(_PLAYBACK_STOPPED_RE, lambda mo: colorize("status_inactive", mo.group(0)), line)
+    line = _sub_outside_color(_PLAYBACK_STARTED_RE, lambda mo: colorize("status_active", mo.group(0)), line)
+    line = _sub_outside_color(_PLAYBACK_CHANGED_RE, lambda mo: colorize("status_change", mo.group(0)), line)
+    line = _sub_outside_color(_ACTIVE_WORD_RE, lambda mo: colorize("status_active", mo.group(0)), line)
+    line = _sub_outside_color(_INACTIVE_WORD_RE, lambda mo: colorize("status_inactive", mo.group(0)), line)
+    line = _sub_outside_color(_OFFLINE_WORD_RE, lambda mo: colorize("status_offline", mo.group(0)), line)
+
+    # Whole-line highlighting, applied last so the colours added above survive the nesting logic
+    is_debug_line = bool(_DEBUG_LINE_RE.match(lowered))
+    is_error = not is_debug_line and (bool(_ERROR_KEYWORD_RE.search(lowered)) or "critical:" in lowered or ("* error" in lowered and "[errors =" not in lowered))
+
+    if lowered.startswith("to fix:"):
+        line = _apply_style_nested(line, "info")
+    elif is_error:
+        line = _apply_style_nested(line, "error")
+    elif "sending email" in lowered:
+        line = _apply_style_nested(line, "email")
+    elif "sending webhook" in lowered:
+        line = _apply_style_nested(line, "webhook")
+
+    return line
+
+
+# Applies colourisation to multi-line text, preserving line breaks
+def apply_color_to_text(text):
+    if not COLOR_ENABLED or not isinstance(text, str):
+        return text
+    parts = []
+    for chunk in text.splitlines(keepends=True):
+        if chunk.endswith(("\n", "\r")):
+            stripped = chunk.rstrip("\r\n")
+            parts.append(_colorize_line(stripped) + chunk[len(stripped):])
+        else:
+            parts.append(_colorize_line(chunk))
+    return "".join(parts)
+
+
+# Colours every link in a line, for the screens printed before the output stream colouriser is installed
+def colorize_links(text):
+    return _sub_outside_color(_URL_RE, lambda mo: colorize("link", mo.group(0)), text)
+
+
+# Colours one line of a fix block the way the output stream colours it, keeping its guide line a link
+def colorize_fix_line(line):
+    return colorize_links(line) if line.lstrip().startswith("Guide: ") else colorize("info", line)
+
+
+# Truncates each line to a display width, expanding tabs and counting double-width characters correctly
+def truncate_string_per_line(message, truncate_width, tabsize=8):
+    try:
+        from wcwidth import wcwidth
+    except ImportError:
+        # Without wcwidth every character costs one column, so truncation still applies and only wide characters are measured short
+        wcwidth = len
+    truncated_lines = []
+    for line in message.split("\n"):
+        expanded_line = line.expandtabs(tabsize)
+        current_width = 0
+        truncated = []
+        position = 0
+        style_open = False
+        while position < len(expanded_line):
+            # A colour sequence is copied through free of charge, so styling never eats into the visible width
+            escape = SGR_SEQUENCE_RE.match(expanded_line, position)
+            if escape:
+                truncated.append(escape.group(0))
+                style_open = escape.group(0) not in ("\x1b[0m", "\x1b[m")
+                position = escape.end()
+                continue
+            char = expanded_line[position]
+            char_width = wcwidth(char)
+            if char_width is None or char_width < 0:
+                char_width = 0
+            if current_width + char_width > truncate_width:
+                # The cut may have dropped the reset, which would leave the colour running into every later line
+                if style_open:
+                    truncated.append(ANSI_RESET)
+                break
+            truncated.append(char)
+            current_width += char_width
+            position += 1
+        truncated_lines.append("".join(truncated))
+    return "\n".join(truncated_lines)
+
+
+# Resolves CLI and configured truncation settings while expanding the terminal-width sentinel
+def resolve_truncate_chars(cli_value, configured_value, logging_disabled):
+    truncate_chars = configured_value if cli_value is None else cli_value
+    if logging_disabled:
+        return 0
+    if truncate_chars == 999:
+        terminal_size = shutil.get_terminal_size()
+        print(f"The detected terminal screen width is: {terminal_size.columns} characters\n")
+        return terminal_size.columns
+    return truncate_chars
+
+
+# Returns the text the terminal should be given, shortened to the configured width when one is set
+def for_terminal(message):
+    return truncate_string_per_line(message, TRUNCATE_CHARS) if TRUNCATE_CHARS else message
+
+
+# Wraps stdout while logging is disabled, so output is sanitized on the path that keeps no log file
+class TerminalStream(object):
+    # Stores the wrapped terminal stream
+    def __init__(self, stream):
+        self.terminal = stream
+
+    # Writes one sanitized and coloured message to the terminal
+    def write(self, message):
+        self.terminal.write(apply_color_to_text(for_terminal(sanitize_terminal_text(sanitize_error_text(message)))))
+        self.terminal.flush()
+
+    # Writes one terminal-only message, which is every message this stream receives
+    def terminal_only(self, message):
+        self.write(message)
+
+    # Discards log-only output while logging is disabled
+    def log_only(self, message):
+        return
+
+    # Flushes the wrapped terminal
+    def flush(self):
+        self.terminal.flush()
+
+    # Forwards other stream attributes, so isatty and encoding still answer for the real terminal
+    def __getattr__(self, name):
+        return getattr(self.terminal, name)
+
+
+# Help screen parts. argparse measures its column layout on the plain text, so the palette is applied to the
+# finished help screen rather than to the pieces argparse assembles and the layout stays identical
+_HELP_USAGE_LABEL = "usage:"
+_HELP_HEADING_RE = re.compile(r"^\S.*:$")
+# The character after the leading dashes excludes a dash itself, so the dash count and the name that follows
+# cannot both claim the same character. Without that the repeated alternative backtracks exponentially
+_HELP_OPTION_ROW_RE = re.compile(r"^( {2,})(-{1,2}[^\s,-][^\s,]*(?:, *-{1,2}[^\s,-][^\s,]*)*)(.*)$")
+_HELP_POSITIONAL_ROW_RE = re.compile(r"^( {2,})([A-Z][A-Z0-9_]*)( {2,}.*)$")
+_HELP_COLUMN_GAP_RE = re.compile(r" {2,}")
+# A value placeholder is an upper-case metavar, a choice list or an angle-bracket name, including a
+# colon-joined pair of them
+_HELP_METAVAR_RE = re.compile(r"\{[^}]*\}|<[^>]+>|\b[A-Z][A-Z0-9_]*(?::[A-Z][A-Z0-9_]*)*\b")
+_HELP_OPTION_RE = re.compile(r"(?<![\w-])(--?[A-Za-z][\w-]*)")
+_HELP_PLACEHOLDER_RE = re.compile(r"<[^>]+>")
+_HELP_DEFAULT_RE = re.compile(r"\(default:[^)]*\)")
+
+
+# Colours the links and the default notes inside one line of help prose
+def _colorize_help_prose(line):
+    line = _URL_RE.sub(lambda match: colorize("link", match.group(1)), line)
+    return _HELP_DEFAULT_RE.sub(lambda match: colorize("help_default", match.group(0)), line)
+
+
+# Colours the option names and the value placeholders of one usage line or option column
+def _colorize_help_signature(text):
+    text = _HELP_METAVAR_RE.sub(lambda match: colorize("help_metavar", match.group(0)), text)
+    return _sub_outside_color(_HELP_OPTION_RE, lambda match: colorize("help_option", match.group(1)), text)
+
+
+# Colours the usage block, the group headings and the option rows of the help screen
+def _colorize_help_body(text):
+    lines = []
+    in_usage = False
+    for line in text.split("\n"):
+        if line.startswith(_HELP_USAGE_LABEL):
+            in_usage = True
+            lines.append(colorize("help_usage", _HELP_USAGE_LABEL) + _colorize_help_signature(line[len(_HELP_USAGE_LABEL):]))
+            continue
+        if in_usage:
+            if line.strip():
+                lines.append(_colorize_help_signature(line))
+                continue
+            in_usage = False
+        if _HELP_HEADING_RE.match(line):
+            lines.append(colorize("help_heading", line))
+            continue
+        option_row = _HELP_OPTION_ROW_RE.match(line)
+        if option_row:
+            indent, names, remainder = option_row.groups()
+            gap = _HELP_COLUMN_GAP_RE.search(remainder)
+            metavars, description = (remainder[:gap.start()], remainder[gap.start():]) if gap else (remainder, "")
+            lines.append(indent + _colorize_help_signature(names + metavars) + _colorize_help_prose(description))
+            continue
+        positional_row = _HELP_POSITIONAL_ROW_RE.match(line)
+        if positional_row:
+            indent, name, description = positional_row.groups()
+            lines.append(indent + colorize("help_metavar", name) + _colorize_help_prose(description))
+            continue
+        lines.append(_colorize_help_prose(line))
+    return "\n".join(lines)
+
+
+# Colours the examples of the help epilog: the task headings, the comments and the commands to run
+def _colorize_help_epilog(text):
+    lines = []
+    for line in text.split("\n"):
+        if _HELP_HEADING_RE.match(line):
+            lines.append(colorize("help_heading", line))
+            continue
+        if not line.strip() or not line.startswith(" "):
+            lines.append(_colorize_help_prose(line))
+            continue
+        if line.lstrip().startswith("#"):
+            comment = _apply_style_nested(_colorize_help_prose(line), "help_comment")
+            lines.append(comment)
+            continue
+        placeholders = _HELP_PLACEHOLDER_RE.sub(lambda match: colorize("help_placeholder", match.group(0)), line)
+        command = _apply_style_nested(placeholders, "help_command")
+        lines.append(command)
+    return "\n".join(lines)
+
+
+# Colours one finished help screen, leaving its column layout untouched
+def colorize_help_text(text, epilog=None):
+    if not COLOR_ENABLED or not isinstance(text, str) or not text:
+        return text
+    examples = (epilog or "").strip("\n")
+    start = text.rfind(examples) if examples else -1
+    if start == -1:
+        return _colorize_help_body(text)
+    return _colorize_help_body(text[:start]) + _colorize_help_epilog(text[start:])
+
+
+# Parser that colours its own help screen and writes it past the output colouriser, which would otherwise
+# repaint the finished help with the rules meant for monitoring output
+class ColoredHelpParser(argparse.ArgumentParser):
+    # Returns the help screen with the help palette already applied
+    def format_help(self) -> str:
+        return colorize_help_text(super().format_help(), self.epilog)
+
+    # Writes one parser message straight to the terminal behind any colouring wrapper
+    def _print_message(self, message, file=None) -> None:
+        if not message:
+            return
+        stream = sys.stderr if file is None else file
+        target = unwrap_terminal_stream(stream)
+        target.write(sanitize_terminal_text(message))
+        flush = getattr(target, "flush", None)
+        if callable(flush):
+            flush()
+
+
 # Logger class to output messages to stdout and log file
 class Logger(object):
     def __init__(self, filename):
-        self.terminal = sys.stdout
+        self.terminal = unwrap_terminal_stream(sys.stdout)
         self.logfile = open(filename, "a", buffering=1, encoding="utf-8")
 
     def write(self, message):
-        self.terminal.write(message)
-        self.logfile.write(normalize_log_separators(message.expandtabs(8)))
+        safe_message = sanitize_terminal_text(sanitize_error_text(message))
+        self.terminal.write(apply_color_to_text(self._truncate_terminal(safe_message)))
+        # Colour codes are stripped so the log file stays plain text whatever the terminal was shown
+        self.logfile.write(normalize_log_separators(ANSI_ESCAPE_RE.sub("", safe_message).expandtabs(8)))
         self.terminal.flush()
+        self.logfile.flush()
+
+    # Writes one message only to the terminal, so a line that orients a reader at a screen stays out of the log
+    def terminal_only(self, message):
+        self.terminal.write(apply_color_to_text(self._truncate_terminal(sanitize_terminal_text(sanitize_error_text(message)))))
+        self.terminal.flush()
+
+    # Writes one message only to the log, so the file keeps the full view whichever one the terminal was shown
+    def log_only(self, message):
+        self.logfile.write(normalize_log_separators(ANSI_ESCAPE_RE.sub("", sanitize_terminal_text(sanitize_error_text(message))).expandtabs(8)))
         self.logfile.flush()
 
     def flush(self):
         pass
+
+    # Limits the terminal line across separate writes while leaving the log complete
+    def _truncate_terminal(self, message):
+        # The limit is fixed once at startup, so with truncation off there is no column to keep track of
+        if not TRUNCATE_CHARS:
+            return message
+        try:
+            from wcwidth import wcwidth
+        except ImportError:
+            wcwidth = len
+        column = getattr(self, "_terminal_column", 0)
+        clipped = getattr(self, "_terminal_clipped", False)
+        output = []
+        position = 0
+        while position < len(message):
+            escape = ANSI_ESCAPE_RE.match(message, position)
+            if escape:
+                output.append(escape.group(0))
+                position = escape.end()
+                continue
+            char = message[position]
+            position += 1
+            if char in ("\n", "\r"):
+                output.append(char)
+                column, clipped = 0, False
+                continue
+            width = 8 - column % 8 if char == "\t" else max(0, wcwidth(char))
+            if char == "\t" and TRUNCATE_CHARS:
+                width = min(width, max(0, TRUNCATE_CHARS - column))
+            if TRUNCATE_CHARS and (clipped or column + width > TRUNCATE_CHARS):
+                clipped = True
+                continue
+            output.append(" " * width if char == "\t" and TRUNCATE_CHARS else char)
+            column += width
+        self._terminal_column, self._terminal_clipped = column, clipped
+        return "".join(output)
+
+
+# Returns the real terminal underneath any stream the tool installed over stdout
+def unwrap_terminal_stream(stream):
+    while isinstance(stream, (Logger, TerminalStream)):
+        stream = stream.terminal
+    return stream
 
 
 # Signal handler when user presses Ctrl+C
@@ -764,21 +1738,91 @@ def signal_handler(sig, frame):
     sys.exit(0)
 
 
+# Restores Python's own Ctrl+C behavior for the length of one prompt, so an interrupt there raises
+# KeyboardInterrupt for the caller to answer instead of reaching the handler that terminates the tool
+@contextlib.contextmanager
+def default_interrupt_handling():
+    try:
+        previous_handler = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+    except (ValueError, OSError):
+        # Handlers can only be replaced from the main thread, which is where every prompt runs
+        yield
+        return
+    try:
+        yield
+    finally:
+        try:
+            signal.signal(signal.SIGINT, previous_handler)
+        except (ValueError, OSError):
+            pass
+
+
+# Reads one visible answer with Python's default Ctrl+C behavior
+def read_interactively(reader, *args, **kwargs):
+    with default_interrupt_handling():
+        return reader(*args, **kwargs)
+
+
+# Reads one hidden answer with Python's default Ctrl+C behavior. Kept apart from the visible reader so a
+# secret typed here is never confused with an ordinary answer that is later printed back to the user
+def read_secret_interactively(reader, *args, **kwargs):
+    with default_interrupt_handling():
+        return reader(*args, **kwargs)
+
+
+# Silences debug output while a raw secret is entered or validated, then restores the previous mode
+@contextlib.contextmanager
+def debug_output_suppressed():
+    global DEBUG_MODE
+    previous_debug_mode = DEBUG_MODE
+    DEBUG_MODE = False
+    try:
+        yield
+    finally:
+        DEBUG_MODE = previous_debug_mode
+
+
+# Silences debug output for the whole of a function that handles a raw secret
+def suppresses_debug_output(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        with debug_output_suppressed():
+            return func(*args, **kwargs)
+    return wrapper
+
+
+# The last connectivity failure, so a quiet caller can classify it instead of the check printing it
+LAST_CONNECTIVITY_ERROR = None
+
+
 # Checks internet connectivity
-def check_internet(url=CHECK_INTERNET_URL, timeout=CHECK_INTERNET_TIMEOUT):
+def check_internet(url=None, timeout=None, quiet=False):
+    # Resolved here rather than as argument defaults, which would freeze the shipped values before the config file is read
+    selected_url = CHECK_INTERNET_URL if url is None else url
+    selected_timeout = CHECK_INTERNET_TIMEOUT if timeout is None else timeout
     try:
         pylast_version = getattr(pylast, '__version__', 'unknown')
         headers = {'User-Agent': f'pylast/{pylast_version}'}
-        _ = req.get(url, timeout=timeout, headers=headers)
+        response = req.get(selected_url, timeout=selected_timeout, headers=headers, verify=VERIFY_SSL)
+        debug_print("Connectivity check", url=selected_url, timeout=f"{selected_timeout}s", status=response.status_code, outcome="OK")
         return True
     except req.RequestException as e:
-        print(f"* No connectivity, please check your network:\n\n{e}")
+        # Quiet callers render the failure themselves, which doctor needs so nothing lands on its progress line
+        global LAST_CONNECTIVITY_ERROR
+        LAST_CONNECTIVITY_ERROR = e
+        debug_print("Connectivity check", url=selected_url, timeout=f"{selected_timeout}s", outcome="failed", error=f"{type(e).__name__}: {e}")
+        if not quiet:
+            print_recovery_error(e, context="connectivity")
         return False
 
 
 # Clears the terminal screen
 def clear_screen(enabled=True):
     if not enabled:
+        return
+    # Don't clear screen if stdout is redirected (not a TTY)
+    if not hasattr(sys.stdout, "isatty") or not sys.stdout.isatty():
         return
     try:
         if platform.system() == 'Windows':
@@ -787,6 +1831,21 @@ def clear_screen(enabled=True):
             os.system('clear')
     except Exception:
         print("* Cannot clear the screen contents")
+
+
+# Commands that print a one-shot result and exit, so the screen keeps whatever is already on it
+KEEP_HISTORY_FLAGS = (*SECRET_ACTION_FLAGS, "--doctor", "--send-test-email", "--send-test-webhook", "--help", "-h")
+
+
+# Returns True when the running command is a one-shot whose output has to stay scrollable
+def keep_terminal_history():
+    return any(flag in sys.argv for flag in KEEP_HISTORY_FLAGS)
+
+
+# Prints the ASCII startup banner with a separately aligned version
+def print_startup_banner():
+    print("\n".join(colorize("header", line) if line else line for line in STARTUP_BANNER.splitlines()))
+    print(colorize("info", f"{'':21}v{VERSION}") + "\n")
 
 
 # Converts absolute value of seconds to human readable format
@@ -883,9 +1942,36 @@ def calculate_timespan(timestamp1, timestamp2, show_weeks=True, show_hours=True,
 
 
 # Sends email notification
+# Opens one authenticated SMTP session, shared so a preflight check fails where a real send would
+def smtp_connect_and_login(use_ssl, smtp_timeout=15):
+    smtp_object = smtplib.SMTP(SMTP_HOST, int(SMTP_PORT), timeout=smtp_timeout)
+    try:
+        if use_ssl:
+            smtp_object.starttls(context=tls_context())
+        smtp_login(smtp_object, SMTP_USER, SMTP_PASSWORD)
+        return smtp_object
+    except Exception:
+        smtp_quit_quietly(smtp_object)
+        raise
+
+
+# Closes an SMTP session without changing the result of an accepted or failed message
+def smtp_quit_quietly(smtp_object):
+    if smtp_object is None:
+        return
+    try:
+        smtp_object.quit()
+    except Exception as quit_error:
+        debug_print("SMTP quit", outcome="failed", error=f"{type(quit_error).__name__}: {quit_error}")
+        try:
+            smtp_object.close()
+        except Exception as close_error:
+            debug_print("SMTP close", outcome="failed", error=f"{type(close_error).__name__}: {close_error}")
+
+
 # Sends an email notification
-def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
-    debug_print(f"Attempting to send email: {subject}")
+def send_email(subject, body, body_html, use_ssl, smtp_timeout=15, report_delivery=True):
+    debug_print("Email delivery attempt", host=SMTP_HOST, port=SMTP_PORT, recipient=RECEIVER_EMAIL, subject=subject)
     fqdn_re = re.compile(r'(?=^.{4,253}$)(^((?!-)[a-zA-Z0-9-]{1,63}(?<!-)\.)+[a-zA-Z]{2,63}\.?$)')
     email_re = re.compile(r'[^@]+@[^@]+\.[^@]+')
 
@@ -893,7 +1979,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         ipaddress.ip_address(str(SMTP_HOST))
     except ValueError:
         if not fqdn_re.search(str(SMTP_HOST)):
-            print("Error sending email - SMTP settings are incorrect (invalid IP address/FQDN in SMTP_HOST)")
+            print_recovery_error(context="email", detail="The SMTP settings are incorrect (invalid IP address/FQDN in SMTP_HOST)")
             return 1
 
     try:
@@ -901,33 +1987,28 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         if not (1 <= port <= 65535):
             raise ValueError
     except ValueError:
-        print("Error sending email - SMTP settings are incorrect (invalid port number in SMTP_PORT)")
+        print_recovery_error(context="email", detail="The SMTP settings are incorrect (invalid port number in SMTP_PORT)")
         return 1
 
     if not email_re.search(str(SENDER_EMAIL)) or not email_re.search(str(RECEIVER_EMAIL)):
-        print("Error sending email - SMTP settings are incorrect (invalid email in SENDER_EMAIL or RECEIVER_EMAIL)")
+        print_recovery_error(context="email", detail="The SMTP settings are incorrect (invalid email in SENDER_EMAIL or RECEIVER_EMAIL)")
         return 1
 
     if not SMTP_USER or not isinstance(SMTP_USER, str) or SMTP_USER == "your_smtp_user" or not SMTP_PASSWORD or not isinstance(SMTP_PASSWORD, str) or SMTP_PASSWORD == "your_smtp_password":
-        print("Error sending email - SMTP settings are incorrect (check SMTP_USER & SMTP_PASSWORD variables)")
+        print_recovery_error(context="email", detail="The SMTP settings are incorrect (check SMTP_USER & SMTP_PASSWORD variables)")
         return 1
 
     if not subject or not isinstance(subject, str):
-        print("Error sending email - SMTP settings are incorrect (subject is not a string or is empty)")
+        print_recovery_error(context="email", detail="The SMTP settings are incorrect (subject is not a string or is empty)")
         return 1
 
     if not body and not body_html:
-        print("Error sending email - SMTP settings are incorrect (body and body_html cannot be empty at the same time)")
+        print_recovery_error(context="email", detail="The SMTP settings are incorrect (body and body_html cannot be empty at the same time)")
         return 1
 
+    smtpObj = None
     try:
-        if use_ssl:
-            ssl_context = ssl.create_default_context()
-            smtpObj = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=smtp_timeout)
-            smtpObj.starttls(context=ssl_context)
-        else:
-            smtpObj = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=smtp_timeout)
-        smtpObj.login(SMTP_USER, SMTP_PASSWORD)
+        smtpObj = smtp_connect_and_login(use_ssl, smtp_timeout=smtp_timeout)
         email_msg = MIMEMultipart('alternative')
         email_msg["From"] = SENDER_EMAIL
         email_msg["To"] = RECEIVER_EMAIL
@@ -944,23 +2025,540 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
             email_msg.attach(part2)
 
         smtpObj.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, email_msg.as_string())
-        smtpObj.quit()
-        debug_print("Email sent successfully")
+        debug_print("Email delivery", host=SMTP_HOST, port=SMTP_PORT, recipient=RECEIVER_EMAIL, outcome="OK")
     except Exception as e:
-        print(f"Error sending email: {e}")
+        debug_print("Email delivery", host=SMTP_HOST, port=SMTP_PORT, recipient=RECEIVER_EMAIL, outcome="failed", error=f"{type(e).__name__}: {e}")
+        print_recovery_error(e, context="email")
         return 1
+    finally:
+        smtp_quit_quietly(smtpObj)
+    if report_delivery:
+        verbose_delivery_print(f"Email sent to {RECEIVER_EMAIL}")
     return 0
 
 
-# Redacts configured private values and common secret parameters from diagnostic text
-def sanitize_sensitive_text(value: Any) -> str:
-    text = str(value)
+# Returns the TLS context every connection outside requests uses, unverified while VERIFY_SSL is off so they follow the same switch
+def tls_context() -> ssl.SSLContext:
+    context = ssl.create_default_context()
+    if not VERIFY_SSL:
+        # check_hostname has to be cleared first, since setting CERT_NONE while it is on raises
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    return context
+
+
+# Applies the configured TLS verification setting to the connections a session or a library owns rather than each call site
+def apply_tls_verification_setting() -> None:
+    SPOTIFY_SESSION.verify = VERIFY_SSL
+    WEBHOOK_SESSION.verify = VERIFY_SSL
+    # pylast builds its own httpx client from this module global, so the switch has to reach it there.
+    # A release that renames it would otherwise leave a new attribute nothing reads, which is worse than an error.
+    if hasattr(pylast, "SSL_CONTEXT"):
+        pylast.SSL_CONTEXT = tls_context()
+    else:
+        debug_print("TLS setting applied to pylast", outcome="skipped", reason="pylast no longer exposes SSL_CONTEXT")
+    if not VERIFY_SSL:
+        # Silenced only once the config file has been read, so the shipped default never decides this
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        print_recovery_advice(make_recovery_advice("config.insecure", "TLS certificate verification is off, so an intercepted connection cannot be told apart from the real service", recovery_fix_with_guide("Set VERIFY_SSL back to True unless this network intercepts TLS with its own certificate authority", TLS_GUIDE_URL), False), label="Warning")
+        print()
+
+
+# Returns how the tool was started, either as the installed console script or as a downloaded standalone script
+def install_method() -> str:
+    override = os.environ.get(INSTALL_METHOD_ENV_VAR, "").strip().casefold()
+    if override in (INSTALL_METHOD_PYPI, INSTALL_METHOD_SCRIPT):
+        return override
+    if os.path.basename(sys.argv[0] or "").casefold().endswith(".py"):
+        return INSTALL_METHOD_SCRIPT
+    return INSTALL_METHOD_PYPI
+
+
+# Returns the install method in the words the startup summary uses, rather than the code the detector returns
+def install_method_display_name(method=None) -> str:
+    selected = install_method() if method is None else method
+    return {INSTALL_METHOD_PYPI: "PyPI install", INSTALL_METHOD_SCRIPT: "downloaded script"}.get(selected, selected)
+
+
+# Returns a compact display prefix for the detected install method
+def install_command_prefix() -> List[str]:
+    executable = "python" if platform.system() == "Windows" else "python3"
+    if install_method() == INSTALL_METHOD_SCRIPT:
+        return [executable, "lastfm_monitor.py"]
+    return ["lastfm_monitor"]
+
+
+# The documentation placeholders a printed command carries unquoted, because the reader replaces them before running it
+COMMAND_PLACEHOLDERS = frozenset(("<lastfm_username>", "<new-file>"))
+
+
+# Returns one command-line argument quoted for the shell the user is most likely pasting into
+def quote_command_argument(argument: Any) -> str:
+    text = str(argument)
+    # Matched exactly rather than by shape, since any other angle-bracket value is user-derived and would otherwise reach the shell unquoted
+    if text in COMMAND_PLACEHOLDERS:
+        return text
+    if platform.system() == "Windows":
+        return f'"{text}"' if (not text or any(char.isspace() for char in text)) else text
+    return shlex.quote(text)
+
+
+# True when a command writes the dotenv file itself, so it refuses an --env-file that switches dotenv loading off
+def command_writes_dotenv(arguments=()) -> bool:
+    return any(str(argument) == "--setup" or str(argument).startswith("--set-") for argument in arguments)
+
+
+# Returns a copy-pasteable command line for the detected install method, carrying the config and dotenv files this run was given
+def render_command(arguments=None, include_paths: bool = True, *, config_path=None, env_path=None) -> str:
+    parts = list(install_command_prefix())
+    parts.extend(str(argument) for argument in (arguments or []))
+    # An explicitly passed path is always rendered, while include_paths only governs falling back to the active ones
+    selected_config = config_path if config_path is not None else (CLI_CONFIG_PATH if include_paths else None)
+    selected_env = env_path if env_path is not None else (DOTENV_FILE if include_paths else None)
+    if selected_config:
+        parts.extend(["--config-file", str(selected_config)])
+    # The "none" sentinel is carried so a printed command reads the setup this run read, except into a command
+    # that writes the dotenv file, since those refuse the sentinel at their own argument gate
+    if selected_env and not (str(selected_env).casefold() == "none" and command_writes_dotenv(arguments or ())):
+        parts.extend(["--env-file", str(selected_env)])
+    return " ".join(quote_command_argument(part) for part in parts)
+
+
+# Returns a compact dependency installation hint for the active platform
+def install_dependency_command(package_name: str) -> str:
+    executable = "python" if platform.system() == "Windows" else "python3"
+    return f'{executable} -m pip install "{package_name}"'
+
+
+# True when a setting holds a real value rather than nothing or the placeholder the config template ships
+def doctor_value_is_set(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip()) and not value.strip().startswith("your_")
+
+
+# Returns the diagnostic fields describing one secret, adding the length only for keys whose length the provider issues
+def secret_fields(value: Any, name: str = "") -> Dict[str, Any]:
+    return {"value": "set" if doctor_value_is_set(value) else "not set", "chars": len(str(value).strip()) if name in FIXED_LENGTH_SECRET_KEYS and doctor_value_is_set(value) else None}
+
+
+# Records where one secret resolved from and traces it, so a later layer overwrites the earlier answer instead of adding to it
+def record_secret_source(name: str, source: str, value: Any = None) -> None:
+    if source == "command line" and DOTENV_RELOAD_STATE:
+        DOTENV_RELOAD_STATE["base"][name] = globals().get(name) if value is None else value
+        DOTENV_RELOAD_STATE.setdefault("base_sources", {})[name] = source
+    if source not in SECRET_SOURCE_ORDER:
+        raise ValueError(f"Unsupported secret source: {source}")
+    resolved = globals().get(name) if value is None else value
+    # A placeholder is not a value, so it earns neither a source nor a row
+    if not doctor_value_is_set(resolved):
+        SECRET_SOURCES.pop(name, None)
+        return
+    SECRET_SOURCES[name] = source
+    debug_print("Secret resolution", name=name, source=source, **secret_fields(resolved, name))
+
+
+# Groups the configured secret names by the source each value actually came from, never by value
+def secrets_by_source() -> List[Tuple[str, List[str]]]:
+    grouped = {}
+    for name, source in SECRET_SOURCES.items():
+        if doctor_value_is_set(globals().get(name)):
+            grouped.setdefault(source, []).append(name)
+    return [(source, sorted(grouped[source])) for source in SECRET_SOURCE_ORDER if source in grouped]
+
+
+# Returns the private values worth replacing wherever they appear, skipping any too short to tell apart from an ordinary word
+def known_secret_values() -> List[str]:
+    values = []
     for key in SECRET_KEYS:
         secret = globals().get(key)
-        if isinstance(secret, str) and secret and not secret.startswith("your_"):
-            text = text.replace(secret, "<redacted>")
-    text = re.sub(r"(?i)([?&](?:api_key|api_sig|token|secret|password)=)[^&\s]+", r"\1<redacted>", text)
+        if isinstance(secret, str) and len(secret) >= MIN_REDACTABLE_SECRET_LENGTH and not secret.startswith("your_"):
+            values.append(secret)
+    if isinstance(WEBHOOK_HEADERS, dict):
+        for name, value in WEBHOOK_HEADERS.items():
+            if isinstance(name, str) and name.casefold() == "authorization" and isinstance(value, str) and len(value) >= MIN_REDACTABLE_SECRET_LENGTH:
+                values.append(value)
+    return sorted(set(values) | set(_DELIVERY_SECRET_VALUES.get()), key=len, reverse=True)
+
+
+# Redacts configured private values and common credential shapes from diagnostic text
+def sanitize_error_text(value: Any, extra_secrets: Sequence[Any] = ()) -> str:
+    text = str(value)
+    # A value being checked before it is saved is held by the caller and by no global, so it is passed in instead
+    entered = [secret for secret in extra_secrets if isinstance(secret, str) and len(secret) >= MIN_REDACTABLE_SECRET_LENGTH]
+    # Longest first, so a secret that contains another one is not left half replaced
+    for secret in sorted(known_secret_values() + entered, key=len, reverse=True):
+        text = text.replace(secret, "<redacted>")
+    patterns = (
+        # A config parse error quotes the offending source line, which is how a password reaches the terminal and the log
+        (r"(?m)(\b(?:LASTFM_API_KEY|LASTFM_API_SECRET|SP_CLIENT_ID|SP_CLIENT_SECRET|SMTP_PASSWORD|WEBHOOK_URL|NTFY_ACCESS_TOKEN)\b\s*=\s*).*$", r"\1<redacted>"),
+        # spotipy authenticates the Spotify app with Basic while Spotify and ntfy both carry Bearer, so this tool sends two schemes
+        (r"(?i)(authorization['\"]?\s*[:=]\s*['\"]?(?:bearer|basic)\s+)[^\s,;'\"}]+", r"\1<redacted>"),
+        (r"(?i)(['\"]?(?:lastfm_api_key|lastfm_api_secret|sp_client_id|sp_client_secret|smtp_password|webhook_url|ntfy_access_token|access_token|refresh_token)['\"]?\s*[:=]\s*['\"]?)[^\s,;'\"}]+", r"\1<redacted>"),
+        # pylast signs each request with api_sig and sends api_key and the session key as parameters
+        (r"(?i)([?&](?:api_key|api_sig|sk|token|secret|password)=)[^&#\s]+", r"\1<redacted>"),
+        (r"(?i)https://(?:canary\.|ptb\.)?discord(?:app)?\.com/api(?:/v[0-9]+)?/webhooks/[0-9]+/[^\s'\"<>]+", "<redacted>"),
+    )
+    for pattern, replacement in patterns:
+        text = re.sub(pattern, replacement, text)
     return text
+
+
+# Every recovery category the tool can report, kept closed so a message is testable, deduplicable and translatable later
+RECOVERY_CODES = frozenset({
+    "config.missing", "config.invalid", "config.insecure",
+    "dependency.missing",
+    "secret.missing", "secret.entry",
+    "auth.api_key_invalid",
+    "network.unavailable", "network.timeout",
+    "lastfm.rate_limited", "lastfm.unavailable", "lastfm.challenge",
+    "target.missing", "target.invalid", "target.not_found", "target.not_visible",
+    "smtp.invalid", "smtp.authentication", "smtp.connection",
+    "webhook.invalid", "webhook.rejected", "webhook.rate_limited", "webhook.connection",
+    "file.unreadable", "file.unwritable", "file.exists",
+    "resource.exhausted",
+    "unknown",
+})
+
+# Carries one classified failure: what happened, what to do about it and whether retrying can help
+RecoveryAdvice = namedtuple("RecoveryAdvice", ["code", "summary", "fix", "retryable", "detail"])
+RecoveryAdvice.__new__.__defaults__ = ("",)
+
+
+# Carries structured recovery advice across an exception boundary without exposing technical detail
+class RecoveryError(Exception):
+    # Initializes a structured recovery exception, keeping the original cause attached for debug output
+    def __init__(self, advice, cause=None):
+        self.advice = advice
+        self.cause = cause
+        if cause is not None:
+            self.__cause__ = cause
+        super().__init__(advice.summary)
+
+
+# Builds one piece of recovery advice, refusing any code outside the closed set and sanitizing every field
+def make_recovery_advice(code, summary, fix, retryable, detail=""):
+    if code not in RECOVERY_CODES:
+        raise ValueError(f"Unsupported recovery code: {code}")
+    return RecoveryAdvice(code, sanitize_error_text(summary), sanitize_error_text(fix), bool(retryable), sanitize_error_text(detail) if detail else "")
+
+
+# Adds a directly relevant documentation link on its own line
+def recovery_fix_with_guide(fix, guide_url):
+    return f"{fix}\nGuide: {guide_url}"
+
+
+# Escapes text for an HTML email body and keeps its line breaks, which HTML would otherwise collapse into spaces
+def html_text(text):
+    return escape(text).replace("\n", "<br>")
+
+
+# Returns the advice an optional library that is missing carries, naming what the run loses and how to install it
+def missing_dependency_advice(package, effect, alternative=""):
+    return make_recovery_advice("dependency.missing", f"{effect} because the optional '{package}' library is missing", recovery_fix_with_guide(f"Install it with: {install_dependency_command(package)}" + (f". {alternative}" if alternative else ""), INSTALLATION_GUIDE_URL), False)
+
+
+# Returns the advice a cancelled secret command reports, worded the same way by every one-shot secret command
+def secret_entry_cancelled_advice(subject, flag, guide_url, plural=False):
+    return make_recovery_advice("secret.entry", f"{subject[:1].upper()}{subject[1:]} setup was cancelled and the dotenv file was not changed", recovery_fix_with_guide(f"Run {render_command([flag])} again when you have the {'values' if plural else 'value'} ready", guide_url), False)
+
+
+# Returns the advice a declined secret replacement reports, since the saved value stands and asking again changes nothing
+def secret_replacement_declined_advice(subject, flag, guide_url, plural=False):
+    kept = "were left as they are" if plural else "was left as it is"
+    return make_recovery_advice("secret.entry", f"The saved {subject} {kept} and the dotenv file was not changed", recovery_fix_with_guide(f"Run {render_command([flag])} again and answer y to replace the saved {'values' if plural else 'value'}", guide_url), False)
+
+
+# Returns the HTTP status carried by an error, when it has one
+def recovery_http_status(error):
+    response = getattr(error, "response", None)
+    status = getattr(response, "status_code", None)
+    return status if isinstance(status, int) else None
+
+
+# Returns the numeric status pylast attaches to a web service error, which is a Last.fm error code or an HTTP code
+def recovery_lastfm_status(error):
+    status = getattr(error, "status", None)
+    if isinstance(status, int):
+        return status
+    if isinstance(status, str):
+        try:
+            return int(status)
+        except ValueError:
+            return None
+    return None
+
+
+# Yields the exception and each cause or context up to max_depth, to walk an exception chain
+def iter_exc_chain(error, max_depth=8):
+    current = error
+    for _ in range(max_depth):
+        if current is None:
+            return
+        yield current
+        current = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
+
+
+# Reports whether this process hit the local file descriptor limit rather than a remote failure
+def is_too_many_open_files(error):
+    for current in iter_exc_chain(error):
+        if isinstance(current, OSError) and getattr(current, "errno", None) == 24:
+            return True
+        # A server controls the wording of its own reply, so its text never proves a local limit here
+        if getattr(current, "response", None) is not None:
+            continue
+        message = str(current).lower()
+        if "too many open files" in message or re.search(r"\berrno 24\b", message):
+            return True
+    return False
+
+
+# Returns the next step for a failure no rule recognized, since a run already printing the technical cause cannot be told to re-run for it
+def unknown_failure_fix():
+    return "Open an issue with this output if the failure continues" if DEBUG_MODE else "Re-run with --debug to see the technical cause"
+
+
+# Maps one exception plus its status and calling context to stable recovery advice
+def classify_recovery_error(error=None, context="runtime", detail="", extra_secrets=()):
+    if isinstance(error, RecoveryError):
+        return error.advice
+    # Both are matched, since a caller that adds context would otherwise hide the error text the rules read
+    message = " ".join(part for part in (str(detail or ""), str(error or "")) if part).lower()
+    safe_detail = sanitize_error_text(detail or error, extra_secrets=extra_secrets) if (detail or error) else ""
+    lastfm_status = recovery_lastfm_status(error)
+    http_status = recovery_http_status(error)
+
+    def advice(code, summary, fix, retryable, guide_url=None):
+        return make_recovery_advice(code, summary, recovery_fix_with_guide(fix, guide_url) if guide_url else fix, retryable, safe_detail)
+
+    # Checked ahead of every context, since a local descriptor limit is not a failure of whatever call hit it
+    if error is not None and is_too_many_open_files(error):
+        return advice("resource.exhausted", "This process ran out of file descriptors, which is a local limit and not a Last.fm problem", "Raise the file descriptor limit, for example with 'ulimit -n 4096', or set LimitNOFILE= if you run under systemd, then restart the tool", False, DIAGNOSTICS_GUIDE_URL)
+
+    if context == "config":
+        if "does not exist" in message or "no such file" in message:
+            return advice("config.missing", safe_detail or "The configuration file was not found", f"Create one with '{render_command(['--generate-config', DEFAULT_CONFIG_FILENAME], include_paths=False)}' or correct the --config-file path", False, CONFIG_GUIDE_URL)
+        return advice("config.invalid", safe_detail or "The configuration file could not be read", f"Correct the reported line, or write a fresh template to a different path with '{render_command(['--generate-config', '<new-file>'], include_paths=False)}'", False, CONFIG_GUIDE_URL)
+
+    if context in ("set_lastfm_credentials", "set_spotify_credentials", "set_webhook_url", "set_smtp_password"):
+        flag = f"--{context.replace('_', '-')}"
+        guide = {"set_lastfm_credentials": LASTFM_API_GUIDE_URL, "set_spotify_credentials": SPOTIFY_APP_GUIDE_URL, "set_smtp_password": SMTP_GUIDE_URL}.get(context, WEBHOOK_GUIDE_URL)
+        if "interactive terminal" in message:
+            return advice("secret.entry", safe_detail or f"{flag} requires an interactive terminal", f"Run {render_command([flag])} in a terminal window so the value stays hidden while you paste it", False, guide)
+        if "cancelled" in message:
+            return advice("secret.entry", safe_detail or "Setup was cancelled and the dotenv file was not changed", f"Run {render_command([flag])} again when you have the value ready", False, guide)
+        if "--env-file none" in message:
+            return advice("secret.entry", safe_detail or "There is nowhere to save the value", f"Drop --env-file none, or name a writable dotenv file with --env-file PATH, then run {render_command([flag])} again", False, SECRETS_GUIDE_URL)
+        if "could not save" in message or "could not read" in message:
+            return advice("file.unwritable", safe_detail or "The private settings file could not be updated", "Check file permissions or choose another path with --env-file PATH", False, SECRETS_GUIDE_URL)
+        if context == "set_smtp_password":
+            if "incomplete" in message:
+                return advice("config.invalid", safe_detail or "The mail server settings are incomplete", f"Set SMTP_HOST, SMTP_USER, SENDER_EMAIL and RECEIVER_EMAIL in the configuration file, then run {render_command([flag])} again", False, guide)
+            if "did not accept" in message:
+                return advice("smtp.authentication", safe_detail or "The mail server refused the password", f"Check SMTP_USER and use an app password where the provider requires one, then run {render_command([flag])} again", False, guide)
+        if context == "set_webhook_url":
+            return advice("webhook.invalid", safe_detail or "The webhook URL was not changed", f"Copy a complete Discord or ntfy webhook URL then run {render_command([flag])} again", False, guide)
+        return advice("secret.entry", safe_detail or "No value was saved and the dotenv file was not changed", f"Run {render_command([flag])} again and paste each value when it is asked for", False, guide)
+
+    if context == "target.missing":
+        return advice("target.missing", safe_detail or "No Last.fm username was provided", f"Pass the username to monitor: {render_command(['<lastfm_username>'])}", False, QUICK_START_GUIDE_URL)
+
+    if context == "secret.missing":
+        return advice("secret.missing", safe_detail or "A required Last.fm credential is missing", f"Save the API key and shared secret with '{render_command(['--set-lastfm-credentials'])}'", False, LASTFM_API_GUIDE_URL)
+
+    if context == "connectivity":
+        # Classified from the error, because the detail names the endpoint rather than the failure. No guide,
+        # since no page covers this check and the doctor report already ends with the troubleshooting link
+        cause = str(error or "").lower()
+        if "timed out" in cause or "timeout" in cause:
+            return advice("network.timeout", "The connectivity endpoint did not answer in time", "Check network, DNS, proxy and CHECK_INTERNET_URL settings", True)
+        return advice("network.unavailable", "The connectivity endpoint could not be reached", "Check network, DNS, proxy and CHECK_INTERNET_URL settings", True)
+
+    if context == "email":
+        if any(term in message for term in ("authentication", "auth", "username and password", "535")):
+            return advice("smtp.authentication", "The SMTP server rejected the sign-in", "Check SMTP_USER and SMTP_PASSWORD, and use an app password if the provider requires one", False, SMTP_GUIDE_URL)
+        if "not set" in message or "incomplete" in message:
+            return advice("smtp.invalid", safe_detail or "The mail server settings are incomplete", "Set the missing settings in the configuration file, or turn the email alerts off", False, SMTP_GUIDE_URL)
+        if any(term in message for term in ("settings are incorrect", "invalid")):
+            return advice("smtp.invalid", safe_detail or "The SMTP settings are incomplete or invalid", "Check SMTP_HOST, SMTP_PORT, SENDER_EMAIL and RECEIVER_EMAIL in the configuration file", False, SMTP_GUIDE_URL)
+        return advice("smtp.connection", "The SMTP server could not be reached", "Check SMTP_HOST, SMTP_PORT and SMTP_SSL, then confirm the host is reachable from this machine", True, SMTP_GUIDE_URL)
+
+    if context == "webhook":
+        if http_status == 429 or "rate limit" in message:
+            return advice("webhook.rate_limited", "The webhook service is rate limiting deliveries", "Reduce how many alert types are enabled, or wait for the service to accept deliveries again", True, WEBHOOK_GUIDE_URL)
+        if any(term in message for term in ("must contain", "must be discord", "could not be formatted", "could not apply", "header", "priority", "tags")):
+            return advice("webhook.invalid", safe_detail or "The webhook configuration is not usable", f"Check WEBHOOK_URL, WEBHOOK_PROVIDER and the alert settings, then verify with '{render_command(['--send-test-webhook'])}'", False, WEBHOOK_GUIDE_URL)
+        if any(term in message for term in ("could not be reached", "connection", "timed out")):
+            return advice("webhook.connection", "The webhook service could not be reached", "Check connectivity and the webhook host, then try again", True, WEBHOOK_GUIDE_URL)
+        return advice("webhook.rejected", safe_detail or "The webhook service refused the delivery", f"Confirm the webhook still exists and the URL is current, then verify with '{render_command(['--send-test-webhook'])}'", http_status is not None and http_status >= 500, WEBHOOK_GUIDE_URL)
+
+    if context == "file.exists":
+        return advice("file.exists", safe_detail or "The destination file already exists", f"Re-run with --force to replace it after a timestamped backup, or write to a different path with '{render_command(['--generate-config', '<new-file>'], include_paths=False)}'", False, CONFIG_GUIDE_URL)
+
+    if context == "file.unwritable":
+        return advice("file.unwritable", safe_detail or "A file the tool keeps could not be written", "Check that the directory exists and is writable, or choose another path", False, DIAGNOSTICS_GUIDE_URL)
+
+    if context == "file":
+        if any(term in message for term in ("cannot load", "cannot be opened", "unreadable", "not valid utf-8", "no such file", "cannot be read")):
+            return advice("file.unreadable", safe_detail or "A file the tool keeps could not be read", "Check the path and its permissions, or delete the file so it is recreated", False, DIAGNOSTICS_GUIDE_URL)
+        return advice("file.unwritable", safe_detail or "A file the tool keeps could not be written", "Check that the directory exists and is writable, or choose another path", False, DIAGNOSTICS_GUIDE_URL)
+
+    # Runtime, which is the monitoring loop, the listing mode and every Last.fm call either of them makes.
+    # The pylast status is checked first, because Last.fm answers HTTP 200 with a numeric error code in the body.
+    if lastfm_status == 17:
+        return advice("target.not_visible", "The monitored user hides their recent listening information", "Ask the user to turn off 'Hide recent listening information' in their Last.fm privacy settings", False, PRIVACY_GUIDE_URL)
+    if lastfm_status in (10, 13, 26):
+        return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", f"Save a working pair with '{render_command(['--set-lastfm-credentials'])}'", False, LASTFM_API_GUIDE_URL)
+    if lastfm_status == 29:
+        return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. Increase the check intervals if this repeats", True, INTERVALS_GUIDE_URL)
+    if lastfm_status in (6, 7):
+        return advice("target.not_found", safe_detail or "Last.fm has no user with that name", "Check the username, since a deleted or renamed account cannot be monitored", False, USAGE_GUIDE_URL)
+    if lastfm_status in (8, 11, 16) or (lastfm_status is not None and lastfm_status >= 500):
+        return advice("lastfm.unavailable", "The Last.fm API is temporarily unavailable", "This is usually a Last.fm outage. The tool will keep retrying", True, DIAGNOSTICS_GUIDE_URL)
+
+    if "last.fm returned a browser verification page" in message:
+        return advice("lastfm.challenge", "Last.fm is asking for browser verification", "The tool will keep retrying. If this persists, update curl_cffi and check the Last.fm page in a browser", True, f"{DOCS_BASE_URL}/troubleshooting/#lastfm-website-tracking")
+    if http_status == 429 or "http code 429" in message or "429 client" in message or "rate limit" in message or "too many requests" in message:
+        return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. Increase the check intervals if this repeats", True, INTERVALS_GUIDE_URL)
+    if "invalid api key" in message or "api key suspended" in message or "invalid method signature" in message:
+        return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", f"Save a working pair with '{render_command(['--set-lastfm-credentials'])}'", False, LASTFM_API_GUIDE_URL)
+    if "user required to be logged in" in message:
+        return advice("target.not_visible", "The monitored user hides their recent listening information", "Ask the user to turn off 'Hide recent listening information' in their Last.fm privacy settings", False, PRIVACY_GUIDE_URL)
+    if "user not found" in message or "no user with that name" in message or http_status == 404:
+        return advice("target.not_found", safe_detail or "Last.fm has no user with that name", "Check the username, since a deleted or renamed account cannot be monitored", False, USAGE_GUIDE_URL)
+    if (http_status is not None and http_status >= 500) or re.search(r"http code 5\d\d", message) or "temporarily unavailable" in message or "service unavailable" in message or "bad gateway" in message:
+        return advice("lastfm.unavailable", "The Last.fm API is temporarily unavailable", "This is usually a Last.fm outage. The tool will keep retrying", True, DIAGNOSTICS_GUIDE_URL)
+    if "timed out" in message or "timeout" in message:
+        return advice("network.timeout", "The Last.fm request timed out", "Check connectivity. The tool will keep retrying", True, DIAGNOSTICS_GUIDE_URL)
+    if any(term in message for term in ("connection", "name resolution", "failed to resolve", "network is unreachable", "no connectivity", "family not supported", "aborted")):
+        return advice("network.unavailable", "Last.fm could not be reached", "Check connectivity, DNS and any proxy. The tool will keep retrying", True, DIAGNOSTICS_GUIDE_URL)
+    if "invalid" in message and "username" in message:
+        return advice("target.invalid", safe_detail or "That is not a usable Last.fm username", f"Pass the {LASTFM_TARGET_FORMS}", False, USAGE_GUIDE_URL)
+    return advice("unknown", safe_detail or "The request could not be completed", unknown_failure_fix(), True, DIAGNOSTICS_GUIDE_URL)
+
+
+# Renders one built advice as the shared Error, To fix and optional Technical detail block
+def render_recovery_advice(advice, debug=None, retry_note="", with_fix=True, label="Error"):
+    lines = [f"* {label}: {advice.summary}" + (f" ({retry_note})" if retry_note else "")]
+    if with_fix:
+        lines.append(f"To fix: {advice.fix}")
+        # A detail that only repeats the summary spends a line saying nothing
+        if (DEBUG_MODE if debug is None else debug) and advice.detail and advice.detail != advice.summary:
+            lines.append(f"Technical detail: {sanitize_error_text(advice.detail)}")
+    return "\n".join(lines)
+
+
+# Classifies one failure and renders it through the shared recovery block
+def render_recovery_error(error=None, context="runtime", debug=None, detail="", retry_note="", with_fix=True, label="Error"):
+    return render_recovery_advice(classify_recovery_error(error, context, detail), debug, retry_note, with_fix, label)
+
+
+# Tracks one failure category over time, so a lasting outage is reported once instead of on every check
+# How long a reported failure may go on before the run reminds about it, whatever the liveness banner is set to
+OUTAGE_REMINDER_SECONDS = 3600  # 1 hour
+
+
+# Returns the family a failure code belongs to, so the DNS and timeout failures of one internet outage count as one
+def outage_family(code):
+    return "network" if str(code or "").startswith("network.") else str(code or "")
+
+
+class OutageReporter:
+    # Starts with no failure recorded and reports a new retryable failure once confirm_checks checks in a row failed
+    def __init__(self, confirm_checks=1):
+        self.confirm_checks = max(1, confirm_checks)
+        self.code = None
+        self.since = 0
+        self.reported_at = 0
+        self.failures = 0
+        self.reported = False
+
+    # Records one failed check and returns "full" when the failure is to be reported in full, "changed" when a
+    # reported outage moved to another failure family, "reminder" once OUTAGE_REMINDER_SECONDS passed since the
+    # last report or "" while nothing new is to be said
+    def failed(self, advice):
+        now = int(time.time())
+        if not self.code:
+            self.since = now
+        self.failures += 1
+        changed = self.code is not None and outage_family(advice.code) != outage_family(self.code)
+        self.code = advice.code
+        if not self.reported:
+            # A failure the tool cannot retry away is reported at once, one it can waits for the next check to confirm it
+            if advice.retryable and self.failures < self.confirm_checks:
+                return ""
+            self.reported = True
+            self.reported_at = now
+            return "full"
+        if changed:
+            self.reported_at = now
+            return "changed" if advice.retryable else "full"
+        # Timed rather than counted, because a failing run usually retries on a different interval than a healthy one
+        if now - self.reported_at >= OUTAGE_REMINDER_SECONDS:
+            self.reported_at = now
+            return "reminder"
+        return ""
+
+    # Clears the failure after a successful check and returns how long it lasted, or None when nothing was reported
+    def recovered(self):
+        lasted = int(time.time()) - self.since if self.code and self.reported else None
+        self.code = None
+        self.since = 0
+        self.reported_at = 0
+        self.failures = 0
+        self.reported = False
+        return lasted
+
+
+# Reports that nothing changed, so a quiet run still says it is alive on the liveness cadence
+def print_liveness_banner(message):
+    print(f"* {sanitize_error_text(message)}")
+    print_cur_ts("Liveness check, timestamp:\t")
+
+
+# Reminds about a lasting failure once an hour, so a broken run still says it is alive without repeating itself
+def print_outage_liveness(target, advice, since, failures=0):
+    count = f", {failures} failed {'check' if failures == 1 else 'checks'}" if failures else ""
+    print(f"* Monitoring degraded for {target}. {advice.summary} since {get_date_from_ts(since)}{count}")
+    print_cur_ts("Liveness check, timestamp:\t")
+
+
+# Notes that a reported outage now fails differently, in one line rather than a second full report
+def print_outage_change(target, advice):
+    print(f"* Monitoring failure changed for {target}. {advice.summary}")
+
+
+# Reports that a failure cleared, since a throttled failure no longer stops printing when it is over
+def print_outage_recovery(target, lasted):
+    print(f"* Monitoring recovered for {target} after {display_time(max(1, lasted))}")
+    print_cur_ts("Timestamp:\t\t\t")
+
+
+# Tracks the last uninterrupted recovery category so a long outage cannot repeat the same hint every cycle
+class RecoveryHintTracker:
+    # Starts with no category, so the first failure of any kind always renders its hint
+    def __init__(self):
+        self.last_code = None
+
+    # Returns True for the first category and again only when the failure category changes
+    def should_render(self, advice):
+        if advice.code == self.last_code:
+            return False
+        self.last_code = advice.code
+        return True
+
+    # Clears suppression after a successful cycle, so a recurrence is reported again
+    def reset(self):
+        self.last_code = None
+
+
+# Prints one built advice through the shared recovery block and returns it
+def print_recovery_advice(advice, debug=None, retry_note="", with_fix=True, label="Error", tracker=None):
+    print(render_recovery_advice(advice, debug, retry_note, with_fix and (tracker is None or tracker.should_render(advice)), label))
+    return advice
+
+
+# Classifies one failure, prints it through the shared recovery block and returns its stable advice
+def print_recovery_error(error=None, context="runtime", debug=None, detail="", retry_note="", with_fix=True, label="Error", tracker=None):
+    return print_recovery_advice(classify_recovery_error(error, context, detail), debug, retry_note, with_fix, label, tracker)
 
 
 # Returns whether a webhook URL is a complete private HTTPS link
@@ -970,9 +2568,23 @@ def validate_webhook_url(url: Any = None) -> bool:
         return False
     try:
         parsed = urlsplit(selected_url.strip())
+        if parsed.port is not None and not 1 <= parsed.port <= 65535:
+            return False
     except ValueError:
         return False
     return parsed.scheme.casefold() == "https" and bool(parsed.hostname) and not parsed.username and not parsed.password and bool(parsed.path.strip("/"))
+
+
+# Accepts a complete webhook URL or expands a bare ntfy.sh topic name into one
+def normalize_ntfy_topic_url(value: Any = None) -> str:
+    if not isinstance(value, str):
+        return ""
+    normalized = value.strip()
+    if validate_webhook_url(normalized):
+        return normalized
+    if re.fullmatch(r"[-_A-Za-z0-9]{1,64}", normalized):
+        return f"https://ntfy.sh/{normalized}"
+    return ""
 
 
 # Returns the normalized configured webhook provider or an empty string when unsupported
@@ -982,6 +2594,12 @@ def normalized_webhook_provider(provider: Any = None) -> str:
         return ""
     normalized = selected_provider.strip().casefold()
     return normalized if normalized in ("discord", "ntfy") else ""
+
+
+# Returns the spelling each webhook service uses for itself, since the stored value is casefolded for comparisons
+def webhook_provider_display_name(provider: Any = None) -> str:
+    normalized = normalized_webhook_provider(provider)
+    return {"discord": "Discord", "ntfy": "ntfy"}.get(normalized, normalized or "an unset provider")
 
 
 # Detects Discord and public ntfy webhook providers from distinctive URL shapes
@@ -1012,12 +2630,13 @@ def _startup_email_notification_categories() -> List[str]:
         (ERROR_NOTIFICATION, "errors"),
         (FOLLOWERS_NOTIFICATION, "followers"),
         (FOLLOWINGS_NOTIFICATION, "followings"),
+        (PROFILE_NOTIFICATION, "profile"),
     )
     return [label for enabled, label in settings if enabled]
 
 
-# Returns enabled webhook notification category names in display order
-def _startup_webhook_notification_categories() -> List[str]:
+# Returns the webhook notification categories that are switched on, whether or not the channel itself is
+def _selected_webhook_notification_categories() -> List[str]:
     settings = (
         (WEBHOOK_ACTIVE_NOTIFICATION, "active"),
         (WEBHOOK_INACTIVE_NOTIFICATION, "inactive"),
@@ -1028,22 +2647,19 @@ def _startup_webhook_notification_categories() -> List[str]:
         (WEBHOOK_ERROR_NOTIFICATION, "errors"),
         (WEBHOOK_FOLLOWERS_NOTIFICATION, "followers"),
         (WEBHOOK_FOLLOWINGS_NOTIFICATION, "followings"),
+        (WEBHOOK_PROFILE_NOTIFICATION, "profile"),
     )
-    return [label for enabled, label in settings if WEBHOOK_ENABLED and enabled]
+    return [label for enabled, label in settings if enabled]
 
 
-# Formats one notification row with unstarred continuation lines when needed
-def _format_startup_notification_line(label: str, categories: List[str]) -> str:
-    prefix = f"* {label:<30}"
-    state = "On (" + ", ".join(categories) + ")" if categories else "Off"
-    return textwrap.fill(state, width=100, initial_indent=prefix, subsequent_indent=" " * len(prefix), break_long_words=False, break_on_hyphens=False)
+# Returns the webhook notification categories a run would actually deliver, for the startup rollup
+def _startup_webhook_notification_categories() -> List[str]:
+    return _selected_webhook_notification_categories() if WEBHOOK_ENABLED else []
 
 
-# Builds compact startup notification lines for both delivery channels
-def _startup_notification_summary_lines() -> List[str]:
-    enabled_email = _startup_email_notification_categories()
-    enabled_webhook = _startup_webhook_notification_categories()
-    return [_format_startup_notification_line("Notifications (email):", enabled_email), _format_startup_notification_line("Notifications (webhook):", enabled_webhook)]
+# Rolls one channel's enabled alerts into the state its summary row reports
+def _startup_notification_state(categories: List[str]) -> str:
+    return "On (" + ", ".join(categories) + ")" if categories else "Off"
 
 
 # Returns whether one configured webhook alert is enabled independently of email settings
@@ -1057,9 +2673,18 @@ def webhook_event_enabled(notification_type: str) -> bool:
         "offline_entries": WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION,
         "followers": WEBHOOK_FOLLOWERS_NOTIFICATION,
         "followings": WEBHOOK_FOLLOWINGS_NOTIFICATION,
+        "profile": WEBHOOK_PROFILE_NOTIFICATION,
         "error": WEBHOOK_ERROR_NOTIFICATION,
     }
     return bool(WEBHOOK_ENABLED and settings.get(notification_type, False))
+
+
+# Returns the webhook host alone, so a delivery can be traced without printing the private URL it carries
+def webhook_destination_host(url: Any = None) -> str:
+    try:
+        return urlsplit(str(WEBHOOK_URL if url is None else url).strip()).hostname or "unknown host"
+    except ValueError:
+        return "unknown host"
 
 
 # Parses a webhook rate-limit delay and caps untrusted server values to a short wait
@@ -1070,7 +2695,8 @@ def webhook_retry_after_seconds(response: Any) -> float:
         candidates.append(headers.get("Retry-After"))
     try:
         payload = response.json()
-    except Exception:
+    except Exception as exc:
+        debug_swallowed_exception("Webhook retry delay payload read", exc)
         payload = None
     if isinstance(payload, dict):
         candidates.append(payload.get("retry_after"))
@@ -1083,7 +2709,8 @@ def webhook_retry_after_seconds(response: Any) -> float:
             try:
                 retry_at = parsedate_to_datetime(str(candidate))
                 seconds = (retry_at - datetime.now(retry_at.tzinfo)).total_seconds()
-            except Exception:
+            except Exception as exc:
+                debug_swallowed_exception("Webhook retry delay header read", exc)
                 continue
         return max(0.0, min(seconds, WEBHOOK_MAX_RETRY_AFTER_SECONDS))
     return WEBHOOK_FALLBACK_RETRY_SECONDS
@@ -1104,9 +2731,28 @@ def format_webhook_payload(template: Any, values: dict) -> Any:
             return values.get("color", 0xD92323)
         try:
             return template.format(**values)
-        except KeyError:
-            return template
+        # A placeholder the payload cannot fill, such as {title[9]} or the positional {0}, is a setting
+        # to correct rather than a delivery failure, so it names the template text that could not render
+        except Exception as exc:
+            raise ValueError(f"WEBHOOK_TEMPLATE cannot render '{template}': {type(exc).__name__}: {exc}. Use plain placeholders such as {{title}} and {{description}}") from exc
     return template
+
+
+# Parses legacy and current Discord templates before validating their object shape
+def render_discord_template(template, values):
+    if isinstance(template, str):
+        try:
+            template = json.loads(template)
+        except json.JSONDecodeError:
+            try:
+                # Legacy templates doubled JSON braces for str.format, while quoted values remain templates
+                unescaped = re.sub(r'("(?:\\.|[^"\\])*")|(\{\{|\}\})', lambda match: match.group(1) if match.group(1) is not None else match.group(2)[0], template)
+                template = json.loads(unescaped)
+            except json.JSONDecodeError as exc:
+                raise ValueError("WEBHOOK_TEMPLATE must be a dictionary or a JSON object string") from exc
+    if not isinstance(template, dict):
+        raise ValueError("WEBHOOK_TEMPLATE must be a dictionary or a JSON object string")
+    return format_webhook_payload(template, values)
 
 
 # Returns a configuration error for unsafe or unsupported webhook customization
@@ -1119,8 +2765,8 @@ def validate_webhook_customization(provider: Any = None) -> Optional[str]:
             return "WEBHOOK_AVATAR_URL must be a string"
         if WEBHOOK_AVATAR_URL.strip() and not validate_webhook_url(WEBHOOK_AVATAR_URL):
             return "WEBHOOK_AVATAR_URL must contain a complete HTTPS link without embedded credentials"
-        if not isinstance(WEBHOOK_TEMPLATE, (dict, list, str)):
-            return "WEBHOOK_TEMPLATE must be a dictionary, list or string"
+        if not isinstance(WEBHOOK_TEMPLATE, (dict, str)):
+            return "WEBHOOK_TEMPLATE must be a dictionary or a JSON object string"
     if not isinstance(NTFY_SHORT, bool):
         return "NTFY_SHORT must be a boolean"
     if not isinstance(WEBHOOK_TRANSFORMS, (list, tuple)):
@@ -1130,6 +2776,14 @@ def validate_webhook_customization(provider: Any = None) -> Optional[str]:
             return f"WEBHOOK_TRANSFORMS entry {index + 1} must contain a field name and string method name"
         if transform[1].startswith("_") or not callable(getattr("", transform[1], None)):
             return f"WEBHOOK_TRANSFORMS entry {index + 1} uses an unsupported string method"
+    if selected_provider == "discord":
+        try:
+            render_discord_template(WEBHOOK_TEMPLATE, {"title": "", "description": "", "username": "", "avatar_url": "", "image_url": "", "fields_str": "", "fields": [], "color": 0, "timestamp": "", "version": VERSION})
+        # The rendering error names the placeholder to correct, which the shape message cannot
+        except ValueError as exc:
+            return str(exc)
+        except TypeError:
+            return "WEBHOOK_TEMPLATE must be a dictionary or a JSON object string"
     return None
 
 
@@ -1163,15 +2817,19 @@ def build_webhook_values(title: str, description: str, notification_type: str) -
 def build_webhook_payload(title: str, description: str, notification_type: str, payload_values: Optional[dict] = None) -> Any:
     values = build_webhook_values(title, description, notification_type) if payload_values is None else payload_values
     try:
-        payload = format_webhook_payload(WEBHOOK_TEMPLATE, values)
+        payload = render_discord_template(WEBHOOK_TEMPLATE, values)
+    # The named placeholder error is the one a user can act on, so it reaches the caller unchanged
+    except ValueError:
+        raise
     except Exception as exc:
         raise ValueError("WEBHOOK_TEMPLATE could not be formatted with the supported placeholders") from exc
-    if isinstance(payload, dict):
-        if payload.get("username") == "":
-            payload.pop("username")
-        if payload.get("avatar_url") == "":
-            payload.pop("avatar_url")
-        payload["allowed_mentions"] = {"parse": []}
+    if not isinstance(payload, dict):
+        raise ValueError("WEBHOOK_TEMPLATE must be a JSON object or a dictionary")
+    if payload.get("username") == "":
+        payload.pop("username")
+    if payload.get("avatar_url") == "":
+        payload.pop("avatar_url")
+    payload["allowed_mentions"] = {"parse": []}
     return payload
 
 
@@ -1184,6 +2842,30 @@ def truncate_utf8_bytes(text: str, max_bytes: int, suffix: str = "") -> str:
     if len(encoded_suffix) >= max_bytes:
         return encoded_suffix[:max_bytes].decode("utf-8", errors="ignore")
     return encoded[:max_bytes - len(encoded_suffix)].decode("utf-8", errors="ignore") + suffix
+
+
+# Converts one HTML anchor to Discord markdown, leaving a self-labeled link bare so Discord turns it into a link itself
+def anchor_to_discord_markdown(url: str, inner_html: str) -> str:
+    target = unescape(str(url or "")).strip()
+    # An image has no markdown equivalent in a Discord embed body, so its alt text stands in as the link label
+    inner = re.sub(r"(?is)<img\s[^>]*?alt=[\"']([^\"']*)[\"'][^>]*>", r"\1", str(inner_html or ""))
+    label = " ".join(unescape(re.sub(r"(?s)<[^>]+>", "", inner)).split())
+    # Discord prints a masked link as plain text when its label repeats the destination, while a bare URL always links
+    if not target or not label or label == target:
+        return target or label
+    return f"[{inner}]({target})"
+
+
+# Converts one HTML email body to the Discord markdown subset, so a Discord alert reads like the email
+def html_body_to_discord_markdown(body_html: str) -> str:
+    text = re.sub(r"(?is)</?(?:html|head|body)\s*>", "", str(body_html or ""))
+    text = re.sub(r"(?is)<a\s[^>]*?href=[\"']([^\"']*)[\"'][^>]*>(.*?)</a>", lambda m: anchor_to_discord_markdown(m.group(1), m.group(2)), text)
+    text = re.sub(r"(?is)<b\s*>(.*?)</b\s*>", lambda m: f"**{m.group(1)}**" if m.group(1).strip() else m.group(1), text)
+    text = re.sub(r"(?is)<i\s*>(.*?)</i\s*>", lambda m: f"*{m.group(1)}*" if m.group(1).strip() else m.group(1), text)
+    text = re.sub(r"(?is)<br\s*/?>", "\n", text)
+    # Anything still tag-shaped is layout the markdown body has no use for, such as a stray paragraph or list wrapper
+    text = re.sub(r"(?s)<[^>]+>", "", text)
+    return unescape(text).strip()
 
 
 # Builds one bounded ntfy title and message pair
@@ -1254,57 +2936,100 @@ def build_webhook_headers(provider: str, values: dict) -> dict:
     return headers
 
 
+# Sends one webhook request with the destination, deadline and redirect policy every delivery shares
+def post_webhook_request(destination=None, **request_kwargs: Any) -> Any:
+    destination = str(WEBHOOK_URL if destination is None else destination).strip()
+    if not validate_webhook_url(destination):
+        raise req.exceptions.InvalidURL("WEBHOOK_URL must contain a complete HTTPS link")
+    return WEBHOOK_SESSION.post(destination, timeout=WEBHOOK_TIMEOUT_SECONDS, verify=VERIFY_SSL, allow_redirects=False, **request_kwargs)
+
+
+_DELIVERY_SECRET_VALUES: contextvars.ContextVar[tuple] = contextvars.ContextVar("delivery_secret_values", default=())
+
+
+# Keeps in-flight credentials available to error redaction across settings reloads
+def _retain_webhook_secrets(deliver):
+    @functools.wraps(deliver)
+    # Restores the previous redaction scope after this delivery finishes
+    def retained(*args, **kwargs):
+        settings = globals().copy()
+        values = [settings.get(name) for name in SECRET_KEYS]
+        headers = settings.get("WEBHOOK_HEADERS")
+        if isinstance(headers, dict):
+            values.extend(value for name, value in headers.items() if isinstance(name, str) and name.casefold() == "authorization")
+        # The same minimum length every other redaction path applies, so a short secret cannot blank out ordinary words
+        secrets = tuple(value for value in values if isinstance(value, str) and len(value) >= MIN_REDACTABLE_SECRET_LENGTH and not value.startswith("your_"))
+        token = _DELIVERY_SECRET_VALUES.set(_DELIVERY_SECRET_VALUES.get() + secrets)
+        try:
+            return deliver(*args, **kwargs)
+        finally:
+            _DELIVERY_SECRET_VALUES.reset(token)
+    return retained
+
+
+@_retain_webhook_secrets
 # Sends one webhook through an isolated bounded retry path
-def send_webhook(title: str, description: str, notification_type: str = "song", force: bool = False, sleeper: Optional[Callable[[float], None]] = None) -> int:
+def send_webhook(title: str, description: str, notification_type: str = "song", force: bool = False, sleeper: Optional[Callable[[float], None]] = None, report_delivery: bool = True, discord_description: str = "") -> int:
     if not force and not webhook_event_enabled(notification_type):
         return 1
-    if not validate_webhook_url():
-        print("* Error sending webhook: WEBHOOK_URL must contain a complete HTTPS link")
+    destination = str(WEBHOOK_URL or "").strip()
+    if not validate_webhook_url(destination):
+        print_recovery_error(context="webhook", detail="WEBHOOK_URL must contain a complete HTTPS link")
         return 1
     provider = normalized_webhook_provider()
     if not provider:
-        print("* Error sending webhook: WEBHOOK_PROVIDER must be discord or ntfy")
+        print_recovery_error(context="webhook", detail="WEBHOOK_PROVIDER must be discord or ntfy")
         return 1
     customization_error = validate_webhook_customization(provider)
     if customization_error is not None:
-        print(f"* Error sending webhook: {customization_error}")
+        print_recovery_error(context="webhook", detail=customization_error)
         return 1
     header_error = validate_webhook_headers(provider)
     if header_error is not None:
-        print(f"* Error sending webhook: {header_error}")
+        print_recovery_error(context="webhook", detail=header_error)
         return 1
+    # Discord renders markdown, so it gets the email's formatting while ntfy keeps the plain body it can display
+    effective_description = discord_description if provider == "discord" and discord_description else description
     try:
-        webhook_values = build_webhook_values(title, description, notification_type)
+        webhook_values = build_webhook_values(title, effective_description, notification_type)
         request_headers = build_webhook_headers(provider, webhook_values)
-        discord_payload = build_webhook_payload(title, description, notification_type, webhook_values) if provider == "discord" else None
+        discord_payload = build_webhook_payload(title, effective_description, notification_type, webhook_values) if provider == "discord" else None
     except ValueError as exc:
-        print(f"* Error sending webhook: {exc}")
+        print_recovery_error(exc, context="webhook")
         return 1
     sleep_func = time.sleep if sleeper is None else sleeper
     ntfy_title, ntfy_message = build_ntfy_webhook_message(str(webhook_values["title"]), str(webhook_values["description"])) if provider == "ntfy" else ("", "")
     ntfy_params = {"title": ntfy_title}
+    if destination != str(WEBHOOK_URL or "").strip():
+        print_recovery_error(context="webhook", detail="Webhook settings changed while preparing the delivery. Retry the notification with the current settings")
+        return 1
     for attempt in range(WEBHOOK_MAX_ATTEMPTS):
         try:
             if provider == "ntfy":
-                response = WEBHOOK_SESSION.post(str(WEBHOOK_URL).strip(), data=ntfy_message.encode("utf-8"), params=ntfy_params, headers=request_headers, timeout=WEBHOOK_TIMEOUT_SECONDS)
-            elif isinstance(discord_payload, str):
-                response = WEBHOOK_SESSION.post(str(WEBHOOK_URL).strip(), data=discord_payload, headers=request_headers, timeout=WEBHOOK_TIMEOUT_SECONDS)
+                response = post_webhook_request(destination=destination, data=ntfy_message.encode("utf-8"), params=ntfy_params, headers=request_headers)
             else:
-                response = WEBHOOK_SESSION.post(str(WEBHOOK_URL).strip(), json=discord_payload, headers=request_headers, timeout=WEBHOOK_TIMEOUT_SECONDS)
+                response = post_webhook_request(destination=destination, json=discord_payload, headers=request_headers)
+            attempt_label = f"#{attempt + 1}/{WEBHOOK_MAX_ATTEMPTS}"
             if 200 <= response.status_code <= 299:
+                if report_delivery:
+                    verbose_delivery_print(f"Webhook sent through {webhook_provider_display_name(provider)}")
+                debug_print("Webhook delivery", provider=provider, host=webhook_destination_host(destination), attempt=attempt_label, status=response.status_code, outcome="OK")
                 return 0
             retryable = response.status_code == 429 or 500 <= response.status_code <= 599
             if not retryable or attempt == WEBHOOK_MAX_ATTEMPTS - 1:
-                print(f"* Error sending webhook: service returned HTTP {response.status_code}")
+                debug_print("Webhook delivery", provider=provider, host=webhook_destination_host(destination), attempt=attempt_label, status=response.status_code, retryable=retryable, outcome="failed")
+                print_recovery_error(req.HTTPError(response=response), context="webhook", detail=f"The webhook service returned HTTP {response.status_code}")
                 return 1
             delay = webhook_retry_after_seconds(response) if response.status_code == 429 else WEBHOOK_FALLBACK_RETRY_SECONDS
-            debug_print(f"Webhook delivery returned HTTP {response.status_code}. Retrying once in {delay:g} seconds")
+            debug_print("Webhook delivery retry", provider=provider, host=webhook_destination_host(destination), attempt=attempt_label, status=response.status_code, delay=f"{delay:g}s", outcome="failed")
             sleep_func(delay)
         except req.RequestException as exc:
+            attempt_label = f"#{attempt + 1}/{WEBHOOK_MAX_ATTEMPTS}"
             if attempt == WEBHOOK_MAX_ATTEMPTS - 1:
-                print(f"* Error sending webhook: {type(exc).__name__}")
+                debug_print("Webhook delivery", provider=provider, host=webhook_destination_host(destination), attempt=attempt_label, outcome="failed", error=f"{type(exc).__name__}: {exc}")
+                print_recovery_error(exc, context="webhook", detail=f"The webhook service could not be reached ({type(exc).__name__})")
                 return 1
-            debug_print(f"Webhook delivery failed with {type(exc).__name__}. Retrying once in {WEBHOOK_FALLBACK_RETRY_SECONDS:g} seconds")
+            debug_print("Webhook delivery retry", provider=provider, host=webhook_destination_host(destination), attempt=attempt_label, delay=f"{WEBHOOK_FALLBACK_RETRY_SECONDS:g}s", outcome="failed", error=f"{type(exc).__name__}: {exc}")
             sleep_func(WEBHOOK_FALLBACK_RETRY_SECONDS)
     return 1
 
@@ -1313,27 +3038,33 @@ def send_webhook(title: str, description: str, notification_type: str = "song", 
 def send_notification_channels(notification_type: str, subject: str, body: str, body_html: str = "", email_enabled: bool = False, webhook_enabled: Optional[bool] = None, subject_short: str = "", body_short: str = "") -> Tuple[bool, bool]:
     email_attempted = bool(email_enabled)
     webhook_attempted = webhook_event_enabled(notification_type) if webhook_enabled is None else bool(webhook_enabled)
+    email_delivered = False
+    webhook_delivered = False
     if email_attempted:
         print(f"Sending email notification to {RECEIVER_EMAIL}")
-        send_email(subject, body, body_html, SMTP_SSL)
+        email_delivered = send_email(subject, body, body_html, SMTP_SSL) == 0
+        debug_print("Notification dispatch", type=notification_type, channel="email", outcome="OK" if email_delivered else "failed")
     if webhook_attempted:
-        print("Sending webhook notification")
+        print(f"Sending webhook notification via {webhook_provider_display_name()}")
         use_short_content = NTFY_SHORT is True and normalized_webhook_provider() == "ntfy"
         webhook_subject = (subject_short or subject) if use_short_content else subject
         webhook_body = (body_short or body) if use_short_content else body
-        send_webhook(webhook_subject, webhook_body, notification_type, force=True)
-    return email_attempted, webhook_attempted
+        webhook_delivered = send_webhook(webhook_subject, webhook_body, notification_type, force=True, discord_description=html_body_to_discord_markdown(body_html)) == 0
+        debug_print("Notification dispatch", type=notification_type, channel="webhook", outcome="OK" if webhook_delivered else "failed")
+    # Delivery rather than the attempt, so a channel that failed is tried again while one that arrived is not sent twice
+    return email_delivered, webhook_delivered
 
 
 # Initializes the CSV file
 def init_csv_file(csv_file_name):
-    debug_print(f"Initializing CSV file: {csv_file_name}")
     try:
         if not os.path.isfile(csv_file_name) or os.path.getsize(csv_file_name) == 0:
             with open(csv_file_name, 'a', newline='', buffering=1, encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=csvfieldnames, quoting=csv.QUOTE_NONNUMERIC)
                 writer.writeheader()
+        debug_print("CSV file initialization", path=csv_file_name, outcome="OK")
     except Exception as e:
+        debug_print("CSV file initialization", path=csv_file_name, outcome="failed", error=f"{type(e).__name__}: {e}")
         raise RuntimeError(f"Could not initialize CSV file '{csv_file_name}': {e}")
 
 
@@ -1344,8 +3075,10 @@ def write_csv_entry(csv_file_name, timestamp, artist, track, album):
         with open(csv_file_name, 'a', newline='', buffering=1, encoding="utf-8") as csv_file:
             csvwriter = csv.DictWriter(csv_file, fieldnames=csvfieldnames, quoting=csv.QUOTE_NONNUMERIC)
             csvwriter.writerow({'Date': timestamp, 'Artist': artist, 'Track': track, 'Album': album})
+        debug_print("CSV entry write", path=csv_file_name, outcome="OK")
 
     except Exception as e:
+        debug_print("CSV entry write", path=csv_file_name, outcome="failed", error=f"{type(e).__name__}: {e}")
         raise RuntimeError(f"Failed to write to CSV file '{csv_file_name}': {e}")
 
 
@@ -1356,17 +3089,91 @@ def get_cur_ts(ts_str=""):
 
 # Prints the current date/time in human readable format with separator; eg. Sun 21 Apr 2024, 15:08:45
 def print_cur_ts(ts_str=""):
+    global PENDING_NOTICE_BLOCK, REPORTS_PRINTED
+    PENDING_NOTICE_BLOCK = False
+    REPORTS_PRINTED += 1
     print(get_cur_ts(str(ts_str)))
     print("─" * HORIZONTAL_LINE)
 
 
-# Debug print helper - only prints if DEBUG_MODE is enabled
-def debug_print(message):
+# Renders one diagnostic line as an operation followed by comma-separated key=value fields, dropping unset ones
+def format_diagnostic_line(operation, fields):
+    rendered = ", ".join(f"{key}={value}" for key, value in fields.items() if value is not None)
+    return f"{operation}: {rendered}" if rendered else str(operation)
+
+
+# Prints one timestamped and sanitized diagnostic line only when debug mode is enabled
+def debug_print(_operation, **fields):
     if DEBUG_MODE:
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        prefix = f" [{LASTFM_USERNAME_GLOBAL}]" if LASTFM_USERNAME_GLOBAL else ""
-        # print(f"[DEBUG {timestamp}]{prefix} {message}")
-        print(f"[DEBUG {timestamp}] {message}")
+        # Sanitized here rather than at each call site, since one caller interpolating a secret is enough to leak it
+        message = format_diagnostic_line(_operation, fields)
+        # Every message is redacted by sanitize_error_text, which CodeQL does not model as a sanitizer. The
+        # reported flows carry secret_fields output, which names the setting and its source rather than its value
+
+        # codeql[py/clear-text-logging-sensitive-data]
+        print(f"[DEBUG {datetime.now().strftime('%H:%M:%S')}] {sanitize_error_text(message)}")
+
+
+# Prints one sanitized operational detail only when verbose mode is enabled
+def verbose_print(message):
+    if VERBOSE_MODE:
+        print(f"* {sanitize_error_text(message)}")
+
+
+# Prints one delivery confirmation in verbose mode unless DELIVERY_CONFIRMATIONS turns them off
+def verbose_delivery_print(message):
+    if DELIVERY_CONFIRMATIONS:
+        verbose_print(message)
+
+
+# Prints verbose-only notices as one block, so a standalone line is not left without the timestamp trailer
+def verbose_notice(*messages):
+    if not VERBOSE_MODE or not messages:
+        return
+    for message in messages:
+        verbose_print(message)
+    # Before monitoring starts the notice belongs to the startup screen, which the monitoring header closes
+    if MONITORING_ACTIVE:
+        print_cur_ts("Timestamp:\t\t\t")
+
+
+# Marks the point where output stops being the startup screen, so later notices close their own block
+def mark_monitoring_started():
+    global MONITORING_ACTIVE
+    MONITORING_ACTIVE = True
+
+
+# Closes the block of verbose lines a check printed on its own, so they are never left without a timestamp
+def close_pending_notice_block():
+    if PENDING_NOTICE_BLOCK:
+        print_cur_ts("Timestamp:\t\t\t")
+
+
+# Stops the run when this process is out of file descriptors, since every fallback below it would hit the same limit
+def exit_if_out_of_file_descriptors(exc):
+    if not is_too_many_open_files(exc):
+        return
+    print_recovery_advice(classify_recovery_error(exc))
+    raise SystemExit(1)
+
+
+# Records a swallowed exception in debug output, first stopping the run if the cause was a local descriptor limit
+def debug_swallowed_exception(context, exc):
+    exit_if_out_of_file_descriptors(exc)
+    debug_print(context, outcome="failed", error=f"{type(exc).__name__}: {exc}")
+
+
+# Names the alert a feature feeds when that feature could not be read and reports whether the reader saw it
+def verbose_degraded_feature(feature, alert, error=None):
+    global PENDING_NOTICE_BLOCK
+    if error is not None:
+        exit_if_out_of_file_descriptors(error)
+    debug_print(feature, outcome="degraded", alert=alert, error=None if error is None else f"{type(error).__name__}: {error}")
+    verbose_print(f"{feature} is unavailable, so {alert} cannot fire")
+    # A degraded feature can be reported from inside a report, so the check closes the block instead of this line
+    if VERBOSE_MODE and MONITORING_ACTIVE:
+        PENDING_NOTICE_BLOCK = True
+    return bool(VERBOSE_MODE)
 
 
 # Returns the timestamp/datetime object in human readable format (long version); eg. Sun 21 Apr 2024, 15:08:45
@@ -1541,6 +3348,52 @@ def decrease_inactivity_check_signal_handler(sig, frame):
     print_cur_ts("Timestamp:\t\t\t")
 
 
+DOTENV_RELOAD_STATE = {}
+
+
+# Names the effective source after a file-owned secret is reloaded or removed
+def dotenv_reload_source(key):
+    if key in DOTENV_RELOAD_STATE.get("managed", ()):
+        return "dotenv file reload" if "dotenv file reload" in SECRET_SOURCE_ORDER else "dotenv file"
+    return DOTENV_RELOAD_STATE.get("base_sources", {}).get(key, "environment" if key in DOTENV_RELOAD_STATE.get("exported", ()) else SECRET_SOURCE_ORDER[0])
+
+
+# Returns the secrets explicitly supplied on the command line
+def command_line_secret_keys():
+    return frozenset(globals().get("COMMAND_LINE_SECRET_KEYS", ())) | frozenset(key for key, source in globals().get("SECRET_SOURCES", {}).items() if source == "command line")
+
+
+# Reloads file-owned credentials while preserving startup exports and command-line choices
+def load_managed_dotenv(path, override=False, interpolate=True, protected_keys=()):
+    from io import StringIO
+    from dotenv.main import DotEnv
+    from dotenv.parser import parse_stream
+    if not override and not Path(path).is_file():
+        return False
+    content = Path(path).read_text(encoding="utf-8")
+    if override:
+        malformed = next((binding for binding in parse_stream(StringIO(content)) if binding.error), None)
+        if malformed is not None:
+            raise ValueError(f"Dotenv syntax error near line {malformed.original.line}. Correct the assignment and reload again")
+    state: dict = DOTENV_RELOAD_STATE if override and DOTENV_RELOAD_STATE else dict(base={key: os.environ.get(key) or globals().get(key, "") for key in SECRET_KEYS}, exported={key for key, value in os.environ.items() if value}, managed=set())
+    command_keys = command_line_secret_keys()
+    protected = set(protected_keys) | state["exported"] | command_keys
+    values = DotEnv(dotenv_path=None, stream=StringIO(content), override=False, interpolate=interpolate).dict()
+    applied = {key for key, value in values.items() if value is not None and key not in protected and (override or not os.environ.get(key))}
+    removed = state["managed"] - applied - protected
+    for key in removed:
+        value = state["base"].get(key)
+        os.environ[key] = "" if value is None else str(value)
+    for key in applied:
+        os.environ[key] = str(values[key])
+    state["managed"] = applied.intersection(SECRET_KEYS)
+    state["loaded"] = set(state.get("loaded", ())) | applied
+    if state is not DOTENV_RELOAD_STATE:
+        DOTENV_RELOAD_STATE.clear()
+        DOTENV_RELOAD_STATE.update(state)
+    return bool(values)
+
+
 # Signal handler for SIGHUP allowing to reload secrets from .env
 def reload_secrets_signal_handler(sig, frame):
     global SP_OAUTH_MEMORY_CACHE_HANDLER, WEBHOOK_PROVIDER
@@ -1553,23 +3406,29 @@ def reload_secrets_signal_handler(sig, frame):
     else:
         # reload .env if python-dotenv is installed
         try:
-            from dotenv import load_dotenv, find_dotenv
+            from dotenv import find_dotenv
             if DOTENV_FILE:
                 env_path = DOTENV_FILE
             else:
                 env_path = find_dotenv()
             if env_path:
-                load_dotenv(env_path, override=True, interpolate=False)
+                load_managed_dotenv(env_path, override=True, interpolate=False)
             else:
                 print("* No .env file found, skipping env-var reload")
         except ImportError:
             env_path = None
-            print("* python-dotenv not installed, skipping env-var reload")
+            print_recovery_advice(missing_dependency_advice("python-dotenv", "The env-var reload was skipped"), label="Warning")
+
+        except (OSError, UnicodeError, ValueError) as exc:
+            print_recovery_advice(make_recovery_advice("config.invalid", "The dotenv reload failed. Existing secrets were kept", recovery_fix_with_guide("Check the dotenv file path, UTF-8 encoding and assignment syntax, then reload again", SECRETS_GUIDE_URL), False, str(exc)))
+            return
 
     oauth_credentials_changed = False
     webhook_url_changed = False
     if env_path:
         for secret in SECRET_KEYS:
+            if secret in command_line_secret_keys():
+                continue
             old_val = globals().get(secret)
             val = os.getenv(secret)
             if val is not None and val != old_val:
@@ -1578,6 +3437,10 @@ def reload_secrets_signal_handler(sig, frame):
                     oauth_credentials_changed = True
                 if secret == "WEBHOOK_URL":
                     webhook_url_changed = True
+                record_secret_source(secret, dotenv_reload_source(secret))
+                debug_print("Secret reload", name=secret, path=env_path, **secret_fields(val, secret))
+                # The line names the setting and where it came from, never its value
+                # codeql[py/clear-text-logging-sensitive-data]
                 print(f"* Reloaded {secret} from {env_path}")
     if oauth_credentials_changed:
         SP_OAUTH_MEMORY_CACHE_HANDLER = None
@@ -1585,7 +3448,7 @@ def reload_secrets_signal_handler(sig, frame):
         detected_provider = detect_webhook_provider(WEBHOOK_URL)
         if detected_provider and detected_provider != normalized_webhook_provider():
             WEBHOOK_PROVIDER = detected_provider
-            print(f"* Updated webhook provider to {detected_provider}")
+            print(f"* Updated webhook provider to {webhook_provider_display_name(detected_provider)}")
 
     print_cur_ts("Timestamp:\t\t\t")
 
@@ -1623,7 +3486,8 @@ def get_spotify_apple_genius_search_urls(artist, track, album=None, network=None
     if track_obj and hasattr(track_obj, 'get_url'):
         try:
             lastfm_url = track_obj.get_url()
-        except Exception:
+        except Exception as exc:
+            debug_swallowed_exception("Last.fm track URL read", exc)
             # Fallback to manual construction if get_url() fails
             artist_encoded = quote_plus(str(artist))
             track_encoded = quote_plus(str(track))
@@ -1633,7 +3497,8 @@ def get_spotify_apple_genius_search_urls(artist, track, album=None, network=None
         try:
             track_obj_temp = pylast.Track(artist, track, network)
             lastfm_url = track_obj_temp.get_url()
-        except Exception:
+        except Exception as exc:
+            debug_swallowed_exception("Last.fm track URL read", exc)
             # Fallback to manual construction
             artist_encoded = quote_plus(str(artist))
             track_encoded = quote_plus(str(track))
@@ -1649,20 +3514,23 @@ def get_spotify_apple_genius_search_urls(artist, track, album=None, network=None
         if network:
             try:
                 lastfm_album_url = pylast.Album(artist, album, network).get_url()
-            except Exception:
+            except Exception as exc:
+                debug_swallowed_exception("Last.fm album URL read", exc)
                 try:
                     # Fallback to manual construction
                     artist_encoded = quote_plus(str(artist))
                     album_encoded = quote_plus(str(album))
                     lastfm_album_url = f"https://www.last.fm/music/{artist_encoded}/{album_encoded}"
-                except Exception:
+                except Exception as build_error:
+                    debug_swallowed_exception("Last.fm album URL construction", build_error)
                     lastfm_album_url = ""
         else:
             try:
                 artist_encoded = quote_plus(str(artist))
                 album_encoded = quote_plus(str(album))
                 lastfm_album_url = f"https://www.last.fm/music/{artist_encoded}/{album_encoded}"
-            except Exception:
+            except Exception as exc:
+                debug_swallowed_exception("Last.fm album URL construction", exc)
                 lastfm_album_url = ""
 
     return spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, lastfm_url, lastfm_album_url
@@ -1790,64 +3658,105 @@ def format_music_urls_email_html(spotify_url, lastfm_url, lastfm_album_url, appl
     return "<br>".join(lines) if lines else ""
 
 
+# Returns the file one run keeps its last activity in, named after the user it monitors
+def resolve_status_file(target):
+    return f"lastfm_{target}_last_activity.json"
+
+
+# Writes the last activity snapshot the next run starts from
+def save_last_activity_state(path, last_activity):
+    try:
+        write_json_atomically(path, last_activity)
+        debug_print("Last activity write", path=path, entries=len(last_activity), outcome="OK")
+    except Exception as e:
+        debug_print("Last activity write", path=path, outcome="failed", error=f"{type(e).__name__}: {e}")
+        print_recovery_error(e, context="file.unwritable", detail=f"Cannot save the last status to '{path}' file: {e}")
+
+
+# Returns the track the user is playing right now, or None when nothing is playing
+def lastfm_get_now_playing(username, user):
+    try:
+        now_playing = user.get_now_playing()
+        debug_print("Last.fm now playing fetch", user=username, track=str(now_playing) if now_playing else None, outcome="OK")
+        return now_playing
+    except Exception as exc:
+        debug_print("Last.fm now playing fetch", user=username, outcome="failed", error=f"{type(exc).__name__}: {exc}")
+        raise
+
+
 # Returns the list of recently played Last.fm tracks
 def lastfm_get_recent_tracks(username, network, number):
     try:
         recent_tracks = network.get_user(username).get_recent_tracks(limit=number)
+        debug_print("Last.fm recent tracks fetch", user=username, limit=number, tracks=len(recent_tracks or []), outcome="OK")
         return recent_tracks
-    except Exception:
+    except Exception as exc:
+        debug_print("Last.fm recent tracks fetch", user=username, limit=number, outcome="failed", error=f"{type(exc).__name__}: {exc}")
         raise
 
 
-# Returns Last.fm HTTP headers crafted to look like a real browser so the WAF is less likely to block low-volume scraping
+# Requests English Last.fm pages while leaving browser identity and compression headers to curl_cffi
 def _lastfm_scrape_headers():
     return {
-        'User-Agent': (
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
-            'AppleWebKit/537.36 (KHTML, like Gecko) '
-            'Chrome/122.0.0.0 Safari/537.36'
-        ),
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
     }
 
 
 # Returns an error description when a Last.fm response should be retried
 def _lastfm_retryable_response_error(response):
-    if response.status_code == 429 or response.status_code >= 500:
-        return f"HTTP {response.status_code} from Last.fm"
-
     content_type = response.headers.get('Content-Type', '').lower()
     if 'text/html' in content_type:
         body = response.content.lower()
+        if re.search(rb'<title>\s*client challenge\s*</title>', body):
+            return "Last.fm returned a browser verification page (Client Challenge)"
         if b'temporarily unavailable' in body and b'error 503' in body:
             return "Last.fm returned its temporarily unavailable page"
+
+    if response.status_code == 429 or response.status_code >= 500:
+        return f"HTTP {response.status_code} from Last.fm"
 
     return None
 
 
 # Fetches a URL with backoff for transient Last.fm HTTP and soft error responses then raises RuntimeError on final failure
 def _lastfm_http_get_with_retry(url, attempts=3, base_delay=2.0):
+    if curl_req is None:
+        raise RecoveryError(missing_dependency_advice("curl_cffi", "Friend and profile tracking cannot run"))
     last_exc = None
+    timeout = FUNCTION_TIMEOUT * 2
     for i in range(attempts):
+        attempt_label = f"#{i + 1}/{attempts}"
+        status = None
         try:
-            response = req.get(url, headers=_lastfm_scrape_headers(), timeout=FUNCTION_TIMEOUT * 2)
+            response = curl_req.get(url, impersonate="chrome", headers=_lastfm_scrape_headers(), timeout=timeout, verify=VERIFY_SSL, allow_redirects=False)
+            status = response.status_code
+            # Every scraped address is built as a literal https://www.last.fm URL, so a redirect is never part of a
+            # healthy fetch. Following one inside curl_cffi would let the response pick the host this request reaches
+            if 300 <= status < 400:
+                location = response.headers.get('Location') or 'an unspecified location'
+                debug_print("HTTP GET", url=url, timeout=f"{timeout}s", attempt=attempt_label, status=status, outcome="failed", error=f"unexpected redirect to {location}")
+                raise RuntimeError(f"Last.fm redirected the request to '{location}' instead of returning the page")
             retryable_error = _lastfm_retryable_response_error(response)
             if retryable_error:
                 last_exc = RuntimeError(retryable_error)
+                debug_print("HTTP GET", url=url, timeout=f"{timeout}s", attempt=attempt_label, status=status, outcome="failed", error=retryable_error)
             else:
                 response.raise_for_status()
+                debug_print("HTTP GET", url=url, timeout=f"{timeout}s", attempt=attempt_label, status=status, outcome="OK")
                 return response
-        except (req.Timeout, req.ConnectionError) as e:
-            last_exc = e
-        except req.HTTPError as e:
+        except curl_req.exceptions.HTTPError as e:
             # Non-retryable 4xx (except 429 handled above) propagates immediately
-            raise RuntimeError(f"Failed to fetch from Last.fm: {e}")
+            debug_print("HTTP GET", url=url, timeout=f"{timeout}s", attempt=attempt_label, status=status, outcome="failed", error=f"{type(e).__name__}: {e}")
+            raise RuntimeError(f"Failed to fetch from Last.fm: {e}") from e
+        except (curl_req.exceptions.RequestException, OSError) as e:
+            exit_if_out_of_file_descriptors(e)
+            last_exc = e
+            debug_print("HTTP GET", url=url, timeout=f"{timeout}s", attempt=attempt_label, outcome="failed", error=f"{type(e).__name__}: {e}")
         if i < attempts - 1:
-            time.sleep(base_delay * (2 ** i))
-    raise RuntimeError(f"Failed to fetch from Last.fm after {attempts} attempts: {last_exc}")
+            delay = base_delay * (2 ** i)
+            debug_print("Last.fm request retry", url=url, attempt=attempt_label, delay=f"{delay:g}s", status=status, outcome="failed")
+            time.sleep(delay)
+    raise RuntimeError(f"Failed to fetch from Last.fm after {attempts} attempts: {last_exc}") from last_exc
 
 
 # Parses the "(N)" suffix from the h1 header on a followers/following page and returns N as int or None if not found
@@ -1908,7 +3817,7 @@ def _lastfm_scrape_user_list(username, kind):
         return users
     except req.RequestException as e:
         raise RuntimeError(f"Failed to scrape {kind} from Last.fm: {e}")
-    except RuntimeError:
+    except (RuntimeError, RecoveryError):
         raise
     except Exception as e:
         raise RuntimeError(f"Failed to parse {kind} page: {e}")
@@ -1924,6 +3833,258 @@ def lastfm_get_followers(username):
     return _lastfm_scrape_user_list(username, 'followers')
 
 
+# Converts profile bio markup into stable plain text while retaining block line breaks
+def _lastfm_profile_bio_text(bio_element):
+    if bio_element is None:
+        return ''
+    for line_break in bio_element.select('br'):
+        line_break.replace_with('\n')
+    for block in bio_element.select('p, div, li'):
+        block.append('\n')
+    lines = [re.sub(r'[ \t\f\v]+', ' ', line).strip() for line in bio_element.get_text().splitlines()]
+    return '\n'.join(line for line in lines if line)
+
+
+# Returns the current public display name and About Me bio scraped from the user's profile
+def lastfm_get_profile(username):
+    from bs4 import BeautifulSoup  # type: ignore
+
+    url = f"https://www.last.fm/user/{quote_plus(username)}"
+    try:
+        response = _lastfm_http_get_with_retry(url)
+        soup = BeautifulSoup(response.content, 'html.parser')
+        profile_username = soup.select_one('h1.header-title a[href^="/user/"]')
+        if profile_username is None or profile_username.get_text(' ', strip=True).casefold() != username.casefold():
+            raise RuntimeError("Could not validate the Last.fm profile owner (layout may have changed)")
+        display_name_element = soup.select_one('.header-title-display-name')
+        if display_name_element is None:
+            raise RuntimeError("Could not find the display name (layout may have changed)")
+        bio_element = soup.select_one('.about-me-header') or soup.select_one('.about-me-sidebar')
+        return {
+            'display_name': display_name_element.get_text(' ', strip=True),
+            'bio': _lastfm_profile_bio_text(bio_element),
+        }
+    except req.RequestException as e:
+        raise RuntimeError(f"Failed to scrape profile from Last.fm: {e}")
+    except (RuntimeError, RecoveryError):
+        raise
+    except Exception as e:
+        raise RuntimeError(f"Failed to parse profile page: {e}")
+
+
+# How far ahead of this machine's clock a saved timestamp may be before the tool stops timing against it
+STATE_FUTURE_TOLERANCE_SECONDS = 300
+
+
+# Rejects timestamps that cannot safely reach date conversion
+def valid_state_timestamp(value):
+    if not finite_number(value) or value < 0:
+        return False
+    try:
+        datetime.fromtimestamp(value)
+    except (ValueError, OverflowError, OSError):
+        return False
+    return True
+
+
+# Reports whether a saved timestamp is far enough ahead of this machine's clock to be untrustworthy. The tool
+# wrote the file itself, so a clock moved backwards is the usual cause and is not a reason to refuse to run
+def state_timestamp_ahead(value):
+    return finite_number(value) and value > time.time() + STATE_FUTURE_TOLERANCE_SECONDS
+
+
+# Reads saved history without adopting malformed values
+def read_status_record(path):
+    with open(path, "r", encoding="utf-8") as source:
+        record = json.load(source)
+    if not isinstance(record, list) or len(record) < 3:
+        raise ValueError("expected an activity list containing a timestamp, artist and track")
+    if any(not isinstance(value, str) for value in record[1:4]):
+        raise ValueError("the saved artist, track and optional album must be strings")
+    if not valid_state_timestamp(record[0]):
+        raise ValueError("the saved timestamp must be finite, nonnegative and representable")
+    return record
+
+
+# Replaces a saved timestamp this machine's clock cannot support, so only the timing restarts and the saved
+# entry itself is kept. A file this tool wrote must not be able to stop the next run over a corrected clock
+def reconcile_status_record(record, path):
+    if not record or not state_timestamp_ahead(record[0]):
+        return record
+    print(f"* Warning: The saved activity in '{path}' is dated ahead of this machine's clock.")
+    print(f"  Keeping the saved track '{record[2]}' and timing it from now. Check the system clock if this repeats.")
+    return [int(time.time()), *record[1:]]
+
+
+# Accepts finite numeric values without overflowing on unusually large integers
+def finite_number(value):
+    import math
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+# Preserves inline credentials privately before setup replaces their only saved source
+def preserve_inline_config_secrets(config_path, env_path):
+    from dotenv import dotenv_values
+    source = Path(config_path).expanduser()
+    if not source.is_file():
+        return None
+    original = {}
+    if not load_config_file(source, namespace=original, report_errors=False):
+        raise ValueError("Existing configuration could not be read before preserving its inline secrets")
+    defaults = _config_template_defaults()
+    destination = Path(env_path).expanduser()
+    saved = dotenv_values(str(destination), interpolate=False) if destination.exists() else {}
+    updates = {}
+    for key in SECRET_KEYS:
+        value = original.get(key)
+        if isinstance(value, str) and value and value != defaults.get(key) and saved.get(key) is None:
+            updates[key] = value
+    if not updates:
+        return None
+    try:
+        return update_dotenv_file(destination, updates)
+    except Exception as exc:
+        raise OSError(f"Could not preserve inline secrets in '{destination}'. The original configuration was not replaced") from exc
+
+
+# Removes inline secret assignments from a setup backup while preserving other configuration text
+def redact_config_backup(content):
+    import ast
+    try:
+        text = content.decode("utf-8")
+        tree = ast.parse(text)
+    except (UnicodeError, SyntaxError) as exc:
+        raise ValueError("Cannot create a secret-free configuration backup. Correct the existing file's UTF-8 encoding or assignment syntax before running setup") from exc
+    lines = text.splitlines(keepends=True)
+    offsets = [0]
+    for line in lines:
+        offsets.append(offsets[-1] + len(line.encode("utf-8")))
+    replacements = []
+    secret_values = set()
+    for statement in ast.walk(tree):
+        if not isinstance(statement, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+        if any(isinstance(target, ast.Name) and target.id in SECRET_KEYS for target in targets):
+            value = statement.value
+            if value is not None and value.end_lineno is not None and value.end_col_offset is not None:
+                start = offsets[value.lineno - 1] + value.col_offset
+                end = offsets[value.end_lineno - 1] + value.end_col_offset
+                replacements.append((start, end))
+                if isinstance(value, ast.Constant) and isinstance(value.value, str) and value.value:
+                    secret_values.add(value.value)
+    for start, end in sorted(replacements, reverse=True):
+        content = content[:start] + b'""' + content[end:]
+    import io
+    import tokenize
+    text = content.decode("utf-8")
+    lines = text.splitlines(keepends=True)
+    for token in tokenize.generate_tokens(io.StringIO(text).readline):
+        if token.type == tokenize.COMMENT:
+            comment = token.string
+            for secret in sorted(secret_values, key=len, reverse=True):
+                comment = comment.replace(secret, "<redacted>")
+            row, start = token.start
+            end = token.end[1]
+            lines[row - 1] = lines[row - 1][:start] + comment + lines[row - 1][end:]
+    return "".join(lines).encode("utf-8")
+
+
+# Copies an existing file to a timestamped private backup before it is replaced, returning the backup path or None
+def create_timestamped_backup(destination, attempts=100, redact_secrets=False):
+    destination_path = Path(destination).expanduser()
+    if not destination_path.is_file():
+        return None
+    existing_bytes = destination_path.read_bytes()
+    if redact_secrets:
+        existing_bytes = redact_config_backup(existing_bytes)
+    stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    for attempt in range(attempts):
+        suffix = f".{stamp}.bak" if attempt == 0 else f".{stamp}-{attempt}.bak"
+        backup_path = destination_path.with_name(destination_path.name + suffix)
+        try:
+            # O_EXCL so a backup can never overwrite an earlier one, even under a concurrent run
+            descriptor = os.open(str(backup_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            continue
+        try:
+            with os.fdopen(descriptor, "wb") as backup_file:
+                backup_file.write(existing_bytes)
+                backup_file.flush()
+                os.fsync(backup_file.fileno())
+        except Exception:
+            try:
+                os.unlink(str(backup_path))
+            except OSError as cleanup_error:
+                debug_swallowed_exception("Failed backup cleanup", cleanup_error)
+            raise
+        debug_print("File backup", path=str(destination_path), backup=str(backup_path), outcome="OK")
+        return str(backup_path)
+    raise OSError(f"Could not create a unique backup for '{destination_path}' after {attempts} attempts")
+
+
+# Writes one file through a temporary file in the same directory, so a crash cannot leave a half-written file
+def write_file_atomically(destination, content, mode=None):
+    destination_path = Path(destination).expanduser()
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", prefix=f".{destination_path.name}.", suffix=".tmp", dir=str(destination_path.parent), delete=False) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write(content)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        if mode is not None and os.name == "posix":
+            os.chmod(str(temporary_path), mode)
+        os.replace(str(temporary_path), str(destination_path))
+        temporary_path = None
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
+    return str(destination_path)
+
+
+# Saves one JSON state file atomically, so an interrupted run cannot strand a half-written file
+def write_json_atomically(destination, payload, ensure_ascii=True):
+    return write_file_atomically(destination, json.dumps(payload, indent=2, ensure_ascii=ensure_ascii) + "\n")
+
+
+# Raised when an existing config is not replaced because nobody could confirm it, as opposed to a path in the way of writing one
+class ConfigExistsError(FileExistsError):
+    pass
+
+
+# Confirms replacing one existing generated config, or requires --force when there is nobody to ask
+def confirm_generated_config_replacement(destination, force=False, interactive=None, input_func=input):
+    destination_path = Path(destination).expanduser()
+    if not destination_path.exists() or force:
+        return True
+    terminal_is_interactive = bool(sys.stdin.isatty()) if interactive is None else bool(interactive)
+    if not terminal_is_interactive:
+        raise ConfigExistsError(f"Config file '{destination_path}' already exists and there is no terminal to confirm replacing it")
+    try:
+        answer = str(read_interactively(input_func, f"Config file '{destination_path}' exists. Replace it and keep a timestamped backup? [y/N]: ")).strip().casefold()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        answer = ""
+    return answer in ("y", "yes")
+
+
+# Writes one generated config atomically, backing up whatever was there first
+def write_generated_config(output_file, content, force=False, interactive=None, input_func=input, redact_secrets=False):
+    destination = Path(output_file).expanduser()
+    if not confirm_generated_config_replacement(destination, force, interactive, input_func):
+        return None, False
+    backup_path = create_timestamped_backup(destination, redact_secrets=redact_secrets)
+    write_file_atomically(destination, content)
+    return backup_path, True
+
+
 # Loads previous friends/followers state from JSON file
 def load_friends_state(username, friends_type):
     filename = f"lastfm_{username}_{friends_type}.json"
@@ -1931,15 +4092,18 @@ def load_friends_state(username, friends_type):
         try:
             with open(filename, 'r', encoding="utf-8") as f:
                 data = json.load(f)
-                if isinstance(data, list):
-                    return set(data)
-                elif isinstance(data, dict) and 'users' in data:
-                    return set(data['users'])
-                else:
-                    return set()
+                users = data if isinstance(data, list) else data.get('users') if isinstance(data, dict) else None
+                if not isinstance(users, list) or any(not isinstance(user, str) or not user.strip() for user in users):
+                    raise ValueError("expected a list of nonempty usernames or an object with that list in 'users'")
+                saved_users = set(users)
+                debug_print("Friends state load", path=filename, type=friends_type, users=len(saved_users), outcome="OK")
+                return saved_users
         except Exception as e:
-            print(f"* Warning: Cannot load {friends_type} state from '{filename}': {e}")
-            return set()
+            debug_print("Friends state load", path=filename, type=friends_type, outcome="failed", error=f"{type(e).__name__}: {e}")
+            print_recovery_error(e, context="file", detail=f"Cannot load the {friends_type} state from '{filename}': {e}. The next successful check will rebuild the baseline without change alerts")
+            exit_if_out_of_file_descriptors(e)
+            return None
+    debug_print("Friends state load", path=filename, type=friends_type, outcome="skipped", reason="no saved state")
     return set()
 
 
@@ -1952,23 +4116,73 @@ def save_friends_state(username, friends_type, users_set):
             'count': len(users_set),
             'last_updated': int(time.time())
         }
-        with open(filename, 'w', encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+        write_json_atomically(filename, data)
+        debug_print("Friends state write", path=filename, type=friends_type, users=len(users_set), outcome="OK")
     except Exception as e:
-        print(f"* Warning: Cannot save {friends_type} state to '{filename}': {e}")
+        debug_print("Friends state write", path=filename, type=friends_type, outcome="failed", error=f"{type(e).__name__}: {e}")
+        print_recovery_error(e, context="file.unwritable", detail=f"Cannot save the {friends_type} state to '{filename}': {e}")
 
 
-# Checks for changes in friends/followers and returns (changes dict, current sets dict) so callers can persist the exact scraped sets without re-fetching
-def check_friends_changes(username, track_followings, track_followers, save_state=True, raise_on_error=False):
+# Loads the saved profile fields used as the comparison baseline
+def load_profile_state(username):
+    filename = f"lastfm_{username}_profile.json"
+    if not os.path.isfile(filename):
+        return {}
+    try:
+        with open(filename, 'r', encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError("profile state must be a JSON object")
+        saved_profile = {key: data[key] for key in ('display_name', 'bio') if isinstance(data.get(key), str)}
+        debug_print("Profile state load", path=filename, fields=len(saved_profile), outcome="OK")
+        return saved_profile
+    except Exception as e:
+        debug_print("Profile state load", path=filename, outcome="failed", error=f"{type(e).__name__}: {e}")
+        print_recovery_error(e, context="file", detail=f"Cannot load the profile state from '{filename}': {e}")
+        return {}
+
+
+# Saves tracked profile fields while retaining baselines for fields disabled during this run
+def save_profile_state(username, profile):
+    filename = f"lastfm_{username}_profile.json"
+    try:
+        data = load_profile_state(username)
+        data.update({key: value for key, value in profile.items() if key in ('display_name', 'bio') and isinstance(value, str)})
+        data['last_updated'] = int(time.time())
+        write_json_atomically(filename, data, ensure_ascii=False)
+        debug_print("Profile state write", path=filename, fields=len(profile), outcome="OK")
+    except Exception as e:
+        debug_print("Profile state write", path=filename, outcome="failed", error=f"{type(e).__name__}: {e}")
+        print_recovery_error(e, context="file.unwritable", detail=f"Cannot save the profile state to '{filename}': {e}")
+
+
+# Returns whether at least one friend or profile field is enabled for the shared timer
+def friends_check_enabled():
+    return TRACK_FOLLOWINGS or TRACK_FOLLOWERS or TRACK_BIO or TRACK_DISPLAY_NAME
+
+
+# Persists the exact states produced by one successful shared timer check
+def save_friends_check_states(username, current_states):
+    for key in ('followings', 'followers'):
+        if key in current_states:
+            save_friends_state(username, key, current_states[key])
+    if 'profile' in current_states:
+        save_profile_state(username, current_states['profile'])
+
+
+# Checks friends and profile fields then returns changes with the exact fetched states for later persistence
+def check_friends_changes(username, track_followings, track_followers, track_bio=False, track_display_name=False, save_state=True, raise_on_error=False):
     changes = {}
-    current_sets = {}
+    current_states = {}
 
     if track_followings:
         try:
             previous_friends = load_friends_state(username, 'followings')
             current_friends = lastfm_get_friends(username)
-            current_sets['followings'] = current_friends
+            current_states['followings'] = current_friends
 
+            if previous_friends is None:
+                previous_friends = current_friends
             added_friends = current_friends - previous_friends
             removed_friends = previous_friends - current_friends
 
@@ -1985,13 +4199,16 @@ def check_friends_changes(username, track_followings, track_followers, save_stat
         except Exception as e:
             if raise_on_error:
                 raise e
+            verbose_degraded_feature("Followings check", "following change alerts", e)
 
     if track_followers:
         try:
             previous_followers = load_friends_state(username, 'followers')
             current_followers = lastfm_get_followers(username)
-            current_sets['followers'] = current_followers
+            current_states['followers'] = current_followers
 
+            if previous_followers is None:
+                previous_followers = current_followers
             added_followers = current_followers - previous_followers
             removed_followers = previous_followers - current_followers
 
@@ -2008,11 +4225,35 @@ def check_friends_changes(username, track_followings, track_followers, save_stat
         except Exception as e:
             if raise_on_error:
                 raise e
+            verbose_degraded_feature("Followers check", "follower change alerts", e)
 
-    return changes, current_sets
+    if track_bio or track_display_name:
+        try:
+            previous_profile = load_profile_state(username)
+            fetched_profile = lastfm_get_profile(username)
+            current_profile = {}
+            profile_changes = {}
+            tracked_fields = (('display_name', track_display_name), ('bio', track_bio))
+            for field, enabled in tracked_fields:
+                if not enabled:
+                    continue
+                current_profile[field] = fetched_profile[field]
+                if field in previous_profile and previous_profile[field] != fetched_profile[field]:
+                    profile_changes[field] = {'previous': previous_profile[field], 'current': fetched_profile[field]}
+            current_states['profile'] = current_profile
+            if profile_changes:
+                changes['profile'] = profile_changes
+            if save_state:
+                save_profile_state(username, current_profile)
+        except Exception as e:
+            if raise_on_error:
+                raise e
+            verbose_degraded_feature("Profile check", "profile change alerts", e)
+
+    return changes, current_states
 
 
-# Sends notification about friends/followers changes
+# Sends console and configured channel notifications for confirmed friend or profile changes
 def notify_friends_changes(username, changes, skip_initial_line=False):
     if not changes:
         return
@@ -2089,8 +4330,7 @@ def notify_friends_changes(username, changes, skip_initial_line=False):
                 html_parts.append("<br><br>")
                 for user in added:
                     user_url = f"https://www.last.fm/user/{quote_plus(user)}"
-                    html_parts.append(f'- <a href="{user_url}">{escape(user)}</a>')
-                html_parts.append("<br>")
+                    html_parts.append(f'- <a href="{user_url}">{escape(user)}</a><br>')
 
             if removed:
                 if added:
@@ -2099,8 +4339,7 @@ def notify_friends_changes(username, changes, skip_initial_line=False):
                 html_parts.append("<br><br>")
                 for user in removed:
                     user_url = f"https://www.last.fm/user/{quote_plus(user)}"
-                    html_parts.append(f'- <a href="{user_url}">{escape(user)}</a>')
-                html_parts.append("<br>")
+                    html_parts.append(f'- <a href="{user_url}">{escape(user)}</a><br>')
 
             html_parts.append("<br>")
             if check_range:
@@ -2185,8 +4424,7 @@ def notify_friends_changes(username, changes, skip_initial_line=False):
                 html_parts.append("<br><br>")
                 for user in added:
                     user_url = f"https://www.last.fm/user/{quote_plus(user)}"
-                    html_parts.append(f'- <a href="{user_url}">{escape(user)}</a>')
-                html_parts.append("<br>")
+                    html_parts.append(f'- <a href="{user_url}">{escape(user)}</a><br>')
 
             if removed:
                 if added:
@@ -2195,8 +4433,7 @@ def notify_friends_changes(username, changes, skip_initial_line=False):
                 html_parts.append("<br><br>")
                 for user in removed:
                     user_url = f"https://www.last.fm/user/{quote_plus(user)}"
-                    html_parts.append(f'- <a href="{user_url}">{escape(user)}</a>')
-                html_parts.append("<br>")
+                    html_parts.append(f'- <a href="{user_url}">{escape(user)}</a><br>')
 
             html_parts.append("<br>")
             if check_range:
@@ -2213,6 +4450,58 @@ def notify_friends_changes(username, changes, skip_initial_line=False):
             print(f"\nCheck interval:\t\t\t{check_interval_str} ({check_range})")
         print_cur_ts("Timestamp:\t\t\t")
 
+    # Handle public profile changes
+    if 'profile' in changes:
+        profile_changes = changes['profile']
+        labels = {'display_name': 'Display name', 'bio': 'Bio'}
+        if not skip_initial_line:
+            print("─" * HORIZONTAL_LINE)
+        print(f"* Public profile changed for user {username}")
+        for field in ('display_name', 'bio'):
+            if field not in profile_changes:
+                continue
+            field_change = profile_changes[field]
+            previous_value = field_change['previous'] or "(empty)"
+            current_value = field_change['current'] or "(empty)"
+            print(f"\n{labels[field]} changed:")
+            print(f"Previous: {previous_value}")
+            print(f"Current: {current_value}")
+
+        if PROFILE_NOTIFICATION or webhook_event_enabled("profile"):
+            changed_labels = [labels[field].lower() for field in ('display_name', 'bio') if field in profile_changes]
+            subject = f"Last.fm user {username} profile has changed! ({' and '.join(changed_labels)})"
+            body_parts = [f"Public profile changed for user {username}", ""]
+            html_parts = [f'Public profile changed for user <a href="https://www.last.fm/user/{quote_plus(username)}">{escape(username)}</a>', "<br><br>"]
+            rendered_fields = []
+            for field in ('display_name', 'bio'):
+                if field not in profile_changes:
+                    continue
+                if rendered_fields:
+                    body_parts.append("")
+                    html_parts.append("<br>")
+                field_change = profile_changes[field]
+                previous_value = field_change['previous'] or "(empty)"
+                current_value = field_change['current'] or "(empty)"
+                body_parts.extend([f"{labels[field]} changed:", f"Previous: {previous_value}", f"Current: {current_value}"])
+                previous_html = html_text(previous_value)
+                current_html = html_text(current_value)
+                html_parts.extend([f"<b>{labels[field]} changed:</b><br>", f"Previous: {previous_html}<br>", f"Current: {current_html}<br>"])
+                rendered_fields.append(field)
+            body_parts.append("")
+            if check_range:
+                body_parts.append(f"Check interval: {check_interval_str} ({check_range})")
+                html_parts.append(f"<br>Check interval: <b>{check_interval_str}</b> ({check_range})")
+            body_parts.append(f"Timestamp: {get_cur_ts('')}")
+            html_parts.append(f"<br>Timestamp: {get_cur_ts('')}")
+            body = "\n".join(body_parts)
+            body_html = f"<html><head></head><body>{''.join(html_parts)}</body></html>"
+            print()
+            send_notification_channels("profile", subject, body, body_html, email_enabled=PROFILE_NOTIFICATION)
+
+        if check_range:
+            print(f"\nCheck interval:\t\t\t{check_interval_str} ({check_range})")
+        print_cur_ts("Timestamp:\t\t\t")
+
 
 # Displays the list of recently played Last.fm tracks
 def lastfm_list_tracks(username, user, network, number, csv_file_name):
@@ -2222,17 +4511,17 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
     print(f"{list_operation} {number} tracks recently listened by {username} ...\n")
 
     try:
-        new_track = user.get_now_playing()
+        new_track = lastfm_get_now_playing(username, user)
         recent_tracks = lastfm_get_recent_tracks(username, network, number)
     except Exception as e:
-        print(f"* Error: Cannot display recent tracks for the user: {e}")
+        print_recovery_error(e, detail=f"Cannot read the recent tracks of '{username}'")
         sys.exit(1)
 
     try:
         if csv_file_name:
             init_csv_file(csv_file_name)
     except Exception as e:
-        print(f"* Error: {e}")
+        print_recovery_error(e, context="file.unwritable")
 
     # Helper function to shorten strings in the middle
     def _shorten_middle(s, max_len, ellipsis="..."):
@@ -2254,7 +4543,7 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
     p = 0
     duplicate_entries = False
 
-    for previous, t, nxt in previous_and_next(reversed(recent_tracks)):
+    for previous, t, _nxt in previous_and_next(reversed(recent_tracks)):
         i = len(track_entries) + 1
         if i == len(recent_tracks):
             last_played = int(t.timestamp)
@@ -2286,12 +4575,13 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
             if csv_file_name:
                 write_csv_entry(csv_file_name, datetime.fromtimestamp(timestamp), artist, title, album)
         except Exception as e:
-            print(f"* Error: {e}")
+            print_recovery_error(e, context="file.unwritable")
 
     # Calculate column widths based on terminal size
     try:
         term_width = shutil.get_terminal_size(fallback=(100, 24)).columns
-    except Exception:
+    except Exception as exc:
+        debug_swallowed_exception("Terminal width probe", exc)
         term_width = 100
 
     w_num = 4
@@ -2425,14 +4715,14 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
     # Print table header
     if track_entries:
         print()
-        hdr = (
+        hdr = colorize("section", (
             f"{'#'.ljust(w_num)}  "
             f"{'Day'.ljust(w_day)}  "
             f"{'Date/Time'.ljust(w_date)}  "
             f"{'Artist'.ljust(w_artist)}  "
             f"{'Title'.ljust(w_title)}  "
             f"{'Album'.ljust(w_album)}"
-        )
+        ))
         sep = (
             f"{'-' * w_num}  "
             f"{'-' * w_day}  "
@@ -2458,13 +4748,14 @@ def lastfm_list_tracks(username, user, network, number, csv_file_name):
                 title_fmt = _shorten_middle(entry['title'], w_title)
             album_fmt = _shorten_middle(entry['album'], w_album)
 
+            # Each cell is padded first and coloured second, so a colour code never counts toward a column width
             row = (
                 f"{str(entry['num']).ljust(w_num)}  "
-                f"{entry['day'].ljust(w_day)}  "
-                f"{entry['date'].ljust(w_date)}  "
-                f"{artist_fmt.ljust(w_artist)}  "
-                f"{title_fmt.ljust(w_title)}  "
-                f"{album_fmt.ljust(w_album)}"
+                f"{colorize('date', entry['day'].ljust(w_day))}  "
+                f"{colorize('date', entry['date'].ljust(w_date))}  "
+                f"{colorize('artist', artist_fmt.ljust(w_artist))}  "
+                f"{colorize('track', title_fmt.ljust(w_title))}  "
+                f"{colorize('album', album_fmt.ljust(w_album))}"
             )
             print(row)
 
@@ -2494,7 +4785,7 @@ def spotify_oauth_app_configured():
 
 
 # Returns an expiration-aware Spotify OAuth app token through Spotipy's cache handler
-def spotify_get_access_token(sp_client_id, sp_client_secret):
+def spotify_get_access_token(sp_client_id, sp_client_secret, validate_credentials=False, force_refresh=False):
     global SP_OAUTH_MEMORY_CACHE_HANDLER
     try:
         from spotipy.cache_handler import CacheFileHandler, MemoryCacheHandler
@@ -2502,7 +4793,10 @@ def spotify_get_access_token(sp_client_id, sp_client_secret):
     except ImportError as error:
         raise RuntimeError("Spotipy is required for the Spotify OAuth app backend") from error
 
-    if SP_TOKENS_FILE:
+    if validate_credentials:
+        cache_handler = MemoryCacheHandler()
+        cache_description = "fresh validation memory"
+    elif SP_TOKENS_FILE:
         cache_handler = CacheFileHandler(cache_path=SP_TOKENS_FILE)
         cache_description = "file"
     else:
@@ -2511,20 +4805,20 @@ def spotify_get_access_token(sp_client_id, sp_client_secret):
         cache_handler = SP_OAUTH_MEMORY_CACHE_HANDLER
         cache_description = "memory"
 
-    auth_manager = SpotifyClientCredentials(client_id=sp_client_id, client_secret=sp_client_secret, requests_timeout=FUNCTION_TIMEOUT, cache_handler=cache_handler)
-    access_token = auth_manager.get_access_token(as_dict=False)
+    # Spotipy accepts a Session here and only falls back to building its own when this is a bool, which its annotation does not express
+    auth_manager = SpotifyClientCredentials(client_id=sp_client_id, client_secret=sp_client_secret, requests_timeout=FUNCTION_TIMEOUT, cache_handler=cache_handler, requests_session=SPOTIFY_SESSION)  # pyright: ignore[reportArgumentType]
+    access_token = auth_manager.get_access_token(as_dict=False, check_cache=False) if force_refresh else auth_manager.get_access_token(as_dict=False)
     if not access_token:
         raise RuntimeError("Spotify OAuth app token response was empty")
-    debug_print(f"Spotify OAuth app access token obtained through {cache_description} cache, token_len={len(access_token)}")
+    debug_print("Spotify OAuth app token", cache=cache_description, token_len=len(access_token), outcome="OK")
     return access_token
 
 
 # Fetches Spotify edge-server Unix time for anonymous token generation
 def spotify_fetch_server_time(session=SPOTIFY_SESSION):
     headers = {"Accept": "*/*", "User-Agent": SPOTIFY_WEB_USER_AGENT}
-    debug_print(f"HTTP HEAD {SPOTIFY_SERVER_TIME_URL} [Spotify server time]")
     response = session.head(SPOTIFY_SERVER_TIME_URL, headers=headers, timeout=FUNCTION_TIMEOUT)
-    debug_print(f"HTTP HEAD {SPOTIFY_SERVER_TIME_URL} [Spotify server time] -> {response.status_code}")
+    debug_print("HTTP HEAD", url=SPOTIFY_SERVER_TIME_URL, purpose="Spotify server time", timeout=f"{FUNCTION_TIMEOUT}s", status=response.status_code, outcome="OK" if response.status_code < 400 else "failed")
     response.raise_for_status()
     date_header = response.headers.get("Date")
     if not date_header:
@@ -2532,10 +4826,18 @@ def spotify_fetch_server_time(session=SPOTIFY_SESSION):
     return int(parsedate_to_datetime(date_header).timestamp())
 
 
+# Reports whether configured web-player cipher bytes are a non-empty sequence of plain integers, checked before
+# iterating because a single number written in place of the sequence is truthy and would raise instead of reporting
+def totp_cipher_bytes_are_valid(cipher_bytes: Any) -> bool:
+    if not isinstance(cipher_bytes, (list, tuple)) or not cipher_bytes:
+        return False
+    return all(isinstance(value, int) and not isinstance(value, bool) for value in cipher_bytes)
+
+
 # Builds a pyotp TOTP object from the configured Spotify web-player cipher bytes
 def generate_totp():
     cipher_bytes = SPOTIFY_TOTP_SECRET_CIPHER_BYTES
-    if not cipher_bytes or not all(isinstance(value, int) and not isinstance(value, bool) for value in cipher_bytes):
+    if not totp_cipher_bytes_are_valid(cipher_bytes):
         raise ValueError("SPOTIFY_TOTP_SECRET_CIPHER_BYTES must be a non-empty sequence of integers; refresh it with the spotify_monitor_secret_grabber tool if Spotify rotated the web-player secret")
     if not isinstance(SPOTIFY_TOTP_VERSION, int) or isinstance(SPOTIFY_TOTP_VERSION, bool) or SPOTIFY_TOTP_VERSION <= 0:
         raise ValueError("SPOTIFY_TOTP_VERSION must be a positive integer; refresh it with the spotify_monitor_secret_grabber tool if Spotify rotated the web-player secret")
@@ -2557,9 +4859,8 @@ def spotify_refresh_web_access_token(session=SPOTIFY_SESSION):
     for reason in ("transport", "init"):
         params = {"productType": "web-player", "reason": reason, "totp": otp_value, "totpServer": otp_value, "totpVer": SPOTIFY_TOTP_VERSION}
         try:
-            debug_print(f"HTTP GET {SPOTIFY_TOKEN_URL} [anonymous web token reason={reason}]")
             response = session.get(SPOTIFY_TOKEN_URL, params=params, headers=headers, timeout=FUNCTION_TIMEOUT)
-            debug_print(f"HTTP GET {SPOTIFY_TOKEN_URL} [anonymous web token reason={reason}] -> {response.status_code}")
+            debug_print("HTTP GET", url=SPOTIFY_TOKEN_URL, purpose="Spotify anonymous web token", reason=reason, timeout=f"{FUNCTION_TIMEOUT}s", status=response.status_code, outcome="OK" if response.status_code < 400 else "failed")
             response.raise_for_status()
             data = response.json()
             if not isinstance(data, dict):
@@ -2569,12 +4870,12 @@ def spotify_refresh_web_access_token(session=SPOTIFY_SESSION):
             expires_at = int(data.get("accessTokenExpirationTimestampMs", 0) / 1000)
             client_id = data.get("clientId", "")
             if access_token and expires_at and client_id:
-                debug_print(f"Anonymous Spotify web-player token obtained, token_len={len(access_token)}")
+                debug_print("Spotify anonymous web token", token_len=len(access_token), outcome="OK")
                 return {"access_token": access_token, "client_id": client_id, "expires_at": expires_at}
             last_error = "incomplete token data"
         except (req.RequestException, TypeError, ValueError) as error:
             last_error = type(error).__name__
-            debug_print(f"Anonymous Spotify web-player token request failed with {last_error}")
+            debug_print("Spotify anonymous web token", reason=reason, outcome="failed", error=f"{type(error).__name__}: {error}")
 
     raise RuntimeError(f"Spotify anonymous web-player token request failed: {last_error or 'unknown error'}")
 
@@ -2584,7 +4885,7 @@ def spotify_get_web_access_token_data():
     global SP_CACHED_WEB_ACCESS_TOKEN, SP_WEB_ACCESS_TOKEN_EXPIRES_AT, SP_CACHED_WEB_CLIENT_ID
     now = time.time()
     if SP_CACHED_WEB_ACCESS_TOKEN and SP_CACHED_WEB_CLIENT_ID and now < SP_WEB_ACCESS_TOKEN_EXPIRES_AT - SPOTIFY_WEB_TOKEN_EXPIRY_WINDOW:
-        debug_print("Using cached anonymous Spotify web-player access token")
+        debug_print("Spotify anonymous web token", source="cache", outcome="OK")
         return {"access_token": SP_CACHED_WEB_ACCESS_TOKEN, "client_id": SP_CACHED_WEB_CLIENT_ID, "expires_at": SP_WEB_ACCESS_TOKEN_EXPIRES_AT}
 
     token_data = spotify_refresh_web_access_token()
@@ -2619,9 +4920,8 @@ def spotify_discover_web_query_hash(operation_name, force=False):
         return cached_hash
 
     headers = {"Accept": "text/html,application/xhtml+xml", "User-Agent": SPOTIFY_WEB_USER_AGENT}
-    debug_print(f"HTTP GET {SPOTIFY_WEB_PLAYER_URL} [Spotify query discovery operation={operation_name}]")
-    response = SPOTIFY_SESSION.get(SPOTIFY_WEB_PLAYER_URL, headers=headers, timeout=FUNCTION_TIMEOUT)
-    debug_print(f"HTTP GET {SPOTIFY_WEB_PLAYER_URL} [Spotify query discovery operation={operation_name}] -> {response.status_code}")
+    response = SPOTIFY_SESSION.get(SPOTIFY_WEB_PLAYER_URL, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
+    debug_print("HTTP GET", url=SPOTIFY_WEB_PLAYER_URL, purpose="Spotify query discovery", query=operation_name, timeout=f"{FUNCTION_TIMEOUT}s", status=response.status_code, outcome="OK" if response.status_code < 400 else "failed")
     response.raise_for_status()
 
     script_urls = re.findall(r'<script[^>]+src=["\']([^"\']+)["\']', response.text, flags=re.IGNORECASE)
@@ -2633,9 +4933,8 @@ def spotify_discover_web_query_hash(operation_name, force=False):
     if not bundle_url:
         raise RuntimeError("Cannot find the Spotify desktop web-player JavaScript bundle")
 
-    debug_print(f"HTTP GET {bundle_url} [Spotify query bundle operation={operation_name}]")
-    bundle_response = SPOTIFY_SESSION.get(bundle_url, headers={"User-Agent": SPOTIFY_WEB_USER_AGENT}, timeout=FUNCTION_TIMEOUT)
-    debug_print(f"HTTP GET {bundle_url} [Spotify query bundle operation={operation_name}] -> {bundle_response.status_code}")
+    bundle_response = SPOTIFY_SESSION.get(bundle_url, headers={"User-Agent": SPOTIFY_WEB_USER_AGENT}, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
+    debug_print("HTTP GET", url=bundle_url, purpose="Spotify query bundle", query=operation_name, timeout=f"{FUNCTION_TIMEOUT}s", status=bundle_response.status_code, outcome="OK" if bundle_response.status_code < 400 else "failed")
     bundle_response.raise_for_status()
 
     discovered_hashes = {}
@@ -2651,7 +4950,7 @@ def spotify_discover_web_query_hash(operation_name, force=False):
     discovered_hash = discovered_hashes.get(operation_name, "")
     if not discovered_hash:
         raise RuntimeError(f"Cannot find the {operation_name} persisted-query hash in the Spotify web-player bundle")
-    debug_print(f"Discovered Spotify {operation_name} persisted-query hash from {bundle_url}")
+    debug_print("Spotify persisted-query hash discovery", query=operation_name, bundle=bundle_url, outcome="OK")
     return discovered_hash
 
 
@@ -2679,9 +4978,8 @@ def spotify_web_metadata_query(operation_name, variables):
         force_query_hash = False
         headers = {"Accept": "application/json", "App-Platform": "WebPlayer", "Authorization": f"Bearer {token_data['access_token']}", "Client-Id": token_data["client_id"], "Content-Type": "application/json", "User-Agent": SPOTIFY_WEB_USER_AGENT}
         payload = {"extensions": {"persistedQuery": {"sha256Hash": query_hash, "version": 1}}, "operationName": operation_name, "variables": variables}
-        debug_print(f"HTTP POST {SPOTIFY_WEB_QUERY_URL} [Spotify web metadata operation={operation_name}]")
-        response = SPOTIFY_SESSION.post(SPOTIFY_WEB_QUERY_URL, headers=headers, json=payload, timeout=FUNCTION_TIMEOUT)
-        debug_print(f"HTTP POST {SPOTIFY_WEB_QUERY_URL} [Spotify web metadata operation={operation_name}] -> {response.status_code}")
+        response = SPOTIFY_SESSION.post(SPOTIFY_WEB_QUERY_URL, headers=headers, json=payload, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
+        debug_print("HTTP POST", url=SPOTIFY_WEB_QUERY_URL, purpose="Spotify web metadata", query=operation_name, timeout=f"{FUNCTION_TIMEOUT}s", status=response.status_code, outcome="OK" if response.status_code < 400 else "failed")
 
         try:
             json_response = response.json()
@@ -2698,7 +4996,7 @@ def spotify_web_metadata_query(operation_name, variables):
             SP_WEB_ACCESS_TOKEN_EXPIRES_AT = 0
             SP_CACHED_WEB_CLIENT_ID = ""
             token_refreshed = True
-            debug_print("Anonymous Spotify web-player token was rejected, refreshing it once")
+            debug_print("Spotify anonymous web token refresh", query=operation_name, reason="token rejected", outcome="degraded")
             continue
 
         persisted_query_rejected = bool(errors) and any(marker in error_message.lower() for marker in ("persistedquery", "persisted query", "sha256"))
@@ -2706,7 +5004,7 @@ def spotify_web_metadata_query(operation_name, variables):
             spotify_clear_web_query_hash(operation_name)
             hash_refreshed = True
             force_query_hash = True
-            debug_print(f"Spotify {operation_name} persisted query was rejected, rediscovering its hash once")
+            debug_print("Spotify persisted-query hash refresh", query=operation_name, reason="query rejected", outcome="degraded")
             continue
 
         if errors:
@@ -2785,7 +5083,7 @@ def spotify_web_search_track_uris(search_term):
         track_uri = item_data.get("uri", "") if isinstance(item_data, dict) else ""
         if track_uri.startswith("spotify:track:") and track_uri not in track_uris:
             track_uris.append(track_uri)
-    debug_print(f"Spotify anonymous search returned {len(track_uris)} track URIs")
+    debug_print("Spotify anonymous search", term=search_term, tracks=len(track_uris), outcome="OK")
     return track_uris
 
 
@@ -2833,16 +5131,16 @@ def spotify_search_process_track_items(track_items, original_artist, original_tr
         cleaned_track_match = bool(cleaned_track and item_name.casefold() == cleaned_track.casefold())
         album_match = bool(original_album and item_album_name and item_album_name.casefold() == original_album.casefold())
 
-        debug_print(f"  Found item: {item_artists_str} - {item_name} [{item_album_name}] ({item_duration}s)")
+        debug_print("Spotify search candidate", artist=item_artists_str, track=item_name, album=item_album_name, duration=f"{item_duration}s")
 
         # Artist match check
         artist_match = any(original_artist.casefold() in a.casefold() for a in item_artists_list)
         alias_match = exact_track_match and album_match
         if not artist_match and not alias_match:
-            debug_print("    Skipping item (artist mismatch)")
+            debug_print("Spotify search candidate", track=item_name, outcome="skipped", reason="artist mismatch")
             continue
         if not artist_match:
-            debug_print("    Accepting artist alias match through exact track and album")
+            debug_print("Spotify search candidate", track=item_name, outcome="OK", reason="artist alias matched through exact track and album")
 
         score = 0
         if exact_track_match:
@@ -2855,14 +5153,14 @@ def spotify_search_process_track_items(track_items, original_artist, original_tr
         # Album match bonus (+20 points)
         if album_match:
             score += 20
-            debug_print("    Album match! (+20 bonus)")
+            debug_print("Spotify search candidate scoring", track=item_name, bonus="album match", outcome="OK")
 
         if score > best_score:
             best_score = score
             best_item = item
-            debug_print(f"    => New best match! (score={score})")
+            debug_print("Spotify search candidate scoring", track=item_name, score=score, best=True, outcome="OK")
         else:
-            debug_print(f"    => Match not better than current best (score={score})")
+            debug_print("Spotify search candidate scoring", track=item_name, score=score, best=False, outcome="OK")
 
     if best_item and best_score > 0:
         sp_track_uri_id = best_item.get("id")
@@ -2875,16 +5173,15 @@ def spotify_search_process_track_items(track_items, original_artist, original_tr
 def spotify_oauth_search_track_items(access_token, search_query, strategy):
     headers = {"Authorization": f"Bearer {access_token}", "User-Agent": SPOTIFY_WEB_USER_AGENT}
     params = {"q": search_query, "type": "track", "limit": 5}
-    debug_print(f"HTTP GET {SPOTIFY_OAUTH_SEARCH_URL} [Spotify OAuth app search strategy={strategy}]")
-    response = req.get(SPOTIFY_OAUTH_SEARCH_URL, params=params, headers=headers, timeout=FUNCTION_TIMEOUT)
-    debug_print(f"HTTP GET {SPOTIFY_OAUTH_SEARCH_URL} [Spotify OAuth app search strategy={strategy}] -> {response.status_code}")
+    response = req.get(SPOTIFY_OAUTH_SEARCH_URL, params=params, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
+    debug_print("HTTP GET", url=SPOTIFY_OAUTH_SEARCH_URL, purpose="Spotify OAuth app search", strategy=strategy, timeout=f"{FUNCTION_TIMEOUT}s", status=response.status_code, outcome="OK" if response.status_code < 400 else "failed")
     response.raise_for_status()
     json_response = response.json()
     tracks = json_response.get("tracks") if isinstance(json_response, dict) else None
     if not isinstance(tracks, dict):
         raise RuntimeError("Spotify OAuth app search returned no track collection")
     items = tracks.get("items") or []
-    debug_print(f"Spotify OAuth app search strategy={strategy} returned {len(items)} track items")
+    debug_print("Spotify OAuth app search", strategy=strategy, tracks=len(items), outcome="OK")
     return items
 
 
@@ -2913,12 +5210,15 @@ def spotify_search_song_trackid_duration_oauth(access_token, artist, track, albu
     for strategy, search_query in dict.fromkeys(strategies):
         try:
             track_items = spotify_oauth_search_track_items(access_token, search_query, strategy)
+        except req.HTTPError:
+            raise
         except (req.RequestException, RuntimeError, TypeError, ValueError) as error:
-            debug_print(f"Spotify OAuth app search strategy={strategy} failed with {type(error).__name__}")
-            continue
+            exit_if_out_of_file_descriptors(error)
+            debug_print("Spotify OAuth app search", strategy=strategy, outcome="failed", error=f"{type(error).__name__}: {error}")
+            break
         sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(track_items, artist, track, cleaned_track=track_cleaned or None, original_album=album)
         if sp_track_uri_id:
-            debug_print(f"Spotify OAuth app metadata matched track ID '{sp_track_uri_id}' with duration {sp_track_duration}s")
+            debug_print("Spotify OAuth app metadata match", track_id=sp_track_uri_id, duration=f"{sp_track_duration}s", outcome="OK")
             return sp_track_uri_id, sp_track_duration
 
     return None, 0
@@ -2941,45 +5241,87 @@ def spotify_search_song_trackid_duration(artist, track, album=""):
         search_terms.append(f"{artist} {track_cleaned}")
 
     for search_term in dict.fromkeys(search_terms):
-        debug_print(f"Searching Spotify anonymous web metadata for artist='{artist}', track='{track}', album='{album}'")
+        debug_print("Spotify anonymous web metadata search", artist=artist, track=track, album=album)
         track_items = []
         for track_uri in spotify_web_search_track_uris(search_term):
             try:
                 track_items.append(spotify_get_track_info_web(track_uri))
             except (req.RequestException, RuntimeError, TypeError, ValueError) as error:
-                debug_print(f"Spotify getTrack candidate failed with {type(error).__name__}")
+                exit_if_out_of_file_descriptors(error)
+                debug_print("Spotify getTrack candidate", outcome="failed", error=f"{type(error).__name__}: {error}")
 
         sp_track_uri_id, sp_track_duration = spotify_search_process_track_items(track_items, artist, track, cleaned_track=track_cleaned or None, original_album=album)
         if sp_track_uri_id:
-            debug_print(f"Spotify anonymous web metadata matched track ID '{sp_track_uri_id}' with duration {sp_track_duration}s")
+            debug_print("Spotify anonymous web metadata match", track_id=sp_track_uri_id, duration=f"{sp_track_duration}s", outcome="OK")
             return sp_track_uri_id, sp_track_duration
 
     return None, 0
 
 
-# Resolves Spotify metadata through OAuth app search then anonymous web-player search
+# Returns the app search cooldown without shortening a valid Retry-After delay
+def spotify_oauth_search_cooldown(response):
+    if response is None or response.status_code != 429:
+        return float(SPOTIFY_OAUTH_SEARCH_RECHECK_SECONDS)
+    raw = response.headers.get("Retry-After", "")
+    try:
+        delay = float(raw)
+    except (TypeError, ValueError):
+        try:
+            delay = parsedate_to_datetime(raw).timestamp() - time.time()
+        except (TypeError, ValueError, OverflowError):
+            return 60.0
+    return max(1.0, delay) if finite_number(delay) else 60.0
+
+
+# Resolves Spotify metadata through available OAuth app search then anonymous web-player search
 def spotify_resolve_track_metadata(artist, track, album=""):
     sp_track_uri_id = None
     sp_track_duration = 0
 
-    if spotify_oauth_app_configured():
-        try:
-            access_token = spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET)
-            sp_track_uri_id, sp_track_duration = spotify_search_song_trackid_duration_oauth(access_token, artist, track, album)
-            debug_print(f"Spotify OAuth app metadata result: id='{sp_track_uri_id}', duration={sp_track_duration}s")
-        except Exception as error:
-            debug_print(f"Spotify OAuth app metadata failed with {type(error).__name__}")
+    if spotify_oauth_app_configured() and time.monotonic() >= SP_OAUTH_SEARCH_COOLDOWNS.get(SP_CLIENT_ID, 0):
+        for attempt in range(2):
+            try:
+                access_token = spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET, force_refresh=True) if attempt else spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET)
+                sp_track_uri_id, sp_track_duration = spotify_search_song_trackid_duration_oauth(access_token, artist, track, album)
+                SP_OAUTH_SEARCH_COOLDOWNS.pop(SP_CLIENT_ID, None)
+                debug_print("Spotify OAuth app metadata", track_id=sp_track_uri_id, duration=f"{sp_track_duration}s", outcome="OK")
+                break
+            except req.HTTPError as error:
+                status = error.response.status_code if error.response is not None else None
+                if status == 401 and attempt == 0:
+                    debug_print("Spotify OAuth app metadata", status=status, outcome="degraded", recovery="refresh token")
+                    continue
+                if status in {401, 403, 429}:
+                    delay = spotify_oauth_search_cooldown(error.response)
+                    now = time.monotonic()
+                    for client_id, until in list(SP_OAUTH_SEARCH_COOLDOWNS.items()):
+                        if until <= now:
+                            SP_OAUTH_SEARCH_COOLDOWNS.pop(client_id, None)
+                    SP_OAUTH_SEARCH_COOLDOWNS[SP_CLIENT_ID] = now + delay
+                    debug_print("Spotify OAuth app metadata", status=status, retry_after=delay, fallback="anonymous web player")
+                else:
+                    debug_print("Spotify OAuth app metadata", outcome="failed", error=f"{type(error).__name__}: {error}")
+                break
+            except Exception as error:
+                if is_too_many_open_files(error):
+                    print_recovery_advice(classify_recovery_error(error))
+                    raise SystemExit(1)
+                debug_print("Spotify OAuth app metadata", outcome="failed", error=f"{type(error).__name__}: {error}")
+                break
 
     if not sp_track_uri_id or sp_track_duration <= 0:
         try:
             web_track_uri_id, web_track_duration = spotify_search_song_trackid_duration(artist, track, album)
-            debug_print(f"Spotify anonymous web metadata result: id='{web_track_uri_id}', duration={web_track_duration}s")
+            debug_print("Spotify anonymous web metadata", track_id=web_track_uri_id, duration=f"{web_track_duration}s", outcome="OK")
             if web_track_uri_id:
                 sp_track_uri_id = web_track_uri_id
             if web_track_duration > 0:
                 sp_track_duration = web_track_duration
         except Exception as error:
-            debug_print(f"Spotify anonymous web metadata failed with {type(error).__name__}")
+            if is_too_many_open_files(error):
+                print_recovery_advice(classify_recovery_error(error))
+                raise SystemExit(1)
+            debug_print("Spotify anonymous web metadata", outcome="failed", error=f"{type(error).__name__}: {error}")
 
     return sp_track_uri_id, sp_track_duration
 
@@ -3035,7 +5377,8 @@ def spotify_win_play_song(sp_track_uri_id, method=SPOTIFY_WINDOWS_PLAYING_METHOD
     elif method == "spotify-cmd":   # spotify-cmd
         subprocess.call((f"{WIN_SPOTIFY_APP_PATH} --uri=spotify:track:{sp_track_uri_id}"), shell=True)
     else:                           # trigger-url - just trigger track URL in the client
-        getattr(os, "startfile")(spotify_convert_uri_to_url(f"spotify:track:{sp_track_uri_id}"))
+        # os.startfile exists only on Windows, so the lookup stays dynamic to keep the type checker quiet on other platforms
+        getattr(os, "startfile")(spotify_convert_uri_to_url(f"spotify:track:{sp_track_uri_id}"))  # noqa: B009
 
 
 # Raised when private values cannot be checked or saved safely
@@ -3058,11 +5401,10 @@ def _dotenv_contains_key(destination, key) -> bool:
     if not destination_path.exists():
         return False
     try:
-        lines = destination_path.read_text(encoding="utf-8").splitlines()
+        content = destination_path.read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         raise PrivateSettingsError(f"Could not read private settings file '{destination_path}'. Check that it is a readable UTF-8 file") from None
-    assignment_pattern = re.compile(rf"^\s*(?:export\s+)?{re.escape(key)}\s*=")
-    return any(assignment_pattern.match(line) for line in lines)
+    return any(binding.key == key for binding in _dotenv_bindings(content))
 
 
 # Quotes one private value for lossless parsing by python-dotenv
@@ -3071,6 +5413,13 @@ def _format_dotenv_value(value: str) -> str:
         raise TypeError("Dotenv values must be strings")
     escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\r", "\\r").replace("\n", "\\n")
     return f'"{escaped}"'
+
+
+# Returns the dotenv parser's own bindings for one file's text, where a quoted value written across several lines is one binding
+def _dotenv_bindings(text: str):
+    from io import StringIO
+    from dotenv.parser import parse_stream
+    return list(parse_stream(StringIO(text)))
 
 
 # Updates allowed private values in a dotenv file through an atomic replacement
@@ -3085,46 +5434,52 @@ def update_dotenv_file(destination, updates):
             raise TypeError(f"Dotenv value for {key} must be a string")
     destination_path = Path(destination).expanduser()
     destination_path.parent.mkdir(parents=True, exist_ok=True)
-    existing_lines = destination_path.read_text(encoding="utf-8").splitlines() if destination_path.exists() else []
+    existing_bindings = _dotenv_bindings(destination_path.read_text(encoding="utf-8") if destination_path.exists() else "")
     update_keys = {key for key, _ in update_items}
     values_by_key = dict(update_items)
     seen_keys = set()
-    output_lines = []
-    assignment_pattern = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
-    for line in existing_lines:
-        match = assignment_pattern.match(line)
-        key = match.group(1) if match else None
-        if key not in update_keys:
-            output_lines.append(line)
+    output_parts = []
+    # Rebuilt from the parser's own bindings rather than physical lines, since a quoted value can span several
+    # of them and replacing only the first leaves the rest of the old secret behind as broken syntax
+    for binding in existing_bindings:
+        original = binding.original.string
+        blank_prefix = original[:len(original) - len(original.lstrip("\r\n"))]
+        if binding.key is None or binding.key not in update_keys:
+            output_parts.append(original)
             continue
-        if key in seen_keys:
+        if binding.key in seen_keys:
+            output_parts.append(blank_prefix)
             continue
-        output_lines.append(f"{key}={_format_dotenv_value(values_by_key[key])}")
-        seen_keys.add(key)
+        seen_keys.add(binding.key)
+        # A secret cleared by its owner is removed rather than emptied, so a disabled value cannot linger here
+        if not values_by_key[binding.key]:
+            output_parts.append(blank_prefix)
+            continue
+        # An "export " the owner wrote is kept, since dropping it changes what a shell sourcing the file exports
+        head = original[len(blank_prefix):]
+        # Keep key quotes out of the indentation and export prefix
+        written_prefix = head[:head.index(binding.key)].rstrip("'")
+        output_parts.append(f"{blank_prefix}{written_prefix}{binding.key}={_format_dotenv_value(values_by_key[binding.key])}\n")
+    content = "".join(output_parts)
+    # A file that did not end in a newline would otherwise take the first new assignment onto its last line
+    if content and not content.endswith("\n"):
+        content += "\n"
     for key, value in update_items:
-        if key not in seen_keys:
-            output_lines.append(f"{key}={_format_dotenv_value(value)}")
+        if key not in seen_keys and value:
+            content += f"{key}={_format_dotenv_value(value)}\n"
             seen_keys.add(key)
-    content = "\n".join(output_lines) + ("\n" if output_lines else "")
-    temporary_path = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", prefix=f".{destination_path.name}.", suffix=".tmp", dir=str(destination_path.parent), delete=False) as temporary_file:
-            temporary_path = Path(temporary_file.name)
-            temporary_file.write(content)
-            temporary_file.flush()
-            os.fsync(temporary_file.fileno())
-        if os.name == "posix":
-            os.chmod(temporary_path, 0o600)
-        os.replace(temporary_path, destination_path)
-        temporary_path = None
-    finally:
-        if temporary_path is not None and temporary_path.exists():
-            temporary_path.unlink()
-    return str(destination_path)
+    # Checked before it replaces the file, so a rewrite can never publish a secret the next run cannot read back
+    rewritten = {binding.key: binding.value for binding in _dotenv_bindings(content) if binding.key is not None}
+    if any(rewritten.get(key, "") != value for key, value in update_items):
+        raise ValueError(f"Updating '{destination_path}' would not store the requested values")
+
+    # No backup here on purpose: a rotated secret must not be left behind in a second file
+    return write_file_atomically(destination_path, content, mode=0o600)
 
 
 # Collects hidden private values and saves them together after overwrite confirmation
-def _run_set_private_values(option_name: str, prompts: List[Tuple[str, str]], env_file=None, interactive=None, input_func=None, getpass_func=None) -> str:
+@suppresses_debug_output
+def _run_set_private_values(option_name: str, prompts: List[Tuple[str, str]], env_file=None, interactive=None, input_func=None, getpass_func=None, guidance: Optional[List[str]] = None, subject: str = "private settings", guide_url: Optional[str] = None, plural: bool = False) -> str:
     destination = resolve_private_settings_path(env_file)
     terminal_is_interactive = sys.stdin.isatty() if interactive is None else interactive
     if not terminal_is_interactive:
@@ -3133,21 +5488,26 @@ def _run_set_private_values(option_name: str, prompts: List[Tuple[str, str]], en
     prompt = input if input_func is None else input_func
     if existing_keys:
         try:
-            confirmed = prompt(f"Replace {', '.join(existing_keys)} in '{destination}'? [y/N]: ").strip().casefold() in ("y", "yes")
+            confirmed = read_interactively(prompt, f"Replace {', '.join(existing_keys)} in '{destination}'? [y/N]: ").strip().casefold() in ("y", "yes")
         except (EOFError, KeyboardInterrupt):
-            confirmed = False
+            # Ctrl+C echoes nothing, so without this the error would continue the prompt line
+            print()
+            raise RecoveryError(secret_entry_cancelled_advice(subject, option_name, guide_url, plural=plural)) from None
         if not confirmed:
-            raise PrivateSettingsError("Private settings update was cancelled. The dotenv file was not changed")
+            raise RecoveryError(secret_replacement_declined_advice(subject, option_name, guide_url, plural=plural))
+    for line in guidance or []:
+        print(f"* {line}")
     hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
     updates = {}
     try:
         for key, prompt_text in prompts:
-            value = hidden_prompt(prompt_text).strip()
+            value = read_secret_interactively(hidden_prompt, prompt_text).strip()
             if not value or "\r" in value or "\n" in value:
                 raise PrivateSettingsError(f"No valid value was entered for {key}. The dotenv file was not changed")
             updates[key] = value
     except (EOFError, KeyboardInterrupt):
-        raise PrivateSettingsError("Private settings entry was cancelled. The dotenv file was not changed") from None
+        print()
+        raise RecoveryError(secret_entry_cancelled_advice(subject, option_name, guide_url, plural=plural)) from None
     try:
         update_dotenv_file(destination, updates)
     except PrivateSettingsError:
@@ -3159,7 +5519,115 @@ def _run_set_private_values(option_name: str, prompts: List[Tuple[str, str]], en
     return str(destination)
 
 
+# Without these there is no email channel at all, which is a different question from what one delivery needs
+MAIL_DESTINATION_SETTINGS = ("SMTP_HOST", "SENDER_EMAIL", "RECEIVER_EMAIL")
+MAIL_SIGN_IN_SETTINGS = ("SMTP_HOST", "SMTP_USER", "SENDER_EMAIL", "RECEIVER_EMAIL")
+# Every send signs in first, so a delivery needs the password as well
+MAIL_DELIVERY_SETTINGS = ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "SENDER_EMAIL", "RECEIVER_EMAIL")
+
+
+# Returns the named mail settings that are still unset, so every caller reports the same missing ones
+def mail_settings_missing(names=MAIL_DESTINATION_SETTINGS):
+    return [name for name in names if not doctor_value_is_set(str(globals().get(name) or ""))]
+
+
+# Signs in while removing the attempted password from SMTP rejection replies before they can be rendered
+def smtp_login(connection, username, password):
+    try:
+        return connection.login(username, password)
+    except smtplib.SMTPResponseException as error:
+        reply = error.smtp_error
+        if password:
+            if isinstance(reply, bytes):
+                reply = reply.replace(str(password).encode("utf-8"), b"<redacted>")
+            else:
+                reply = str(reply).replace(str(password), "<redacted>")
+        error.smtp_error = reply
+        error.args = (error.smtp_code, reply)
+        raise
+
+
+# Signs in to the configured mail server with one entered password, so nothing is saved that cannot deliver
+def smtp_sign_in(password, timeout=15):
+    global SMTP_PASSWORD
+
+    candidate = str(password or "")
+    if not candidate or not doctor_value_is_set(candidate):
+        raise PrivateSettingsError("No SMTP password was entered. The dotenv file was not changed")
+    missing = mail_settings_missing(MAIL_SIGN_IN_SETTINGS)
+    if missing:
+        raise PrivateSettingsError(f"The mail server settings are incomplete, {join_setting_names(missing, 'and')} {'is' if len(missing) == 1 else 'are'} not set")
+    previous_password = SMTP_PASSWORD
+    SMTP_PASSWORD = candidate
+    smtp_object = None
+    try:
+        smtp_object = smtp_connect_and_login(SMTP_SSL, smtp_timeout=timeout)
+    finally:
+        if smtp_object is not None:
+            try:
+                smtp_object.quit()
+            except Exception as cleanup_error:
+                debug_swallowed_exception("SMTP session cleanup", cleanup_error)
+        SMTP_PASSWORD = previous_password
+    return str(SMTP_USER)
+
+
+@suppresses_debug_output
+# Privately checks one SMTP password against the mail server and atomically stores it
+def run_set_smtp_password(env_file=None, interactive=None, input_func=None, getpass_func=None, sign_in=None) -> str:
+    destination = resolve_private_settings_path(env_file)
+    terminal_is_interactive = sys.stdin.isatty() if interactive is None else interactive
+    if not terminal_is_interactive:
+        raise PrivateSettingsError("--set-smtp-password requires an interactive terminal so the password stays hidden")
+    # Checked before the prompts, so nobody types a password only to be told the mail server was never configured
+    missing = mail_settings_missing(MAIL_SIGN_IN_SETTINGS)
+    if missing:
+        raise PrivateSettingsError(f"The mail server settings are incomplete, {join_setting_names(missing, 'and')} {'is' if len(missing) == 1 else 'are'} not set")
+    prompt = input if input_func is None else input_func
+    if _dotenv_contains_key(destination, "SMTP_PASSWORD"):
+        try:
+            confirmed = read_interactively(prompt, f"Replace SMTP_PASSWORD in '{destination}'? [y/N]: ").strip().casefold() in ("y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            raise RecoveryError(secret_entry_cancelled_advice("SMTP password", "--set-smtp-password", SMTP_GUIDE_URL)) from None
+        if not confirmed:
+            raise RecoveryError(secret_replacement_declined_advice("SMTP password", "--set-smtp-password", SMTP_GUIDE_URL))
+    print(f"* The password is checked by signing in to {SMTP_HOST} as {SMTP_USER}. Nothing is sent")
+    print(colorize_links(f"* Guide: {SMTP_GUIDE_URL}"))
+    hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
+    try:
+        smtp_password = str(read_secret_interactively(hidden_prompt, "Enter the SMTP password (input hidden): "))
+    except (EOFError, KeyboardInterrupt):
+        print()
+        raise RecoveryError(secret_entry_cancelled_advice("SMTP password", "--set-smtp-password", SMTP_GUIDE_URL)) from None
+    check = smtp_sign_in if sign_in is None else sign_in
+    try:
+        signed_in_user = check(smtp_password, timeout=DOCTOR_SMTP_TIMEOUT)
+    except PrivateSettingsError:
+        raise
+    except Exception as exc:
+        # The sign-in restores the previous password before the failure reaches here, so the value that was tried
+        # is passed to the redaction explicitly rather than left to the global it would otherwise read
+        raise PrivateSettingsError(f"The mail server did not accept the password: {type(exc).__name__}: {sanitize_error_text(exc, (smtp_password,))}. The dotenv file was not changed") from None
+    try:
+        update_dotenv_file(destination, {"SMTP_PASSWORD": smtp_password})
+    except PrivateSettingsError:
+        raise
+    except Exception:
+        raise PrivateSettingsError(f"Could not save the SMTP password in '{destination}'. Check file permissions or choose another path with --env-file") from None
+    print(f"* The mail server accepted the password for {signed_in_user}")
+    print(f"* Updated private settings file: {destination}")
+    # Startup loads the dotenv file without overriding the environment, so a saved replacement that an export
+    # shadows would never be read. The run would keep failing with the password that was just proven good
+    if os.environ.get("SMTP_PASSWORD"):
+        print("* SMTP_PASSWORD is exported in this environment and an export wins at startup, so the next run uses that value rather than the one just saved")
+        print(colorize("info", "To fix: Unset the exported SMTP_PASSWORD to use the saved one"))
+    print(f"* Test it with: {render_command(['--send-test-email'], env_path=destination)}")
+    return str(destination)
+
+
 # Safely stores one privately entered webhook URL
+@suppresses_debug_output
 def run_set_webhook_url(env_file=None, interactive=None, input_func=None, getpass_func=None) -> str:
     destination = resolve_private_settings_path(env_file)
     terminal_is_interactive = sys.stdin.isatty() if interactive is None else interactive
@@ -3168,16 +5636,21 @@ def run_set_webhook_url(env_file=None, interactive=None, input_func=None, getpas
     prompt = input if input_func is None else input_func
     if _dotenv_contains_key(destination, "WEBHOOK_URL"):
         try:
-            confirmed = prompt(f"Replace WEBHOOK_URL in '{destination}'? [y/N]: ").strip().casefold() in ("y", "yes")
+            confirmed = read_interactively(prompt, f"Replace WEBHOOK_URL in '{destination}'? [y/N]: ").strip().casefold() in ("y", "yes")
         except (EOFError, KeyboardInterrupt):
-            confirmed = False
+            print()
+            raise RecoveryError(secret_entry_cancelled_advice("webhook URL", "--set-webhook-url", WEBHOOK_GUIDE_URL)) from None
         if not confirmed:
-            raise PrivateSettingsError("Webhook setup was cancelled. The dotenv file was not changed")
+            raise RecoveryError(secret_replacement_declined_advice("webhook URL", "--set-webhook-url", WEBHOOK_GUIDE_URL))
+    print("* Discord: Edit Channel -> Integrations -> Webhooks -> New Webhook -> Copy Webhook URL")
+    print(colorize_links("* ntfy: the complete topic URL, such as https://ntfy.sh/your-private-topic"))
+    print(colorize_links(f"* Guide: {WEBHOOK_GUIDE_URL}"))
     hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
     try:
-        webhook_url = hidden_prompt("Paste the Discord or ntfy webhook URL (input hidden): ").strip()
+        webhook_url = read_secret_interactively(hidden_prompt, "Paste the Discord or ntfy webhook URL (input hidden): ").strip()
     except (EOFError, KeyboardInterrupt):
-        raise PrivateSettingsError("Webhook setup was cancelled. The dotenv file was not changed") from None
+        print()
+        raise RecoveryError(secret_entry_cancelled_advice("webhook URL", "--set-webhook-url", WEBHOOK_GUIDE_URL)) from None
     if not validate_webhook_url(webhook_url):
         raise PrivateSettingsError("That does not look like a complete HTTPS webhook URL. The dotenv file was not changed")
     try:
@@ -3186,20 +5659,32 @@ def run_set_webhook_url(env_file=None, interactive=None, input_func=None, getpas
         raise PrivateSettingsError(f"Could not save the webhook URL in '{destination}'. Check file permissions or choose another path with --env-file") from None
     print("* Webhook URL looks valid")
     print(f"* Updated private settings file: {destination}")
-    print("* Test it with: lastfm_monitor --send-test-webhook")
+    print(f"* Test it with: {render_command(['--send-test-webhook'], env_path=destination)}")
     return str(destination)
 
 
 # Safely stores privately entered Last.fm API credentials
+@suppresses_debug_output
 def run_set_lastfm_credentials(env_file=None, interactive=None, input_func=None, getpass_func=None) -> str:
     prompts = [("LASTFM_API_KEY", "Enter the Last.fm API key privately: "), ("LASTFM_API_SECRET", "Enter the Last.fm shared secret privately: ")]
-    return _run_set_private_values("--set-lastfm-credentials", prompts, env_file, interactive, input_func, getpass_func)
+    guidance = [
+        f"Create your API key and shared secret at {LASTFM_API_REGISTRATION_URL}",
+        f"View the credentials of an application you already registered at {LASTFM_API_ACCOUNTS_URL}",
+        f"Guide: {LASTFM_API_GUIDE_URL}",
+    ]
+    return _run_set_private_values("--set-lastfm-credentials", prompts, env_file, interactive, input_func, getpass_func, guidance, subject="Last.fm API credentials", guide_url=LASTFM_API_GUIDE_URL, plural=True)
 
 
 # Safely stores privately entered Spotify OAuth app credentials
+@suppresses_debug_output
 def run_set_spotify_credentials(env_file=None, interactive=None, input_func=None, getpass_func=None) -> str:
     prompts = [("SP_CLIENT_ID", "Enter the Spotify client ID privately: "), ("SP_CLIENT_SECRET", "Enter the Spotify client secret privately: ")]
-    return _run_set_private_values("--set-spotify-credentials", prompts, env_file, interactive, input_func, getpass_func)
+    guidance = [
+        f"Create an app at {SPOTIFY_DASHBOARD_URL} with 'Web API' selected and a redirect URI of http://127.0.0.1:1234",
+        "Then copy its Client ID and, through 'View client secret', its Client Secret.",
+        f"Guide: {SPOTIFY_APP_GUIDE_URL}",
+    ]
+    return _run_set_private_values("--set-spotify-credentials", prompts, env_file, interactive, input_func, getpass_func, guidance, subject="Spotify OAuth app credentials", guide_url=SPOTIFY_APP_GUIDE_URL, plural=True)
 
 
 # Finds an optional config file
@@ -3210,7 +5695,12 @@ def find_config_file(cli_path=None):
       2) ./{DEFAULT_CONFIG_FILENAME}
       3) ~/.{DEFAULT_CONFIG_FILENAME}
       4) script-directory/{DEFAULT_CONFIG_FILENAME}
+
+    The literal 'none' selects no file at all, which also switches the search off.
     """
+
+    if CONFIG_DISCOVERY_DISABLED or str(cli_path or "").casefold() == "none":
+        return None
 
     if cli_path:
         p = Path(os.path.expanduser(cli_path))
@@ -3228,16 +5718,221 @@ def find_config_file(cli_path=None):
     return None
 
 
-# Resolves an executable path by checking if it's a valid file or searching in $PATH
-def resolve_executable(path):
-    if os.path.isfile(path) and os.access(path, os.X_OK):
-        return path
+# Keeps argparse from colouring its own help, so the help screen is coloured by this tool alone and --no-color is
+# not left with a second palette to silence. From Python 3.14 argparse colours the help by default on a terminal
+def argparse_color_kwargs() -> dict[str, Any]:
+    return {"color": False} if sys.version_info >= (3, 14) else {}
 
-    found = shutil.which(path)
-    if found:
-        return found
 
-    raise FileNotFoundError(f"Could not find executable '{path}'")
+# Reads the --config-file path straight from the raw arguments, for the settings needed before argparse runs
+def early_config_file_argument(arguments=None):
+    values = list(sys.argv[1:] if arguments is None else arguments)
+    for index, argument in enumerate(values):
+        if argument == "--config-file" and index + 1 < len(values):
+            return values[index + 1]
+        if argument.startswith("--config-file="):
+            return argument.split("=", 1)[1]
+    return None
+
+
+# Applies the terminal settings needed before argument parsing, leaving any failure to normal config loading
+def apply_early_output_config():
+    global CLEAR_SCREEN, COLORED_OUTPUT, COLOR_THEME
+    try:
+        cli_path = early_config_file_argument()
+        if cli_path is not None and cli_path.casefold() == "none":
+            # Config discovery is disabled for this run, so there is nothing to peek at
+            return
+        config_path = find_config_file(os.path.expanduser(cli_path) if cli_path else None)
+        if not config_path:
+            return
+        values = parse_config_content(Path(config_path).read_text(encoding="utf-8"), str(config_path))
+    except (MemoryError, OSError, RecursionError, SyntaxError, UnicodeError, ValueError):
+        return
+    if isinstance(values.get("CLEAR_SCREEN"), bool):
+        CLEAR_SCREEN = values["CLEAR_SCREEN"]
+    if isinstance(values.get("COLORED_OUTPUT"), bool):
+        COLORED_OUTPUT = values["COLORED_OUTPUT"]
+    # --help is printed and exited from inside argparse, long before the config load, so the help_* overrides
+    # have to be here or they could never colour the one screen they name. Unusable styles are dropped downstream
+    if isinstance(values.get("COLOR_THEME"), dict):
+        COLOR_THEME = values["COLOR_THEME"]
+
+
+# Settings an older version wrote that this version no longer defines, ignored instead of rejected
+RETIRED_CONFIG_SETTINGS = frozenset(("ERROR_500_NUMBER_LIMIT", "ERROR_500_TIME_LIMIT", "ERROR_NETWORK_ISSUES_NUMBER_LIMIT", "ERROR_NETWORK_ISSUES_TIME_LIMIT"))
+
+# Settings the template ships commented out, so the tool's own defaults apply until a user uncomments them.
+# They are still accepted from a configuration file, since the template is also the settings allowlist
+COMMENTED_CONFIG_SETTINGS = frozenset({"COLOR_THEME"})
+
+
+# Collects the setting names the built-in configuration template defines
+def _config_allowed_names():
+    template_tree = ast.parse(CONFIG_BLOCK, "<built-in-config>", "exec")
+    return frozenset(statement.targets[0].id for statement in template_tree.body if isinstance(statement, ast.Assign) and len(statement.targets) == 1 and isinstance(statement.targets[0], ast.Name)) | COMMENTED_CONFIG_SETTINGS
+
+
+# Returns the values the built-in template ships, so a section the user declines is written as shipped
+def _config_template_defaults():
+    defaults = {}
+    for statement in ast.parse(CONFIG_BLOCK, "<built-in-config>", "exec").body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1 or not isinstance(statement.targets[0], ast.Name):
+            continue
+        try:
+            defaults[statement.targets[0].id] = ast.literal_eval(statement.value)
+        except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+            continue
+    return defaults
+
+
+# Renders an explicit assignment for a setting the template ships commented out, so overrides the user wrote
+# survive a rewrite instead of being replaced by the commented default
+def _rendered_commented_setting(variable, values):
+    value = values.get(variable)
+    if not isinstance(value, dict) or not value:
+        return []
+    lines = ["", f"{variable} = {{"]
+    lines.extend(f"    {repr(str(name))}: {repr(str(setting))}," for name, setting in value.items())
+    lines.append("}")
+    return lines
+
+
+# Renders one configuration file from the built-in template with the chosen values substituted in
+def generate_config_with_current_values(config_values):
+    tree = ast.parse(CONFIG_BLOCK, "<built-in-config>", "exec")
+    template_defaults = _config_template_defaults()
+    replacements = {}
+    for statement in tree.body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1 or not isinstance(statement.targets[0], ast.Name):
+            continue
+        name = statement.targets[0].id
+        # A secret belongs in the dotenv file, so its template placeholder stays even when the running values hold the real one
+        if name not in config_values or name in SECRET_KEYS:
+            continue
+        # A setting still holding what the template ships keeps the template's own lines, so a multi-line
+        # value such as WEBHOOK_TEMPLATE is not collapsed into one unreadable line by a wizard that changed nothing
+        if name in template_defaults and config_values[name] == template_defaults[name] and type(config_values[name]) is type(template_defaults[name]):
+            continue
+        replacements[name] = (statement.lineno, getattr(statement, "end_lineno", statement.lineno), repr(config_values[name]))
+    lines = CONFIG_BLOCK.strip("\n").split("\n")
+    # The template keeps its own leading blank line, so template line numbers are one ahead of this list
+    offset = 1 if CONFIG_BLOCK.startswith("\n") else 0
+    commented_pattern = re.compile(r"^#\s*([A-Z][A-Z0-9_]*)\s*=\s*\{$")
+    commented_block = ""
+    skip_until = 0
+    output = []
+    for number, line in enumerate(lines, 1):
+        template_line = number + offset
+        if template_line < skip_until:
+            continue
+        replaced = next((name for name, (start, _end, _value) in replacements.items() if start == template_line), None)
+        if replaced is None:
+            output.append(line)
+            stripped = line.strip()
+            commented_match = commented_pattern.match(stripped)
+            if commented_match and commented_match.group(1) in COMMENTED_CONFIG_SETTINGS:
+                commented_block = commented_match.group(1)
+            elif commented_block and stripped == "# }":
+                output.extend(_rendered_commented_setting(commented_block, config_values))
+                commented_block = ""
+            continue
+        start, end, rendered = replacements[replaced]
+        output.append(f"{replaced} = {rendered}")
+        skip_until = end + 1
+    return "\n".join(output) + "\n"
+
+
+# Returns the parsed value with a legacy numeric on/off setting read as the boolean it stands for
+def _normalized_config_value(name, value, defaults):
+    # 0 and 1 were accepted for these settings before the values were checked, so they still mean off and on
+    if isinstance(value, int) and not isinstance(value, bool) and value in (0, 1) and isinstance(defaults.get(name), bool):
+        return bool(value)
+    return value
+
+
+# Parses allowlisted literal config assignments without executing any file content
+def parse_config_content(content, filename="<config>", retired_out=None, reference_values=None):
+    tree = ast.parse(content, filename, "exec")
+    allowed_names = _config_allowed_names()
+    template_defaults = _config_template_defaults()
+    parsed_values = {}
+    for statement in tree.body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1 or not isinstance(statement.targets[0], ast.Name):
+            raise ValueError(f"Line {getattr(statement, 'lineno', '?')}: only NAME = value assignments are allowed")
+        name = statement.targets[0].id
+        if name in RETIRED_CONFIG_SETTINGS and name not in allowed_names:
+            if retired_out is not None and name not in retired_out:
+                retired_out.append(name)
+            continue
+        if name not in allowed_names:
+            raise ValueError(f"Line {statement.lineno}: unsupported configuration setting {name!r}")
+        # One setting may reuse another, which the built-in template does and existing configs copy
+        if isinstance(statement.value, ast.Name):
+            referenced = statement.value.id
+            if referenced not in allowed_names:
+                raise ValueError(f"Line {statement.lineno}: {name} may only reference another configuration setting")
+            source = parsed_values if referenced in parsed_values else (reference_values if reference_values is not None else globals())
+            if referenced not in source:
+                raise ValueError(f"Line {statement.lineno}: {name} references {referenced!r} before it has a value")
+            parsed_values[name] = source[referenced]
+            continue
+        try:
+            parsed_values[name] = _normalized_config_value(name, ast.literal_eval(statement.value), template_defaults)
+        except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError) as exc:
+            raise ValueError(f"Line {statement.lineno}: {name} must be a plain value such as a number, string, True, False, None, list, tuple or dict") from exc
+    return parsed_values
+
+
+# Validates config content through the same restricted parser used at startup
+def validate_config_content(content, filename="<generated-config>"):
+    parse_config_content(content, filename)
+
+
+# Reports settings an older version wrote that this version no longer defines
+def describe_retired_settings(names, quoted_path):
+    listed = ", ".join(sorted(names))
+    return f"Config file {quoted_path} contains settings this version no longer uses, which were ignored: {listed}"
+
+
+# Loads a config file as data and applies only recognized literal settings
+def load_config_file(config_path, namespace=None, report_errors=True):
+    selected_namespace = globals() if namespace is None else namespace
+    retired_settings = []
+    try:
+        content = Path(config_path).read_text(encoding="utf-8")
+        # Parsed as data rather than executed, so a config file picked up from the working directory cannot run code
+        parsed_values = parse_config_content(content, str(config_path), retired_settings)
+        selected_namespace.update(parsed_values)
+        # Only a load that reaches the module settings records a choice, not a copy read for the wizard or a report
+        if selected_namespace is globals():
+            CONFIGURED_SETTING_NAMES.update(parsed_values)
+        debug_print("Configuration applied", path=str(config_path), settings=len(parsed_values), retired=len(retired_settings) or None, outcome="OK")
+        if retired_settings and report_errors:
+            print(f"* Note: {describe_retired_settings(retired_settings, chr(39) + str(config_path) + chr(39))}")
+        return True
+    except SyntaxError as exc:
+        detail = f"Config file '{config_path}' has invalid Python syntax"
+        if exc.lineno is not None:
+            detail += f" at line {exc.lineno}"
+        detail += f" | Parser: {exc.msg}"
+    # Checked before ValueError because UnicodeDecodeError derives from it
+    except UnicodeDecodeError:
+        detail = f"Config file '{config_path}' is not valid UTF-8"
+    except ValueError as exc:
+        detail = f"Config file '{config_path}' contains unsupported content: {exc}"
+    except Exception as exc:
+        detail = f"Config file '{config_path}' failed with {type(exc).__name__}: {exc}"
+    debug_print("Configuration load", path=str(config_path), outcome="failed", error=detail)
+    if report_errors:
+        print_recovery_error(context="config", detail=detail)
+        print("* Config files are read as data. Only documented SETTING = value lines with plain literal values are accepted.")
+    return False
+
+
+# Reports whether durations carry an L* or S* mark, which only distinguishes sources while Spotify lookups are on
+def duration_marks_enabled():
+    return bool(USE_TRACK_DURATION_FROM_SPOTIFY) and not DO_NOT_SHOW_DURATION_MARKS
 
 
 # Resolves Spotify track metadata first then falls back to Last.fm duration
@@ -3247,7 +5942,7 @@ def get_track_info(artist, track, album, network):
     track_duration = 0
     duration_mark = ""
 
-    debug_print(f"get_track_info(artist='{artist}', track='{track}', album='{album}')")
+    debug_print("Track metadata lookup", artist=artist, track=track, album=album)
 
     if USE_TRACK_DURATION_FROM_SPOTIFY or TRACK_SONGS:
         sp_track_uri_id, sp_track_duration = spotify_resolve_track_metadata(artist, track, album)
@@ -3256,23 +5951,26 @@ def get_track_info(artist, track, album, network):
 
     if sp_track_duration > 0:
         track_duration = sp_track_duration
-        if not DO_NOT_SHOW_DURATION_MARKS:
+        if duration_marks_enabled():
             duration_mark = " S*"
     else:
         try:
             lf_track = pylast.Track(artist, track, network)
             lf_duration = lf_track.get_duration()
-            debug_print(f"Last.fm fallback: raw duration={lf_duration}ms")
+            debug_print("Last.fm track duration fallback", artist=artist, track=track, duration=f"{lf_duration}ms", outcome="OK")
             if lf_duration and lf_duration > 0:
-                if USE_TRACK_DURATION_FROM_SPOTIFY and not DO_NOT_SHOW_DURATION_MARKS:
+                if duration_marks_enabled():
                     duration_mark = " L*"
                 # Last.fm returns duration in milliseconds
                 track_duration = int(lf_duration / 1000)
         except Exception as e:
-            debug_print(f"Last.fm fallback error: {e}")
+            if is_too_many_open_files(e):
+                print_recovery_advice(classify_recovery_error(e))
+                raise SystemExit(1)
+            debug_print("Last.fm track duration fallback", artist=artist, track=track, outcome="failed", error=f"{type(e).__name__}: {e}")
             track_duration = 0
 
-    debug_print(f"Final track_duration={track_duration}s, duration_mark='{duration_mark}'")
+    debug_print("Track metadata lookup", artist=artist, track=track, duration=f"{track_duration}s", mark=duration_mark or None, outcome="OK")
 
     return track_duration, sp_track_uri_id, duration_mark
 
@@ -3324,6 +6022,15 @@ def decode(password: str) -> str:
         raise ValueError("decrypted bytes are not valid UTF-8") from exc
 
 
+# Clears error delivery state only after the required requests for a monitoring check succeed
+def complete_monitor_check(username, outage, error_alert, recovery_hint_tracker):
+    outage_lasted = outage.recovered()
+    if outage_lasted is not None:
+        print_outage_recovery(username, outage_lasted)
+    error_alert.reset()
+    recovery_hint_tracker.reset()
+
+
 # Main function that monitors activity of the specified Last.fm user
 def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyright: ignore[reportGeneralTypeIssues]
 
@@ -3333,7 +6040,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
     lf_track_ts_start_old = 0
     lf_track_ts_start_after_resume = 0
     lf_user_online = False
-    alive_counter = 0
+    alive_since = int(time.time())
     track_duration = 0
     playing_paused = False
     playing_paused_ts = 0
@@ -3352,23 +6059,21 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
     song_on_loop = 0
     recent_songs_session = []
     sp_track_uri_id = None
-    sp_track_duration = 0
     duration_mark = ""
     pauses_number = 0
-    error_500_counter = 0
-    error_500_start_ts = 0
-    error_network_issue_counter = 0
-    error_network_issue_start_ts = 0
     friends_check_last_ts = 0
+    check_count = 0
 
-    debug_print(f"Starting monitor loop for user: {username}")
+    # Output after this point is no longer the startup screen, so a verbose notice closes its own block
+    mark_monitoring_started()
+    debug_print("Monitoring loop start", user=username, interval=f"{LASTFM_CHECK_INTERVAL}s", active_interval=f"{LASTFM_ACTIVE_CHECK_INTERVAL}s")
     try:
         if csv_file_name:
             init_csv_file(csv_file_name)
     except Exception as e:
-        print(f"* Error: {e}")
+        print_recovery_error(e, context="file.unwritable")
 
-    lastfm_last_activity_file = f"lastfm_{username}_last_activity.json"
+    lastfm_last_activity_file = resolve_status_file(username)
     last_activity_read = []
     last_activity_ts = 0
     last_activity_artist = ""
@@ -3377,10 +6082,12 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
     if os.path.isfile(lastfm_last_activity_file):
         try:
-            with open(lastfm_last_activity_file, 'r', encoding="utf-8") as f:
-                last_activity_read = json.load(f)
+            last_activity_read = reconcile_status_record(read_status_record(lastfm_last_activity_file), lastfm_last_activity_file)
+            debug_print("Last activity read", path=lastfm_last_activity_file, entries=len(last_activity_read), outcome="OK")
         except Exception as e:
-            print(f"* Cannot load last status from '{lastfm_last_activity_file}' file: {e}")
+            debug_print("Last activity read", path=lastfm_last_activity_file, outcome="failed", error=f"{type(e).__name__}: {e}")
+            print_recovery_error(e, context="file", detail=f"Cannot load the last status from '{lastfm_last_activity_file}': {e}. Correct the file or move it aside to start a new history")
+            raise SystemExit(1) from None
         if last_activity_read:
             last_activity_ts = last_activity_read[0]
             last_activity_artist = last_activity_read[1]
@@ -3394,10 +6101,10 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             print(f"* Last activity loaded from file '{lastfm_last_activity_file}' ({lastfm_last_activity_file_mdate_weekday} {lastfm_last_activity_file_mdate})")
 
     try:
-        new_track = user.get_now_playing()
+        new_track = lastfm_get_now_playing(username, user)
         recent_tracks = lastfm_get_recent_tracks(username, network, RECENT_TRACKS_NUMBER)
     except Exception as e:
-        print(f"* Error: {e}")
+        print_recovery_error(e, detail=f"Cannot read the recent tracks of '{username}'")
         sys.exit(1)
 
     # Handle case where user has no tracks yet (fresh account)
@@ -3425,7 +6132,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             last_activity_track = track
             playing_track = new_track
             lf_user_online = True
-            debug_print(f"{username} is now ONLINE (initial track)")
+            debug_print("User state change", user=username, state="online", reason="track playing at startup")
             print(f"\nTrack:\t\t\t\t{artist} - {track}")
             if album:
                 print(f"Album:\t\t\t\t{album}")
@@ -3457,17 +6164,13 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             last_activity_to_save.append(track)
             last_activity_to_save.append(album)
 
-            try:
-                with open(lastfm_last_activity_file, 'w', encoding="utf-8") as f:
-                    json.dump(last_activity_to_save, f, indent=2)
-            except Exception as e:
-                print(f"* Cannot save last status to '{lastfm_last_activity_file}' file: {e}")
+            save_last_activity_state(lastfm_last_activity_file, last_activity_to_save)
 
             try:
                 if csv_file_name:
                     write_csv_entry(csv_file_name, datetime.fromtimestamp(int(lf_track_ts_start)), artist, track, album)
             except Exception as e:
-                print(f"* Error: {e}")
+                print_recovery_error(e, context="file.unwritable")
 
             duration_m_body = ""
             duration_m_body_html = ""
@@ -3625,17 +6328,13 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             last_activity_to_save.append(track)
             last_activity_to_save.append(album)
 
-            try:
-                with open(lastfm_last_activity_file, 'w', encoding="utf-8") as f:
-                    json.dump(last_activity_to_save, f, indent=2)
-            except Exception as e:
-                print(f"* Cannot save last status to '{lastfm_last_activity_file}' file: {e}")
+            save_last_activity_state(lastfm_last_activity_file, last_activity_to_save)
 
             try:
                 if csv_file_name:
                     write_csv_entry(csv_file_name, datetime.fromtimestamp(int(lf_track_ts_start)), artist, track, album)
             except Exception as e:
-                print(f"* Error: {e}")
+                print_recovery_error(e, context="file.unwritable")
 
             duration_m_body = ""
             duration_m_body_html = ""
@@ -3701,7 +6400,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
     if not recent_tracks or len(recent_tracks) == 0:
         print("(No tracks yet)")
     else:
-        for previous, t, nxt in previous_and_next(reversed(recent_tracks)):
+        for previous, t, _nxt in previous_and_next(reversed(recent_tracks)):
             i += 1
             print(f'{i}\t{datetime.fromtimestamp(int(t.timestamp)).strftime("%d %b %Y, %H:%M:%S")}\t{calendar.day_abbr[(datetime.fromtimestamp(int(t.timestamp))).weekday()]}\t{t.track}')
             if previous:
@@ -3719,43 +6418,54 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
     email_sent = False
     webhook_sent = False
+    # The error alert is tracked apart from the event alerts, once per channel and per outage
+    error_alert = ErrorAlertState()
 
     tracks_upper = {t.upper() for t in tracks}
 
-    # Initialize friends/followers tracking if enabled
-    if TRACK_FOLLOWINGS or TRACK_FOLLOWERS:
-        print(f"* Friends/followers tracking enabled")
+    # Initialize friend and profile tracking if enabled
+    if friends_check_enabled():
+        print("* Friends/profile tracking enabled")
 
         # Do initial check
         try:
             followings_file_exists = os.path.isfile(f"lastfm_{username}_followings.json")
             followers_file_exists = os.path.isfile(f"lastfm_{username}_followers.json")
+            profile_file_exists = os.path.isfile(f"lastfm_{username}_profile.json")
 
             # Load existing state if available
             if TRACK_FOLLOWINGS and followings_file_exists:
                 followings_loaded = load_friends_state(username, 'followings')
-                followings_count = len(followings_loaded)
+                followings_count = len(followings_loaded or ())
                 print(f"* Loading followings for user {username} from file lastfm_{username}_followings.json ({followings_count})")
 
             if TRACK_FOLLOWERS and followers_file_exists:
                 followers_loaded = load_friends_state(username, 'followers')
-                followers_count = len(followers_loaded)
+                followers_count = len(followers_loaded or ())
                 print(f"* Loading followers for user {username} from file lastfm_{username}_followers.json ({followers_count})")
+
+            if (TRACK_BIO or TRACK_DISPLAY_NAME) and profile_file_exists:
+                profile_loaded = load_profile_state(username)
+                profile_fields = ', '.join(field for field in ('display_name', 'bio') if field in profile_loaded)
+                print(f"* Loading profile baseline for user {username} from file lastfm_{username}_profile.json ({profile_fields or 'no valid fields'})")
 
             # Perform initial check to build baseline
             # We use raise_on_error=True so initialization failures (e.g. scraping issues) are visible
-            initial_changes, _ = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, save_state=True, raise_on_error=True)
+            initial_changes, _ = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, save_state=True, raise_on_error=True)
 
             # Announce baseline creation for missing files
             if TRACK_FOLLOWINGS and not followings_file_exists:
                 if os.path.isfile(f"lastfm_{username}_followings.json"):
-                    followings_count = len(load_friends_state(username, 'followings'))
+                    followings_count = len(load_friends_state(username, 'followings') or ())
                     print(f"* Saving followings for user {username} to file lastfm_{username}_followings.json ({followings_count})")
 
             if TRACK_FOLLOWERS and not followers_file_exists:
                 if os.path.isfile(f"lastfm_{username}_followers.json"):
-                    followers_count = len(load_friends_state(username, 'followers'))
+                    followers_count = len(load_friends_state(username, 'followers') or ())
                     print(f"* Saving followers for user {username} to file lastfm_{username}_followers.json ({followers_count})")
+
+            if (TRACK_BIO or TRACK_DISPLAY_NAME) and not profile_file_exists and os.path.isfile(f"lastfm_{username}_profile.json"):
+                print(f"* Saving profile baseline for user {username} to file lastfm_{username}_profile.json")
 
             # Only notify if there are real changes (not initial fetch/baseline build)
             if initial_changes:
@@ -3771,6 +6481,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 elif 'followers' in initial_changes:
                     to_notify['followers'] = initial_changes['followers']
 
+                if 'profile' in initial_changes:
+                    to_notify['profile'] = initial_changes['profile']
+
                 if to_notify:
                     notify_friends_changes(username, to_notify, skip_initial_line=True)
                 else:
@@ -3780,7 +6493,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 # No changes detected during baseline build
                 print_cur_ts("\nTimestamp:\t\t\t")
         except Exception as e:
-            print(f"* Warning: Initial friends check failed: {e}")
+            exit_if_out_of_file_descriptors(e)
+            print_recovery_error(e, detail=f"Cannot complete the initial friend and profile check: {e}")
             print_cur_ts("\nTimestamp:\t\t\t")
 
         friends_check_last_ts = int(time.time())
@@ -3788,12 +6502,21 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
     # Main loop
     friends_pending_changes = None
     friends_streak = 0
+    friends_failure_announced = False
+    # A blip of one check is confirmed by the next before it is printed, since the checks here are seconds apart
+    outage = OutageReporter(confirm_checks=1 if VERBOSE_MODE else 2)
+    recovery_hint_tracker = RecoveryHintTracker()
     friends_next_check_ts = 0
 
     while True:
+        reports_before_check = REPORTS_PRINTED
         try:
-            # Check for friends/followers changes if enabled and interval has passed
-            if (TRACK_FOLLOWINGS or TRACK_FOLLOWERS) and FRIENDS_CHECK_INTERVAL > 0:
+            # Reported by the completed-check trace at the end of this iteration, which one failure handler shares
+            # with the healthy path, so the trace says which of the two ran
+            check_outcome = "OK"
+
+            # Check for friend or profile changes if enabled and interval has passed
+            if friends_check_enabled() and FRIENDS_CHECK_INTERVAL > 0:
                 current_ts = int(time.time())
 
                 # Determine if it's time for a regular check or a retry check
@@ -3813,11 +6536,17 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     try:
                         # Use save_state=False by default to avoid saving to file during suspected transient changes
                         # Use raise_on_error=True to detect check failures and avoid resetting streak
-                        # current_sets holds the exact sets we just scraped, so we can persist them without a second scrape (which could glitch and corrupt state)
-                        changes, current_sets = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, save_state=False, raise_on_error=True)
+                        # current_states holds the exact data we just fetched so confirmation never needs a second request
+                        changes, current_states = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, save_state=False, raise_on_error=True)
 
                         # Reset error streak on any successful check
                         if friends_streak < 0:
+                            failed_checks = abs(friends_streak)
+                            debug_print("Friends/profile check", outcome="OK", failures=failed_checks)
+                            # A recovery is only news if the failure was, so an outage nobody saw clears in silence
+                            if friends_failure_announced:
+                                print(f"* Friends/profile check is available again after {failed_checks} failed check{'' if failed_checks == 1 else 's'}, so friend and profile change alerts can fire again")
+                                print_cur_ts("Timestamp:\t\t\t")
                             friends_streak = 0
 
                         if changes:
@@ -3828,10 +6557,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                                 friends_streak = 1
 
                             if friends_streak >= FRIENDS_CHANGE_COUNTER:
-                                # Final confirmation after enough checks; persist the exact sets we just scraped rather than re-fetching
-                                for key in ('followings', 'followers'):
-                                    if key in current_sets:
-                                        save_friends_state(username, key, current_sets[key])
+                                # Final confirmation after enough checks then persist the exact fetched state
+                                save_friends_check_states(username, current_states)
                                 notify_friends_changes(username, changes, skip_initial_line=not PROGRESS_INDICATOR)
                                 friends_streak = 0
                                 friends_pending_changes = None
@@ -3850,6 +6577,10 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                                         diff_str = f"{diff:+d}" if diff != 0 else "0"
                                         change_details.append(f"{key}: {c['previous_count']} -> {c['current_count']} ({diff_str})")
 
+                                if 'profile' in changes:
+                                    changed_fields = ', '.join('display name' if field == 'display_name' else 'bio' for field in changes['profile'])
+                                    change_details.append(f"profile: {changed_fields}")
+
                                 detail_str = "; ".join(change_details)
                                 print(f"* Suspected transient change ({detail_str}) (streak {friends_streak}/{FRIENDS_CHANGE_COUNTER}); will confirm in {display_time(retry_interval)}")
                                 print_cur_ts("Timestamp:\t\t\t")
@@ -3857,31 +6588,34 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             # No changes or back to baseline
                             if friends_streak > 0:
                                 # Recovered from a suspected change
-                                print(f"* Friend/follower count recovered back to normal baseline after {friends_streak} suspected transient checks")
+                                print(f"* Friend/profile state recovered back to the baseline after {friends_streak} suspected transient checks")
                                 print_cur_ts("Timestamp:\t\t\t")
 
                             friends_streak = 0
                             friends_pending_changes = None
                             if not is_retry:
                                 friends_check_last_ts = current_ts
-                                # Persist the scraped sets to refresh the baseline file timestamp; reuse what we just fetched instead of re-scraping (which could glitch and overwrite state)
-                                for key in ('followings', 'followers'):
-                                    if key in current_sets:
-                                        save_friends_state(username, key, current_sets[key])
+                                # Refresh baseline timestamps with the exact data fetched by this check
+                                save_friends_check_states(username, current_states)
                     except Exception as e:
                         if friends_streak == 0:
                             # Start measuring error streak (negative values)
                             friends_streak = -1
+                            # Nothing else is printed until the streak reaches its alert threshold, which reads as a check that stopped running
+                            friends_failure_announced = verbose_degraded_feature("Friends/profile check", "friend and profile change alerts", e)
                         elif friends_streak < 0:
                             # Continue error streak
                             friends_streak -= 1
+                            # The notice above reports the outage once, so the repeats are left to debug
+                            debug_print("Friends/profile check", outcome="failed", attempt=f"#{abs(friends_streak)}", error=f"{type(e).__name__}: {e}")
 
                         if friends_streak > 0:
                             # We were tracking a change but hit an error
                             retry_interval = FRIENDS_RETRY_INTERVAL
                             friends_next_check_ts = current_ts + retry_interval
-                            print(f"* Error during friends check: {e}")
-                            print(f"* Preserving confirmation streak ({friends_streak}/{FRIENDS_CHANGE_COUNTER}) despite error; will retry in {display_time(retry_interval)}")
+                            friends_failure_announced = True
+                            print_recovery_error(e, detail=f"Cannot confirm the friend and profile state: {e}")
+                            print(f"* Keeping the confirmation streak ({friends_streak}/{FRIENDS_CHANGE_COUNTER}); will retry in {display_time(retry_interval)}")
                             print_cur_ts("Timestamp:\t\t\t")
                         else:
                             # Error streak logic (negative streak)
@@ -3889,21 +6623,26 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
                             # Throttling: Alert on threshold, then every 10 attempts
                             if current_error_streak == FRIENDS_CHANGE_COUNTER or (current_error_streak > FRIENDS_CHANGE_COUNTER and (current_error_streak - FRIENDS_CHANGE_COUNTER) % 10 == 0):
-                                print(f"* Error confirming friends (attempt {current_error_streak}): {e}")
+                                friends_failure_announced = True
+                                print_recovery_error(e, detail=f"Cannot confirm the friend and profile state (attempt {current_error_streak}): {e}")
                                 print_cur_ts("Timestamp:\t\t\t")
 
                             retry_interval = FRIENDS_RETRY_INTERVAL
                             friends_next_check_ts = current_ts + retry_interval
 
-            debug_print(f"Fetching now playing / recent tracks...")
+            debug_print("Now playing and recent tracks fetch", user=username)
             recent_tracks = lastfm_get_recent_tracks(username, network, 1)
+
             # Handle case where user still has no tracks
             if not recent_tracks or len(recent_tracks) == 0:
+                complete_monitor_check(username, outage, error_alert, recovery_hint_tracker)
                 # Wait for first track to appear
+                debug_print("Waiting for the first scrobble", user=username, interval=f"{LASTFM_ACTIVE_CHECK_INTERVAL}s")
+                close_pending_notice_block()
                 time.sleep(LASTFM_ACTIVE_CHECK_INTERVAL)
                 continue
             last_track_start_ts = int(recent_tracks[0].timestamp)
-            new_track = user.get_now_playing()
+            new_track = lastfm_get_now_playing(username, user)
             email_sent = False
             webhook_sent = False
 
@@ -3913,12 +6652,12 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             if not lf_user_online:
                 # If this is the first track appearing (user had no tracks before)
                 if last_track_start_ts_old2 == 0:
-                    debug_print("First track appeared!")
+                    debug_print("First scrobble appeared", user=username, outcome="OK")
                     print("\n*** First track appeared! Starting monitoring...\n")
                     last_track_start_ts_old2 = last_track_start_ts
                     lf_track_ts_start_old = last_track_start_ts
                 if last_track_start_ts > last_track_start_ts_old2:
-                    debug_print(f"Detected new entries while offline ({last_track_start_ts} > {last_track_start_ts_old2})")
+                    debug_print("New scrobbles while offline", user=username, latest=last_track_start_ts, previous=last_track_start_ts_old2)
                     print("\n*** New last.fm entries showed up while user was offline!\n")
                     lf_track_ts_start_old = last_track_start_ts
                     duplicate_entries = False
@@ -3926,7 +6665,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     added_entries_list = ""
                     try:
                         recent_tracks_while_offline = lastfm_get_recent_tracks(username, network, 100)
-                        for previous, t, nxt in previous_and_next(reversed(recent_tracks_while_offline)):
+                        for previous, t, _nxt in previous_and_next(reversed(recent_tracks_while_offline)):
                             if int(t.timestamp) > int(last_track_start_ts_old2):
                                 if 0 <= (lf_track_ts_start + LASTFM_ACTIVE_CHECK_INTERVAL - int(t.timestamp)) <= 60:
                                     continue
@@ -3940,7 +6679,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                                 if csv_file_name:
                                     write_csv_entry(csv_file_name, datetime.fromtimestamp(int(t.timestamp)), str(t.track.artist), str(t.track.title), str(t.album))
                     except Exception as e:
-                        print(f"* Error: {e}")
+                        print_recovery_error(e, detail=f"Cannot list the tracks played while the tool was offline: {e}")
 
                     if i > 0 and (OFFLINE_ENTRIES_NOTIFICATION or webhook_event_enabled("offline_entries")):
                         if added_entries_list:
@@ -3950,6 +6689,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         send_notification_channels("offline_entries", m_subject, m_body, email_enabled=OFFLINE_ENTRIES_NOTIFICATION, subject_short=f"{username}: {i} new offline scrobbles", body_short=added_entries_list.strip())
 
                     print_cur_ts("\nTimestamp:\t\t\t")
+                    alive_since = int(time.time())
 
             # User is online (plays music at the moment)
             if new_track is not None:
@@ -3980,7 +6720,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 # Track has changed
                 if (new_track != playing_track or (last_track_start_ts > last_track_start_ts_old and last_track_start_ts > lf_track_ts_start_old - 20)):
 
-                    alive_counter = 0
+                    alive_since = int(time.time())
 
                     if new_track == playing_track:
                         song_on_loop += 1
@@ -3993,7 +6733,6 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     artist = str(playing_track.artist)
                     track = str(playing_track.title)
                     album = str(playing_track.info.get('album', '')) if playing_track.info.get('album') else ""
-                    info = playing_track.info
 
                     played_for_m_body = ""
                     played_for_m_body_html = ""
@@ -4130,11 +6869,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     last_activity_to_save.append(artist)
                     last_activity_to_save.append(track)
                     last_activity_to_save.append(album)
-                    try:
-                        with open(lastfm_last_activity_file, 'w', encoding="utf-8") as f:
-                            json.dump(last_activity_to_save, f, indent=2)
-                    except Exception as e:
-                        print(f"* Cannot save last status to '{lastfm_last_activity_file}' file: {e}")
+                    save_last_activity_state(lastfm_last_activity_file, last_activity_to_save)
 
                     duration_m_body = ""
                     duration_m_body_html = ""
@@ -4170,13 +6905,13 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         try:
                             p = 0
                             recent_tracks_while_offline = lastfm_get_recent_tracks(username, network, RECENT_TRACKS_NUMBER)
-                            for previous, t, nxt in previous_and_next(reversed(recent_tracks_while_offline)):
+                            for previous, t, _nxt in previous_and_next(reversed(recent_tracks_while_offline)):
                                 if previous:
                                     if previous.timestamp == t.timestamp:
                                         p += 1
                                         duplicate_entries = True
                         except Exception as e:
-                            print(f"* Error: {e}")
+                            print_recovery_error(e, detail=f"Cannot re-read the recent tracks to check for duplicates: {e}")
                         if duplicate_entries:
                             private_mode = f"\n\nDuplicate entries ({p}) found, possible private mode ({get_range_of_dates_from_tss(lf_active_ts_last_old, lf_track_ts_start, short=True)})"
                             private_mode_html = f"<br><br>Duplicate entries ({p}) found, possible <b>private mode</b> (<b>{get_range_of_dates_from_tss(lf_active_ts_last_old, lf_track_ts_start, short=True)}</b>)"
@@ -4258,9 +6993,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}{album_html_line}{music_section_html}{lyrics_section_html_fresh}{played_for_m_body_html}{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
                         if ACTIVE_NOTIFICATION or webhook_event_enabled("active"):
-                            email_attempted, webhook_attempted = send_notification_channels("active", m_subject, m_body, m_body_html, email_enabled=ACTIVE_NOTIFICATION, subject_short=f"{username} is active", body_short="\n".join(value for value in (track, artist, album) if value))
-                            email_sent = email_sent or email_attempted
-                            webhook_sent = webhook_sent or webhook_attempted
+                            email_delivered, webhook_delivered = send_notification_channels("active", m_subject, m_body, m_body_html, email_enabled=ACTIVE_NOTIFICATION, subject_short=f"{username} is active", body_short="\n".join(value for value in (track, artist, album) if value))
+                            email_sent = email_sent or email_delivered
+                            webhook_sent = webhook_sent or webhook_delivered
 
                     track_matched = track.upper() in tracks_upper or album.upper() in tracks_upper
                     email_song_enabled = ((TRACK_NOTIFICATION and track_matched) or SONG_NOTIFICATION) and not email_sent
@@ -4348,9 +7083,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         album_html_line = f"<br>Album: {album_html}" if album else ""
                         m_body = f"Track: {artist} - {track}{duration_m_body}\n{album_line}{music_section_text}{lyrics_section_text}{played_for_m_body}\n\nUser plays song on LOOP ({song_on_loop} times){timespan_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                         m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}{album_html_line}{music_section_html}{lyrics_section_html}{played_for_m_body_html}<br><br>User plays song on LOOP (<b>{song_on_loop}</b> times){timespan_str_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
-                        email_attempted, webhook_attempted = send_notification_channels("loop", m_subject, m_body, m_body_html, email_enabled=loop_email_enabled, webhook_enabled=loop_webhook_enabled, subject_short=f"{username} is playing a song on loop", body_short="\n".join(value for value in (track, artist, album) if value))
-                        email_sent = email_sent or email_attempted
-                        webhook_sent = webhook_sent or webhook_attempted
+                        email_delivered, webhook_delivered = send_notification_channels("loop", m_subject, m_body, m_body_html, email_enabled=loop_email_enabled, webhook_enabled=loop_webhook_enabled, subject_short=f"{username} is playing a song on loop", body_short="\n".join(value for value in (track, artist, album) if value))
+                        email_sent = email_sent or email_delivered
+                        webhook_sent = webhook_sent or webhook_delivered
 
                     # Send track/song notifications only if loop notification was not sent
                     if track_matched:
@@ -4359,16 +7094,16 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         track_email_enabled = TRACK_NOTIFICATION and not email_sent
                         track_webhook_enabled = webhook_event_enabled("track") and not webhook_sent
                         if track_email_enabled or track_webhook_enabled:
-                            email_attempted, webhook_attempted = send_notification_channels("track", m_subject, m_body, m_body_html, email_enabled=track_email_enabled, webhook_enabled=track_webhook_enabled, subject_short=f"{username}: monitored track", body_short="\n".join(value for value in (track, artist, album) if value))
-                            email_sent = email_sent or email_attempted
-                            webhook_sent = webhook_sent or webhook_attempted
+                            email_delivered, webhook_delivered = send_notification_channels("track", m_subject, m_body, m_body_html, email_enabled=track_email_enabled, webhook_enabled=track_webhook_enabled, subject_short=f"{username}: monitored track", body_short="\n".join(value for value in (track, artist, album) if value))
+                            email_sent = email_sent or email_delivered
+                            webhook_sent = webhook_sent or webhook_delivered
 
                     song_email_enabled = SONG_NOTIFICATION and not email_sent
                     song_webhook_enabled = webhook_event_enabled("song") and not webhook_sent
                     if song_email_enabled or song_webhook_enabled:
-                        email_attempted, webhook_attempted = send_notification_channels("song", m_subject, m_body, m_body_html, email_enabled=song_email_enabled, webhook_enabled=song_webhook_enabled, subject_short=f"{username}: song changed", body_short="\n".join(value for value in (track, artist, album) if value))
-                        email_sent = email_sent or email_attempted
-                        webhook_sent = webhook_sent or webhook_attempted
+                        email_delivered, webhook_delivered = send_notification_channels("song", m_subject, m_body, m_body_html, email_enabled=song_email_enabled, webhook_enabled=song_webhook_enabled, subject_short=f"{username}: song changed", body_short="\n".join(value for value in (track, artist, album) if value))
+                        email_sent = email_sent or email_delivered
+                        webhook_sent = webhook_sent or webhook_delivered
 
                     lf_user_online = True
                     lf_active_ts_last = int(time.time())
@@ -4380,7 +7115,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         if csv_file_name:
                             write_csv_entry(csv_file_name, datetime.fromtimestamp(int(lf_track_ts_start)), artist, track, album)
                     except Exception as e:
-                        print(f"* Error: {e}")
+                        print_recovery_error(e, context="file.unwritable")
                     if listened_songs:
                         if lf_track_ts_start == lf_active_ts_start:
                             print(f"\nSongs Played:\t\t\t{listened_songs}")
@@ -4406,8 +7141,6 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         print(f"# {ts} +{delta_diff_str}")
             # User is offline (does not play music at the moment)
             else:
-
-                alive_counter += 1
 
                 # User paused playing the music
                 if ((int(time.time()) - lf_active_ts_last) > (LASTFM_ACTIVE_CHECK_INTERVAL * LASTFM_BREAK_CHECK_MULTIPLIER)) and lf_user_online and lf_active_ts_last > 0 and lf_active_ts_start > 0 and (LASTFM_ACTIVE_CHECK_INTERVAL * LASTFM_BREAK_CHECK_MULTIPLIER) < LASTFM_INACTIVITY_CHECK and LASTFM_BREAK_CHECK_MULTIPLIER > 0 and playing_paused is False:
@@ -4509,6 +7242,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             if platform.system() == 'Darwin':       # macOS
                                 spotify_macos_play_song(SP_USER_GOT_OFFLINE_TRACK_ID)
                                 if SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE > 0:
+                                    debug_print("Waiting before pausing the finishing track", delay=f"{SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE}s")
                                     time.sleep(SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE)
                                     spotify_macos_play_pause("pause")
                             elif platform.system() == 'Windows':    # Windows
@@ -4516,6 +7250,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             else:                                   # Linux variants
                                 spotify_linux_play_song(SP_USER_GOT_OFFLINE_TRACK_ID)
                                 if SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE > 0:
+                                    debug_print("Waiting before pausing the finishing track", delay=f"{SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE}s")
                                     time.sleep(SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE)
                                     spotify_linux_play_pause("pause")
                         else:
@@ -4530,11 +7265,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     last_activity_to_save.append(artist)
                     last_activity_to_save.append(track)
                     last_activity_to_save.append(album)
-                    try:
-                        with open(lastfm_last_activity_file, 'w', encoding="utf-8") as f:
-                            json.dump(last_activity_to_save, f, indent=2)
-                    except Exception as e:
-                        print(f"* Cannot save last status to '{lastfm_last_activity_file}' file: {e}")
+                    save_last_activity_state(lastfm_last_activity_file, last_activity_to_save)
                     if INACTIVE_NOTIFICATION or webhook_event_enabled("inactive"):
                         # Format recently listened songs list for email (skip if only 1 song)
                         recent_songs_mbody = ""
@@ -4592,9 +7323,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         m_body = f"Last played: {artist} - {track}{duration_m_body}\n{album_line}{music_section_text}{lyrics_section_text}User got inactive after listening to music for {calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}\nUser played music from {get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep=' to ')}{paused_mbody}{listened_songs_mbody}{played_for_m_body}{recent_songs_mbody}\n\nLast activity: {get_date_from_ts(lf_active_ts_last)}\nInactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
                         m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{last_played_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}{album_html_line}{music_section_html}{lyrics_section_html}User got inactive after listening to music for <b>{calculate_timespan(int(lf_active_ts_last), int(lf_active_ts_start))}</b><br>User played music from <b>{get_range_of_dates_from_tss(lf_active_ts_start, lf_active_ts_last, short=True, between_sep='</b> to <b>')}</b>{paused_mbody_html}{listened_songs_mbody_html}{played_for_m_body_html}{recent_songs_mbody_html}<br><br>Last activity: <b>{get_date_from_ts(lf_active_ts_last)}</b><br>Inactivity timer: {display_time(LASTFM_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
-                        email_attempted, webhook_attempted = send_notification_channels("inactive", m_subject, m_body, m_body_html, email_enabled=INACTIVE_NOTIFICATION, subject_short=f"{username} is inactive", body_short="\n".join(value for value in (track, artist, album) if value))
-                        email_sent = email_sent or email_attempted
-                        webhook_sent = webhook_sent or webhook_attempted
+                        email_delivered, webhook_delivered = send_notification_channels("inactive", m_subject, m_body, m_body_html, email_enabled=INACTIVE_NOTIFICATION, subject_short=f"{username} is inactive", body_short="\n".join(value for value in (track, artist, album) if value))
+                        email_sent = email_sent or email_delivered
+                        webhook_sent = webhook_sent or webhook_delivered
                     lf_active_ts_start = 0
                     playing_track = None
                     last_track_start_ts = 0
@@ -4604,91 +7335,64 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     pauses_number = 0
                     recent_songs_session = []
                     print_cur_ts("\nTimestamp:\t\t\t")
-
-                if LIVENESS_CHECK_COUNTER and alive_counter >= LIVENESS_CHECK_COUNTER:
-                    print_cur_ts("Liveness check, timestamp:\t")
-                    alive_counter = 0
+                    alive_since = int(time.time())
 
             # Stuff to do regardless if the user is online or offline
             if last_track_start_ts > 0:
                 last_track_start_ts_old2 = last_track_start_ts
 
-            ERROR_500_ZERO_TIME_LIMIT = ERROR_500_TIME_LIMIT + LASTFM_CHECK_INTERVAL
-            if LASTFM_CHECK_INTERVAL * ERROR_500_NUMBER_LIMIT > ERROR_500_ZERO_TIME_LIMIT:
-                ERROR_500_ZERO_TIME_LIMIT = LASTFM_CHECK_INTERVAL * (ERROR_500_NUMBER_LIMIT + 1)
+            complete_monitor_check(username, outage, error_alert, recovery_hint_tracker)
 
-            if error_500_start_ts and ((int(time.time()) - error_500_start_ts) >= ERROR_500_ZERO_TIME_LIMIT):
-                error_500_start_ts = 0
-                error_500_counter = 0
-
-            ERROR_NETWORK_ZERO_TIME_LIMIT = ERROR_NETWORK_ISSUES_TIME_LIMIT + LASTFM_CHECK_INTERVAL
-            if LASTFM_CHECK_INTERVAL * ERROR_NETWORK_ISSUES_NUMBER_LIMIT > ERROR_NETWORK_ZERO_TIME_LIMIT:
-                ERROR_NETWORK_ZERO_TIME_LIMIT = LASTFM_CHECK_INTERVAL * (ERROR_NETWORK_ISSUES_NUMBER_LIMIT + 1)
-
-            if error_network_issue_start_ts and ((int(time.time()) - error_network_issue_start_ts) >= ERROR_NETWORK_ZERO_TIME_LIMIT):
-                error_network_issue_start_ts = 0
-                error_network_issue_counter = 0
+            # Not gated on the user being offline, since a user who listens for days is exactly when a silent run looks dead
+            # The banner speaks for a quiet check, so anything this one reported restarts the clock instead of being contradicted by it
+            if REPORTS_PRINTED != reports_before_check:
+                alive_since = int(time.time())
+            elif LIVENESS_REMINDER_SECONDS and int(time.time()) - alive_since >= LIVENESS_REMINDER_SECONDS:
+                print_liveness_banner(f"Monitoring healthy for {username}. The user is {'active' if lf_user_online else 'inactive'} with no activity change since the last check")
+                alive_since = int(time.time())
 
         except Exception as e:
 
-            str_matches = ["http code 500", "http code 504", "http code 503", "http code 502"]
-            if any(x in str(e).lower() for x in str_matches):
-                if not error_500_start_ts:
-                    error_500_start_ts = int(time.time())
-                    error_500_counter = 1
+            debug_print("Monitoring cycle", check=f"#{check_count + 1}", user=username, outcome="failed", error=f"{type(e).__name__}: {e}")
+            check_outcome = "failed"
+
+            advice = classify_recovery_error(e, context="runtime")
+            sleep_interval = LASTFM_ACTIVE_CHECK_INTERVAL if lf_user_online else LASTFM_CHECK_INTERVAL
+            retry_note = f"retrying in {display_time(sleep_interval)}"
+
+            # A failure is reported once it is confirmed, then left to the hourly reminder rather than repeated on every check
+            outage_outcome = outage.failed(advice)
+            reported = False
+            if outage_outcome == "full":
+                print_recovery_error(e, "runtime", retry_note=retry_note, tracker=recovery_hint_tracker)
+                reported = True
+            elif outage_outcome == "changed":
+                print_outage_change(username, advice)
+                reported = True
+            elif outage_outcome == "reminder":
+                print_outage_liveness(username, advice, outage.since, outage.failures)
+                alive_since = int(time.time())
+
+            # Attempted on every failing check rather than only on the report, so a channel that failed is tried again
+            # A failure the tool can retry away is alerted once the outage has lasted ERROR_ALERT_AFTER_SECONDS, one it cannot at once
+            alert_due = not advice.retryable or int(time.time()) - outage.since >= ERROR_ALERT_AFTER_SECONDS
+            now = int(time.time())
+            error_email_enabled = alert_due and error_alert.pending("email", ERROR_NOTIFICATION, now)
+            error_webhook_enabled = alert_due and error_alert.pending("webhook", webhook_event_enabled("error"), now)
+            if error_email_enabled or error_webhook_enabled:
+                if advice.code == "auth.api_key_invalid":
+                    m_subject = f"Last.fm API key error! (user: {username})"
                 else:
-                    error_500_counter += 1
+                    m_subject = f"Last.fm monitoring error (user: {username})"
+                m_body = f"{advice.summary}{nl_ch}{nl_ch}To fix: {advice.fix}{nl_ch}{nl_ch}Last.fm Monitor will retry in {display_time(sleep_interval)}.{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                m_body_html = f"<html><head></head><body>{html_text(advice.summary)}<br><br>To fix: {html_text(advice.fix)}<br><br>Last.fm Monitor will retry in {escape(display_time(sleep_interval))}.{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                email_delivered, webhook_delivered = send_notification_channels("error", m_subject, m_body, m_body_html, email_enabled=error_email_enabled, webhook_enabled=error_webhook_enabled)
+                error_alert.record("email", error_email_enabled, email_delivered, now)
+                error_alert.record("webhook", error_webhook_enabled, webhook_delivered, now)
+                reported = True
 
-            str_matches = ["timed out", "timeout", "name resolution", "failed to resolve", "family not supported", "429 client", "aborted"]
-            if any(x in str(e).lower() for x in str_matches) or str(e) == '':
-                if not error_network_issue_start_ts:
-                    error_network_issue_start_ts = int(time.time())
-                    error_network_issue_counter = 1
-                else:
-                    error_network_issue_counter += 1
-
-            if error_500_start_ts and (error_500_counter >= ERROR_500_NUMBER_LIMIT and (int(time.time()) - error_500_start_ts) >= ERROR_500_TIME_LIMIT):
-                print(f"* Error 50x ({error_500_counter}x times in the last {display_time((int(time.time()) - error_500_start_ts))}): '{e}'")
-                if webhook_event_enabled("error") and not webhook_sent:
-                    m_subject = f"lastfm_monitor: Last.fm service error (user: {username})"
-                    m_body = f"Repeated Last.fm 50x errors: {sanitize_sensitive_text(e)}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                    _, webhook_attempted = send_notification_channels("error", m_subject, m_body, webhook_enabled=True)
-                    webhook_sent = webhook_sent or webhook_attempted
-                print_cur_ts("Timestamp:\t\t\t")
-                error_500_start_ts = 0
-                error_500_counter = 0
-
-            elif error_network_issue_start_ts and (error_network_issue_counter >= ERROR_NETWORK_ISSUES_NUMBER_LIMIT and (int(time.time()) - error_network_issue_start_ts) >= ERROR_NETWORK_ISSUES_TIME_LIMIT):
-                print(f"* Error with network ({error_network_issue_counter}x times in the last {display_time((int(time.time()) - error_network_issue_start_ts))}): '{e}'")
-                if webhook_event_enabled("error") and not webhook_sent:
-                    m_subject = f"lastfm_monitor: network error (user: {username})"
-                    m_body = f"Repeated network errors: {sanitize_sensitive_text(e)}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                    _, webhook_attempted = send_notification_channels("error", m_subject, m_body, webhook_enabled=True)
-                    webhook_sent = webhook_sent or webhook_attempted
-                print_cur_ts("Timestamp:\t\t\t")
-                error_network_issue_start_ts = 0
-                error_network_issue_counter = 0
-
-            elif not error_500_start_ts and not error_network_issue_start_ts:
-                print(f"* Error: '{e}'")
-
-                if 'Invalid API key' in str(e) or 'API Key Suspended' in str(e):
-                    print("* API key might not be valid anymore!")
-                    error_email_enabled = ERROR_NOTIFICATION and not email_sent
-                    error_webhook_enabled = webhook_event_enabled("error") and not webhook_sent
-                    if error_email_enabled or error_webhook_enabled:
-                        m_subject = f"lastfm_monitor: API key error! (user: {username})"
-                        safe_error = sanitize_sensitive_text(e)
-                        m_body = f"API key might not be valid anymore: {safe_error}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>API key might not be valid anymore: {escape(safe_error)}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
-                        email_attempted, webhook_attempted = send_notification_channels("error", m_subject, m_body, m_body_html, email_enabled=error_email_enabled, webhook_enabled=error_webhook_enabled)
-                        email_sent = email_sent or email_attempted
-                        webhook_sent = webhook_sent or webhook_attempted
-                elif webhook_event_enabled("error") and not webhook_sent:
-                    m_subject = f"lastfm_monitor: monitoring error (user: {username})"
-                    m_body = f"Monitoring error: {sanitize_sensitive_text(e)}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                    _, webhook_attempted = send_notification_channels("error", m_subject, m_body, webhook_enabled=True)
-                    webhook_sent = webhook_sent or webhook_attempted
+            # One trailer for whatever this check printed, since a retry can be the only thing on the screen
+            if reported:
                 print_cur_ts("Timestamp:\t\t\t")
 
         if lf_user_online:
@@ -4696,15 +7400,30 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
         else:
             check_interval = LASTFM_CHECK_INTERVAL
 
-        debug_print(f"Sleeping for {check_interval}s before next check")
+        # Any verbose line this check printed on its own is closed here, so one check never leaves a floating line
+        close_pending_notice_block()
+
+        check_count += 1
+        wait_reason = "the last check failed" if check_outcome == "failed" else ("the user is online" if lf_user_online else "the user is offline")
+        debug_print("Completed check", check=f"#{check_count}", user=username, outcome=check_outcome, state="online" if lf_user_online else "offline", track=str(playing_track) if playing_track else None)
+        debug_print("Waiting for the next check", check=f"#{check_count}", interval=f"{check_interval}s", reason=wait_reason, state="online" if lf_user_online else "offline")
         time.sleep(check_interval)
 
         new_track = None
 
 
+# Applies only the explicitly supplied --verbose and --debug flags so the command line always wins over the config file
+def apply_diagnostic_cli_flags(args):
+    global VERBOSE_MODE, DEBUG_MODE
+    if getattr(args, "verbose", None):
+        VERBOSE_MODE = True
+    if getattr(args, "debug_mode", None):
+        DEBUG_MODE = True
+
+
 # Applies validated one-run webhook command-line overrides to runtime settings
 def apply_webhook_cli_overrides(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
-    global WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION
+    global WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_PROFILE_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION
     if args.webhook_provider is not None:
         WEBHOOK_PROVIDER = str(args.webhook_provider)
     if args.webhook_url is not None:
@@ -4712,6 +7431,7 @@ def apply_webhook_cli_overrides(args: argparse.Namespace, parser: argparse.Argum
             parser.error("--webhook-url must contain a complete HTTPS link without embedded credentials")
         WEBHOOK_URL = str(args.webhook_url).strip()
         WEBHOOK_ENABLED = True
+        record_secret_source("WEBHOOK_URL", "command line")
     if args.webhook_enabled is not None:
         WEBHOOK_ENABLED = args.webhook_enabled
     event_overrides = (
@@ -4723,6 +7443,7 @@ def apply_webhook_cli_overrides(args: argparse.Namespace, parser: argparse.Argum
         (args.webhook_offline_entries, "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION"),
         (args.webhook_followers, "WEBHOOK_FOLLOWERS_NOTIFICATION"),
         (args.webhook_followings, "WEBHOOK_FOLLOWINGS_NOTIFICATION"),
+        (args.webhook_profile, "WEBHOOK_PROFILE_NOTIFICATION"),
     )
     for enabled, setting in event_overrides:
         if enabled is True:
@@ -4737,31 +7458,2225 @@ def apply_webhook_cli_overrides(args: argparse.Namespace, parser: argparse.Argum
         configured_provider = normalized_webhook_provider()
         if detected_provider and detected_provider != configured_provider:
             WEBHOOK_PROVIDER = detected_provider
-            print(f"* Warning: Configured webhook provider did not match the URL. Using {detected_provider}")
+            # The built-in default is not a choice anyone made, so detection there is the documented behaviour
+            # rather than a mismatch. Only a provider the configuration actually sets is worth warning about
+            if "WEBHOOK_PROVIDER" in CONFIGURED_SETTING_NAMES:
+                print(f"* Warning: Configured webhook provider did not match the URL. Using {webhook_provider_display_name(detected_provider)}.")
+            else:
+                verbose_print(f"Webhook provider detected from the URL: {webhook_provider_display_name(detected_provider)}")
+
+
+# The four shared status markers. A fifth neutral marker is the single biggest source of drift between these
+# tools, because every state it would cover is a state the others already call PASS
+DOCTOR_STATUSES = ("PASS", "WARN", "FAIL", "SKIP")
+
+# The fixed section order the report renders in, chosen so each section depends only on the ones above it
+DOCTOR_SECTIONS = ("Environment", "Configuration", "Authentication", "Spotify metadata", "Connectivity", "Target", "Notifications")
+
+# Delivery results are printed as they happen rather than inside a section, but they still count in the summary
+DOCTOR_DELIVERY_SECTION = "Optional delivery tests"
+
+# Width of the transient progress line currently on screen, so the next write can erase exactly what it drew
+DOCTOR_PROGRESS_WIDTH = 0
+
+# The theme entry each doctor result marker is drawn in, so a failure reads as one at a glance
+DOCTOR_MARK_STYLES = {"PASS": "boolean_true", "WARN": "warning", "FAIL": "error", "SKIP": "info"}
+
+
+# One doctor result, held until the whole report is rendered
+DoctorCheck = namedtuple("DoctorCheck", ["section", "status", "label", "detail", "advice"])
+DoctorCheck.__new__.__defaults__ = ("", None)
+
+
+# Collects doctor checks plus the work later checks reuse, so nothing is fetched or authenticated twice
+class DoctorReport:
+    # Starts an empty report with no Last.fm client and no channel marked ready for a delivery test
+    def __init__(self):
+        self.checks: List[Any] = []
+        self.network: Any = None
+        self.user: Any = None
+        # Structural flags, so offering a delivery test never depends on matching a rendered label
+        self.email_ready = False
+        self.webhook_ready = False
+
+
+# Builds one doctor check, keeping construction in one place so the shape cannot drift between sections
+def make_doctor_check(section, status, label, detail="", advice=None):
+    if status not in DOCTOR_STATUSES:
+        raise ValueError(f"Unsupported doctor status: {status}")
+    # A row the user has to act on is useless without an action, so the row is rejected rather than printed bare
+    if status in ("WARN", "FAIL") and (advice is None or not advice.fix):
+        raise ValueError(f"Doctor {status} rows require a fix")
+    # Several advice objects carry the same text as their summary and printing it twice reads as two problems
+    return DoctorCheck(section, status, label, "" if str(detail).strip() == str(label).strip() else sanitize_error_text(detail), advice)
+
+
+# Joins setting names the way every doctor detail and action in this family lists them
+def join_setting_names(names, conjunction):
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} {conjunction} {names[-1]}"
+
+
+# Reports the Python version and every library the tool imports, required ones apart from optional ones
+def doctor_check_environment(version_info=None, spec_finder=None):
+    checks = []
+    selected_version = sys.version_info if version_info is None else version_info
+    version_text = ".".join(str(part) for part in tuple(selected_version)[:3])
+    minimum_detail = f"Minimum supported version: {MINIMUM_PYTHON_VERSION_TEXT}"
+    if tuple(selected_version)[:2] >= MINIMUM_PYTHON_VERSION:
+        checks.append(make_doctor_check("Environment", "PASS", f"Python {version_text} is supported", minimum_detail))
+    else:
+        advice = make_recovery_advice("dependency.missing", f"Python {version_text} is unsupported", recovery_fix_with_guide(f"Install Python {MINIMUM_PYTHON_VERSION_TEXT} or newer then retry", INSTALLATION_GUIDE_URL), False)
+        checks.append(make_doctor_check("Environment", "FAIL", advice.summary, minimum_detail, advice))
+
+    find_spec = importlib.util.find_spec if spec_finder is None else spec_finder
+
+    # Returns whether one module can be located, treating an unimportable parent as absent
+    def module_present(module_name):
+        try:
+            return find_spec(module_name) is not None
+        except (ImportError, ValueError):
+            return False
+
+    for module_name, package_name in (("pylast", "pylast"), ("requests", "requests"), ("dateutil", "python-dateutil"), ("pyotp", "pyotp")):
+        if module_present(module_name):
+            checks.append(make_doctor_check("Environment", "PASS", f"Required dependency {package_name} is installed"))
+        else:
+            advice = make_recovery_advice("dependency.missing", f"Required dependency {package_name} is missing", recovery_fix_with_guide(f'Install it with: {install_dependency_command(package_name)}', INSTALLATION_GUIDE_URL), False)
+            checks.append(make_doctor_check("Environment", "FAIL", advice.summary, advice=advice))
+
+    optional = [
+        ("dotenv", "python-dotenv", "Secrets can only come from environment variables or the configuration file", "Used only for reading secrets from a dotenv file"),
+        ("spotipy", "spotipy", "The Spotify OAuth app metadata backend is unavailable, leaving the anonymous web player", "Used only for the Spotify OAuth app metadata backend"),
+        ("bs4", "beautifulsoup4", "Follower, following and profile tracking cannot run", "Used only for follower, following and profile tracking"),
+        ("curl_cffi", "curl_cffi", "Follower, following and profile tracking cannot run", "Used only for Last.fm website requests in follower, following and profile tracking"),
+        ("wcwidth", "wcwidth", "Wide characters count as one column, so a line holding them can run past the limit", "Used only to measure display width for screen truncation"),
+    ]
+    # The classic Command Prompt is the only place this library changes anything, so a machine it cannot
+    # affect is not warned about a package it does not need
+    if platform.system() == "Windows":
+        optional.append(("colorama", "colorama", "Coloured output may not render in the classic Windows Command Prompt", "Used only for coloured output in the older Windows Command Prompt"))
+    for module_name, package_name, purpose, use in optional:
+        if module_present(module_name):
+            checks.append(make_doctor_check("Environment", "PASS", f"Optional dependency {package_name} is installed", use))
+        else:
+            advice = make_recovery_advice("dependency.missing", f"Optional dependency {package_name} is not installed", recovery_fix_with_guide(f'Install it with: {install_dependency_command(package_name)}', INSTALLATION_GUIDE_URL), False)
+            checks.append(make_doctor_check("Environment", "WARN", advice.summary, f"{purpose}. Every other feature is unaffected", advice))
+    return checks
+
+
+# The name each secret source is reported under, spelled the way every sibling monitor spells it
+DOCTOR_SECRET_SOURCE_LABELS = {"config file": "configuration file", "dotenv file": "dotenv file", "environment": "environment", "command line": "command line"}
+
+
+# Reports which secrets are in effect and where each one was read from, by name and never by value
+def doctor_secret_checks():
+    checks = [make_doctor_check("Configuration", "PASS", f"Secrets loaded from the {DOCTOR_SECRET_SOURCE_LABELS[source]}", ", ".join(names)) for source, names in secrets_by_source()]
+    if not checks:
+        checks.append(make_doctor_check("Configuration", "PASS", "No secrets loaded", "Nothing was read from a dotenv file, the environment, the configuration file or the command line"))
+    return checks
+
+
+# Returns the log file monitoring will actually write, which needs the target-derived suffix
+def build_log_path(base_path, suffix):
+    log_path = Path(os.path.expanduser(str(base_path)))
+    if log_path.suffix == "" and suffix:
+        log_path = log_path.parent / f"{log_path.name}_{suffix}.log"
+    return log_path
+
+
+# Returns the closest parent that exists, so writability is judged without creating anything
+def nearest_existing_parent(path):
+    candidate = Path(path).expanduser()
+    if candidate.exists():
+        return candidate if candidate.is_dir() else candidate.parent
+    while not candidate.exists() and candidate != candidate.parent:
+        candidate = candidate.parent
+    return candidate
+
+
+# Reports whether one file monitoring will write can be created, without creating anything
+def doctor_destination_check(label, destination, section="Configuration", creates_parents=False):
+    selected = Path(destination).expanduser()
+    parent = nearest_existing_parent(selected) if creates_parents else selected.parent
+    writable = selected.is_file() and os.access(selected, os.W_OK) if selected.exists() else parent.is_dir() and os.access(parent, os.W_OK)
+    if writable:
+        return make_doctor_check(section, "PASS", f"{label} appears writable", f"Path: {selected}")
+    advice = classify_recovery_error(context="file", detail=f"{label} is not writable: {selected}")
+    return make_doctor_check(section, "FAIL", advice.summary, advice.detail, advice)
+
+
+# Reports each file monitoring will write or read, resolving the target-derived names once a username is known
+def doctor_output_destination_checks(target_value=None):
+    checks = []
+    suffix = str(target_value) if target_value else ""
+    if DISABLE_LOGGING:
+        checks.append(make_doctor_check("Configuration", "PASS", "Output logging is disabled"))
+    elif LF_LOGFILE:
+        if suffix:
+            checks.append(doctor_destination_check("Log destination", build_log_path(LF_LOGFILE, suffix), creates_parents=True))
+        else:
+            checks.append(make_doctor_check("Configuration", "PASS", "Log destination will be finalized after a username is selected", f"Base path: {Path(os.path.expanduser(LF_LOGFILE))}"))
+    if CSV_FILE:
+        checks.append(doctor_destination_check("CSV destination", CSV_FILE))
+    else:
+        checks.append(make_doctor_check("Configuration", "PASS", "CSV logging is disabled"))
+    if suffix:
+        checks.append(doctor_destination_check("Status destination", f"lastfm_{suffix}_last_activity.json"))
+        if friends_check_enabled():
+            checks.append(doctor_destination_check("Profile state destination", f"lastfm_{suffix}_profile.json"))
+    else:
+        checks.append(make_doctor_check("Configuration", "PASS", "Status file will be finalized after a username is selected", "Base name: lastfm_<lastfm_username>_last_activity.json in the working directory"))
+    if MONITOR_LIST_FILE:
+        monitored = Path(os.path.expanduser(MONITOR_LIST_FILE))
+        if monitored.is_file() and os.access(monitored, os.R_OK):
+            checks.append(make_doctor_check("Configuration", "PASS", "Monitored tracks file is readable", f"Path: {monitored}"))
+        else:
+            advice = classify_recovery_error(context="file", detail=f"The file with Last.fm tracks cannot be opened: {monitored}")
+            checks.append(make_doctor_check("Configuration", "FAIL", advice.summary, advice.detail, advice))
+    return checks
+
+
+# Names every on/off setting holding something other than True or False, since a string such as "false" would count as on
+def runtime_boolean_errors():
+    errors = []
+    for statement in ast.parse(CONFIG_BLOCK, "<built-in-config>", "exec").body:
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1 and isinstance(statement.targets[0], ast.Name) and isinstance(statement.value, ast.Constant) and isinstance(statement.value.value, bool):
+            value = globals().get(statement.targets[0].id)
+            if not isinstance(value, bool):
+                errors.append(f"{statement.targets[0].id} must be True or False, not {value!r}")
+    return errors
+
+
+# Returns all type and range errors in settings that control runtime timing or counts
+def runtime_configuration_errors():
+    errors = []
+    positive_numbers = (("LASTFM_CHECK_INTERVAL", LASTFM_CHECK_INTERVAL), ("LASTFM_ACTIVE_CHECK_INTERVAL", LASTFM_ACTIVE_CHECK_INTERVAL), ("LASTFM_INACTIVITY_CHECK", LASTFM_INACTIVITY_CHECK), ("CHECK_INTERNET_TIMEOUT", CHECK_INTERNET_TIMEOUT))
+    nonnegative_numbers = (("LIVENESS_CHECK_INTERVAL", LIVENESS_CHECK_INTERVAL), ("LASTFM_BREAK_CHECK_MULTIPLIER", LASTFM_BREAK_CHECK_MULTIPLIER), ("FRIENDS_CHECK_INTERVAL", FRIENDS_CHECK_INTERVAL), ("FRIENDS_RETRY_INTERVAL", FRIENDS_RETRY_INTERVAL))
+    for name, value in positive_numbers:
+        if not finite_number(value) or value <= 0:
+            errors.append(f"{name} must be a number greater than zero, not {value!r}")
+    for name, value in nonnegative_numbers:
+        if not finite_number(value) or value < 0:
+            errors.append(f"{name} must be a number zero or greater, not {value!r}")
+    if not isinstance(SMTP_PORT, int) or isinstance(SMTP_PORT, bool) or not 1 <= SMTP_PORT <= 65535:
+        errors.append(f"SMTP_PORT must be an integer from 1 through 65535, not {SMTP_PORT!r}")
+    return errors
+
+
+# The values this file defines for the settings checked below, so a configuration file that makes one
+# unusable can be reported and then ignored instead of stopping the commands that exist to correct it
+BUILT_IN_SHAPE_SETTINGS = {name: globals()[name] for name in ('LF_LOGFILE', 'CSV_FILE', 'MONITOR_LIST_FILE', 'DOTENV_FILE', 'COLOR_THEME', 'TRUNCATE_CHARS', 'SP_TOKENS_FILE') if name in globals()}
+
+# Shape errors whose settings were replaced with the built-in values, so doctor still names them
+DISCARDED_SETTING_ERRORS = []
+
+DOTENV_STARTUP_ERRORS = {}
+
+
+# Names the cause of a dotenv file the run could not load, so startup and doctor word the same failure the same way
+def dotenv_load_problem(path, error):
+    if isinstance(error, UnicodeError):
+        return f"Dotenv file '{path}' is not valid UTF-8 text", "Save the dotenv file as UTF-8"
+    if isinstance(error, OSError):
+        return f"Dotenv file '{path}' could not be opened", "Check the dotenv file path and its read permissions"
+    return f"Dotenv file '{path}' could not be read", "Check that the dotenv file is readable UTF-8 text"
+
+
+# True when the selected command exists to correct the configuration, so a malformed setting is reported
+# there instead of stopping the one run that could repair it
+def command_reports_configuration(args=None):
+    # Read from the parsed namespace rather than the raw words, since argparse also accepts abbreviations
+    return any(getattr(args, name, False) for name in ("doctor", "setup", "set_lastfm_credentials", "set_smtp_password", "set_spotify_credentials", "set_webhook_url"))
+
+
+# Validates effective path settings before startup expands or opens them
+def prepare_configured_paths(args):
+    overrides = {'DOTENV_FILE': 'env_file', 'CSV_FILE': 'csv_file', 'MONITOR_LIST_FILE': 'monitor_list'}
+    settings = globals().copy()
+    for name, argument in overrides.items():
+        value = getattr(args, argument, None)
+        if value:
+            settings[name] = value
+    if getattr(args, "truncate", None) is not None:
+        settings["TRUNCATE_CHARS"] = args.truncate
+        globals()["TRUNCATE_CHARS"] = args.truncate
+    errors = configuration_shape_errors(settings)
+    if not errors:
+        # Cleared here so a run that starts with usable settings cannot inherit an earlier run's report
+        DISCARDED_SETTING_ERRORS.clear()
+        return
+    advice = make_recovery_advice("config.invalid", "Invalid settings: " + ". ".join(errors), recovery_fix_with_guide("Correct the named settings in the configuration file or command line", CONFIG_GUIDE_URL), False)
+    # A monitoring run cannot continue on a value this broken, but doctor, the setup wizard and the secret
+    # commands are how it gets corrected, so they fall back to the built-in values and report the setting
+    if not command_reports_configuration(args):
+        print_recovery_advice(advice)
+        raise SystemExit(1)
+    DISCARDED_SETTING_ERRORS[:] = errors
+    # Only the values that are broken after command-line overrides are replaced, so an override still wins
+    for name, built_in in BUILT_IN_SHAPE_SETTINGS.items():
+        if name in settings and configuration_shape_errors({name: settings[name]}):
+            globals()[name] = built_in
+    # Doctor lists the same settings as report rows, so a warning above it would only say them twice
+    if not getattr(args, "doctor", False):
+        print_recovery_advice(advice, label="Warning")
+        print()
+
+
+# Names malformed path and color settings before diagnostics consume their values
+def configuration_shape_errors(settings=None):
+    errors = list(DISCARDED_SETTING_ERRORS) if settings is None else []
+    settings = globals() if settings is None else settings
+    for name in ('LF_LOGFILE', 'CSV_FILE', 'MONITOR_LIST_FILE', 'DOTENV_FILE', 'SP_TOKENS_FILE'):
+        if name in settings and not isinstance(settings[name], (str, os.PathLike)):
+            errors.append(f"{name} must be a path string")
+    width = settings.get("TRUNCATE_CHARS", 0)
+    if not isinstance(width, int) or isinstance(width, bool) or width < 0:
+        errors.append("TRUNCATE_CHARS must be an integer zero or greater")
+    theme = settings.get("COLOR_THEME", {})
+    if not isinstance(theme, dict):
+        errors.append("COLOR_THEME must be a dictionary of style strings")
+    else:
+        errors.extend(f"COLOR_THEME[{key!r}] must be a style string" for key, value in theme.items() if not isinstance(value, str))
+    return errors
+
+
+# Replaces every setting still holding a value this file cannot use with the built-in one, so a report reached
+# from any entry point reads a usable value after it has named the setting
+def discard_invalid_shape_settings():
+    for name, built_in in BUILT_IN_SHAPE_SETTINGS.items():
+        if configuration_shape_errors({name: globals().get(name)}):
+            globals()[name] = built_in
+
+
+# Reports the configuration and dotenv files in effect plus every file the tool will write
+def doctor_check_configuration(config_path=None, env_path=None, target_value=None):
+    # Read before the unusable values are replaced, so each row names the value the user configured
+    # Reported as ordinary rows so one malformed setting cannot hide the rest of the configuration report
+    checks = [make_doctor_check("Configuration", "FAIL", detail, advice=make_recovery_advice("config.invalid", detail, recovery_fix_with_guide("Correct the named setting in the configuration file", CONFIG_GUIDE_URL), False)) for detail in configuration_shape_errors()]
+    discard_invalid_shape_settings()
+    if config_path:
+        checks.append(make_doctor_check("Configuration", "PASS", "Configuration file loaded", f"Path: {config_path}"))
+    else:
+        checks.append(make_doctor_check("Configuration", "PASS", "No configuration file selected", "Using built-in defaults and command-line overrides"))
+    if env_path and str(env_path) in DOTENV_STARTUP_ERRORS:
+        detail, fix = DOTENV_STARTUP_ERRORS[str(env_path)]
+        advice = make_recovery_advice("file.unreadable", detail, recovery_fix_with_guide(f"{fix}, then run Doctor again", CONFIG_GUIDE_URL), False)
+        checks.append(make_doctor_check("Configuration", "FAIL", "Dotenv file could not be loaded", detail, advice))
+    elif env_path and os.path.isfile(str(env_path)):
+        checks.append(make_doctor_check("Configuration", "PASS", "Dotenv file loaded", f"Path: {env_path}"))
+    elif env_path:
+        advice = make_recovery_advice("config.missing", "The requested dotenv file was not found", recovery_fix_with_guide("Create the file or select an existing path with --env-file", SECRETS_GUIDE_URL), False, f"Path: {env_path}")
+        checks.append(make_doctor_check("Configuration", "WARN", advice.summary, advice.detail, advice))
+    else:
+        checks.append(make_doctor_check("Configuration", "PASS", "No dotenv file selected", "Using environment variables and other configured sources"))
+    checks.extend(doctor_secret_checks())
+
+    if VERIFY_SSL:
+        checks.append(make_doctor_check("Configuration", "PASS", "TLS certificate verification is on", "Every outbound request checks the server certificate"))
+    else:
+        advice = make_recovery_advice("config.insecure", "TLS certificate verification is off", recovery_fix_with_guide("Set VERIFY_SSL back to True unless this network intercepts TLS with its own certificate authority", TLS_GUIDE_URL), False)
+        checks.append(make_doctor_check("Configuration", "WARN", advice.summary, "VERIFY_SSL is False, so an intercepted connection cannot be told apart from the real service", advice))
+
+    numeric_errors = runtime_configuration_errors()
+    if numeric_errors:
+        numeric_detail = "Invalid numeric settings: " + "; ".join(numeric_errors)
+        advice = make_recovery_advice("config.invalid", "One or more numeric settings are invalid", recovery_fix_with_guide("Correct the reported settings in the configuration file", CONFIG_GUIDE_URL), False, numeric_detail)
+        checks.append(make_doctor_check("Configuration", "FAIL", advice.summary, numeric_detail, advice))
+    boolean_errors = runtime_boolean_errors()
+    if boolean_errors:
+        boolean_detail = "Invalid on/off settings: " + "; ".join(boolean_errors)
+        advice = make_recovery_advice("config.invalid", "One or more on/off settings are invalid", recovery_fix_with_guide("Set the reported settings to True or False in the configuration file", CONFIG_GUIDE_URL), False, boolean_detail)
+        checks.append(make_doctor_check("Configuration", "FAIL", "One or more on/off settings are invalid", boolean_detail, advice))
+
+    checks.extend(doctor_output_destination_checks(target_value))
+    return checks
+
+
+# Confirms the configured connectivity endpoint is reachable, reusing the settings monitoring will use
+def doctor_check_connectivity():
+    global LAST_CONNECTIVITY_ERROR
+    LAST_CONNECTIVITY_ERROR = None
+    if check_internet(quiet=True):
+        return [make_doctor_check("Connectivity", "PASS", "The connectivity endpoint is reachable", f"Endpoint: {CHECK_INTERNET_URL}")]
+    advice = classify_recovery_error(LAST_CONNECTIVITY_ERROR, context="connectivity", detail=f"Could not reach {CHECK_INTERNET_URL}")
+    return [make_doctor_check("Connectivity", "FAIL", "The connectivity endpoint could not be reached", f"Endpoint: {CHECK_INTERNET_URL}", advice)]
+
+
+# Validates the Last.fm credential pair with one real API call and keeps the client for the target check
+def doctor_check_authentication(report):
+    unset = [name for name in ("LASTFM_API_KEY", "LASTFM_API_SECRET") if not doctor_value_is_set(globals().get(name))]
+    if unset:
+        advice = classify_recovery_error(context="secret.missing", detail=f"{join_setting_names(unset, 'or')} is empty or still set to its placeholder")
+        return [make_doctor_check("Authentication", "FAIL", "The Last.fm credentials are incomplete", advice.detail, advice)]
+    try:
+        report.network = pylast.LastFMNetwork(LASTFM_API_KEY, LASTFM_API_SECRET)
+        report.network.get_top_artists(limit=1)
+    except Exception as exc:
+        report.network = None
+        advice = classify_recovery_error(exc)
+        return [make_doctor_check("Authentication", "FAIL", advice.summary, advice.detail, advice)]
+    return [make_doctor_check("Authentication", "PASS", "Last.fm accepted the configured API key", "The shared secret is set. Neither value was displayed")]
+
+
+# Reports which Spotify metadata backend a run will use, and only while a feature actually needs one
+def doctor_check_spotify_metadata(report):
+    if not (TRACK_SONGS or USE_TRACK_DURATION_FROM_SPOTIFY):
+        return []
+    checks = []
+    if not spotify_oauth_app_configured():
+        return [make_doctor_check("Spotify metadata", "PASS", "The anonymous Spotify web player supplies track metadata", "No OAuth app is configured, which needs no credentials")]
+    try:
+        spotify_get_access_token(SP_CLIENT_ID, SP_CLIENT_SECRET, validate_credentials=True)
+    except Exception as exc:
+        exit_if_out_of_file_descriptors(exc)
+        advice = make_recovery_advice("auth.api_key_invalid", "Spotify did not accept the OAuth app credentials", recovery_fix_with_guide(f"Check SP_CLIENT_ID and SP_CLIENT_SECRET, or save a working pair with '{render_command(['--set-spotify-credentials'])}'", SPOTIFY_APP_GUIDE_URL), False, sanitize_error_text(exc))
+        checks.append(make_doctor_check("Spotify metadata", "WARN", advice.summary, "Track metadata falls back to the anonymous Spotify web player", advice))
+    else:
+        checks.append(make_doctor_check("Spotify metadata", "PASS", "Spotify accepted the configured OAuth app credentials", "Track metadata uses the OAuth app first, then the anonymous web player"))
+    if SP_TOKENS_FILE:
+        checks.append(doctor_destination_check("Spotify token cache destination", SP_TOKENS_FILE, section="Spotify metadata"))
+    else:
+        checks.append(make_doctor_check("Spotify metadata", "PASS", "Spotify tokens are cached in memory only", "SP_TOKENS_FILE is empty, so nothing is written to disk"))
+    return checks
+
+
+# Confirms the monitored user exists and their listening history is readable, which is what the loop reads first
+def doctor_check_target(report, target_value=None):
+    if not target_value:
+        advice = classify_recovery_error(context="target.missing")
+        return [make_doctor_check("Target", "WARN", advice.summary, "Nothing will be monitored until one is given", advice)]
+    if report.network is None:
+        return [make_doctor_check("Target", "SKIP", "The monitored profile was not checked", "The Last.fm API key did not validate, so no lookup was attempted")]
+    try:
+        recent_tracks = lastfm_get_recent_tracks(target_value, report.network, 1)
+    except Exception as exc:
+        advice = classify_recovery_error(exc, context="runtime", detail=f"Cannot read the recent tracks of '{target_value}'")
+        return [make_doctor_check("Target", "FAIL", advice.summary, advice.detail, advice)]
+    report.user = report.network.get_user(target_value)
+    checks = [make_doctor_check("Target", "PASS", "The monitored profile exists", f"Last.fm user: {target_value}")]
+    if recent_tracks:
+        checks.append(make_doctor_check("Target", "PASS", "The recent listening history is readable", "Scrobbles are visible, so activity can be detected"))
+    else:
+        checks.append(make_doctor_check("Target", "PASS", "The recent listening history is readable but empty", "No scrobbles yet, so monitoring waits for the first track"))
+    return checks
+
+
+# Returns the doctor row for email alerts whose settings cannot deliver, worded the same way by every sibling monitor
+def doctor_email_unusable_check(detail, fix):
+    advice = make_recovery_advice("smtp.invalid", EMAIL_UNUSABLE_CHECK_LABEL, recovery_fix_with_guide(fix, SMTP_GUIDE_URL), False, detail)
+    return make_doctor_check("Notifications", "WARN", EMAIL_UNUSABLE_CHECK_LABEL, detail, advice)
+
+
+# Checks email alert settings then confirms the SMTP sign-in without sending anything
+def doctor_check_email_notifications(report):
+    enabled_categories = _startup_email_notification_categories()
+    unset = mail_settings_missing()
+    # The error alert ships on by default, so it alone cannot mean the channel is switched on
+    deliberate_categories = [category for category in enabled_categories if category != "errors"]
+    if not deliberate_categories and unset:
+        return [make_doctor_check("Notifications", "PASS", "Email notifications are disabled", "No SMTP connection was attempted and no email was sent")]
+    if unset:
+        return [doctor_email_unusable_check(f"{join_setting_names(unset, 'or')} is empty or still set to its placeholder", f"Set {join_setting_names(unset, 'and')} or turn the email alerts off")]
+    if not enabled_categories:
+        advice = make_recovery_advice("smtp.invalid", "Email is configured but no alert types are selected", recovery_fix_with_guide("Turn on at least one email alert in the configuration file", SMTP_GUIDE_URL), False)
+        return [make_doctor_check("Notifications", "WARN", advice.summary, "Nothing would ever be emailed", advice)]
+    if not doctor_value_is_set(SMTP_USER) or not doctor_value_is_set(SMTP_PASSWORD):
+        return [doctor_email_unusable_check("SMTP_USER or SMTP_PASSWORD is empty or still set to its placeholder", "Set SMTP_USER and SMTP_PASSWORD or turn the email alerts off")]
+    smtp_object = None
+    try:
+        smtp_object = smtp_connect_and_login(SMTP_SSL, smtp_timeout=DOCTOR_SMTP_TIMEOUT)
+    except Exception as exc:
+        advice = classify_recovery_error(exc, "email")
+        return [make_doctor_check("Notifications", "FAIL", advice.summary, advice.detail, advice)]
+    finally:
+        if smtp_object is not None:
+            try:
+                smtp_object.quit()
+            except Exception as cleanup_error:
+                debug_swallowed_exception("SMTP session cleanup", cleanup_error)
+    report.email_ready = True
+    return [make_doctor_check("Notifications", "PASS", SMTP_READY_CHECK_LABEL, f"Alerts: {', '.join(enabled_categories)}. No email was sent during this passive check")]
+
+
+# Checks webhook alert settings without sending anything, asking whether the channel can fire before validating it
+def doctor_check_webhook_notifications(report):
+    selected_categories = _selected_webhook_notification_categories()
+    deliberate_categories = [category for category in selected_categories if category != "errors"]
+    if not WEBHOOK_ENABLED and not deliberate_categories:
+        return [make_doctor_check("Notifications", "PASS", "Webhook alerts are disabled")]
+    if not WEBHOOK_ENABLED:
+        advice = make_recovery_advice("webhook.invalid", "Webhook alert types are selected but webhooks are switched off", recovery_fix_with_guide("Set WEBHOOK_ENABLED to True, or turn the alert types off", WEBHOOK_GUIDE_URL), False)
+        return [make_doctor_check("Notifications", "WARN", advice.summary, "Nothing would ever be delivered", advice)]
+    if not normalized_webhook_provider():
+        advice = classify_recovery_error(context="webhook", detail="WEBHOOK_PROVIDER must be discord or ntfy")
+        return [make_doctor_check("Notifications", "FAIL", advice.summary, advice.detail, advice)]
+    if not validate_webhook_url():
+        advice = classify_recovery_error(context="webhook", detail="WEBHOOK_URL must contain a complete HTTPS link")
+        return [make_doctor_check("Notifications", "FAIL", advice.summary, advice.detail, advice)]
+    for validation_error in (validate_webhook_customization(normalized_webhook_provider()), validate_webhook_headers(normalized_webhook_provider())):
+        if validation_error is not None:
+            advice = classify_recovery_error(context="webhook", detail=validation_error)
+            return [make_doctor_check("Notifications", "FAIL", advice.summary, advice.detail, advice)]
+    if not selected_categories:
+        advice = make_recovery_advice("webhook.invalid", "Webhook alerts are on but no alert types are selected", recovery_fix_with_guide("Turn on at least one webhook alert in the configuration file, or set WEBHOOK_ENABLED to False", WEBHOOK_GUIDE_URL), False)
+        return [make_doctor_check("Notifications", "WARN", advice.summary, "Nothing would ever be delivered", advice)]
+    report.webhook_ready = True
+    return [make_doctor_check("Notifications", "PASS", f"{WEBHOOK_READY_CHECK_LABEL} for {webhook_provider_display_name()}", f"Alerts: {', '.join(selected_categories)}. The private link was not displayed. No webhook was sent during this passive check")]
+
+
+# Renders one doctor result marker in the colour its status calls for
+def render_doctor_marker(status):
+    return colorize(DOCTOR_MARK_STYLES.get(status, "info"), f"[{status}]")
+
+
+# Prints one result the way the report renders it, so a row printed after the report matches the rows above it
+def print_doctor_check(check):
+    print(f"{render_doctor_marker(check.status)} {check.label}")
+    if check.detail:
+        print(f"  {colorize_links(check.detail)}")
+
+
+# Renders the heading and every non-empty section, with a fix line on the rows that are not a pass
+def render_doctor_sections(report):
+    # The install method is context rather than a check: it cannot fail, so it is stated once here
+    # instead of occupying a result row that no marker describes
+    lines = [colorize("header", "Doctor"), f"Detected install method: {colorize('username', install_method())}"]
+    for section in DOCTOR_SECTIONS:
+        section_checks = [check for check in report.checks if check.section == section]
+        if not section_checks:
+            continue
+        lines.extend(("", colorize("section", section)))
+        for check in section_checks:
+            lines.append(f"{render_doctor_marker(check.status)} {check.label}")
+            if check.detail:
+                lines.append(f"  {colorize_links(check.detail)}")
+            if check.status != "PASS" and check.advice is not None:
+                # The fix carries its own guide line, so each line is indented and styled on its own rather
+                # than leaving one colour sequence open across the newline
+                lines.extend(f"  {colorize_fix_line(advice_line)}" for advice_line in f"To fix: {check.advice.fix}".splitlines())
+    return sanitize_error_text("\n".join(lines))
+
+
+# Renders the one sentence that says whether the setup is usable and where to read more
+def render_doctor_summary(checks):
+    failures = sum(check.status == "FAIL" for check in checks)
+    warnings = sum(check.status == "WARN" for check in checks)
+    if failures:
+        summary_line = colorize("error", f"  {failures} check(s) failed, {warnings} warning(s). Fix the failures above before relying on the tool.")
+    elif warnings:
+        summary_line = colorize("warning", f"  All critical checks passed with {warnings} warning(s). Review the warnings above.")
+    else:
+        summary_line = colorize("boolean_true", "  All checks passed. You are good to go!")
+    return "\n".join(("", colorize("header", "Summary"), summary_line, "", colorize_links(f"Guide: {DOCTOR_GUIDE_URL}")))
+
+
+# Returns the real terminal underneath the installed stream, so progress can move the cursor safely
+def _doctor_terminal_stream():
+    return unwrap_terminal_stream(sys.stdout)
+
+
+# Shows one transient doctor step, only on an interactive terminal
+# The line stays uncoloured on purpose: it is erased by writing exactly len(line) spaces, and escape
+# sequences would make that width wrong and leave a styled remnant behind
+def _doctor_progress(label):
+    global DOCTOR_PROGRESS_WIDTH
+    terminal = _doctor_terminal_stream()
+    if terminal.isatty():
+        if DOCTOR_PROGRESS_WIDTH:
+            terminal.write("\r" + (" " * DOCTOR_PROGRESS_WIDTH) + "\r")
+        line = f"* Checking {ANSI_ESCAPE_RE.sub('', sanitize_terminal_text(label))} ..."
+        DOCTOR_PROGRESS_WIDTH = len(line)
+        terminal.write("\r" + line)
+        terminal.flush()
+
+
+# Clears the transient doctor progress line on an interactive terminal
+def _doctor_progress_clear():
+    global DOCTOR_PROGRESS_WIDTH
+    terminal = _doctor_terminal_stream()
+    if terminal.isatty() and DOCTOR_PROGRESS_WIDTH:
+        terminal.write("\r" + (" " * DOCTOR_PROGRESS_WIDTH) + "\r")
+        terminal.flush()
+    DOCTOR_PROGRESS_WIDTH = 0
+
+
+# States what doctor will and will not do, before the first slow check starts rather than after
+def render_doctor_notice():
+    print("Running preflight checks. No files will be written. Interactive email and webhook tests run only after separate approval.\n")
+
+
+# Prompts for explicit delivery consent and defaults safely to no
+def _doctor_ask_yes_no(question, input_func=None):
+    prompt = input if input_func is None else input_func
+    while True:
+        try:
+            value = prompt(colorize("info", f"{question} [y/N]: ")).strip().casefold()
+        except EOFError:
+            print("\nDelivery test skipped.")
+            return False
+        except KeyboardInterrupt:
+            # Ctrl+C ends the run here the way it does anywhere else, rather than only declining this one test
+            signal_handler(signal.SIGINT, None)
+            raise
+        if not value or value in ("n", "no"):
+            return False
+        if value in ("y", "yes"):
+            return True
+        print("  Please answer 'y' or 'n'.")
+
+
+# Offers one real delivery per ready channel, only after separate interactive approval
+def _doctor_offer_notification_tests(report, input_func=None):
+    # The terminal underneath any logger wrapper, since that wrapper answers no isatty of its own
+    if not sys.stdin.isatty() or not _doctor_terminal_stream().isatty():
+        return []
+    if not report.email_ready and not report.webhook_ready:
+        return []
+    print("\n" + colorize("section", DOCTOR_DELIVERY_SECTION) + "\n")
+    print("Doctor will not write files. Each approved test sends one real message.\n")
+    checks = []
+    if report.email_ready:
+        if _doctor_ask_yes_no("Send one test email now? This will deliver a real message", input_func=input_func):
+            delivered = send_email(DOCTOR_TEST_EMAIL_SUBJECT, DOCTOR_TEST_EMAIL_BODY, "", SMTP_SSL, smtp_timeout=DOCTOR_SMTP_TIMEOUT, report_delivery=False) == 0
+            if delivered:
+                check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "PASS", "Doctor test email delivered", "One real test email was sent after confirmation")
+            else:
+                advice = make_recovery_advice("smtp.connection", "Doctor test email delivery failed", recovery_fix_with_guide("Review the SMTP error above and correct the email settings", SMTP_GUIDE_URL), True)
+                check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "FAIL", advice.summary, "The approved test email could not be delivered", advice)
+        else:
+            check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "SKIP", "Test email was not sent", "You declined the real delivery test. Run doctor again and approve the email test when ready")
+        checks.append(check)
+        # Recorded on the report so the summary sentence and the exit code cannot disagree about the same run
+        report.checks.append(check)
+        print_doctor_check(check)
+    if report.webhook_ready:
+        provider = webhook_provider_display_name()
+        if _doctor_ask_yes_no(f"Send one test webhook through {provider} now? This will publish a real notification", input_func=input_func):
+            delivered = send_webhook(DOCTOR_TEST_WEBHOOK_TITLE, DOCTOR_TEST_WEBHOOK_BODY, "song", force=True, report_delivery=False) == 0
+            if delivered:
+                check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "PASS", f"Doctor test webhook through {provider} delivered", "One real test webhook was sent after confirmation")
+            else:
+                advice = make_recovery_advice("webhook.connection", f"Doctor test webhook through {provider} delivery failed", recovery_fix_with_guide("Review the webhook error above and correct the destination settings", WEBHOOK_GUIDE_URL), True)
+                check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "FAIL", advice.summary, "The approved test webhook could not be delivered", advice)
+        else:
+            check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "SKIP", f"Test webhook through {provider} was not sent", "You declined the real delivery test. Run doctor again and approve the webhook test when ready")
+        checks.append(check)
+        report.checks.append(check)
+        print_doctor_check(check)
+    return checks
+
+
+# One startup summary setting, routed to the concise view, the verbose view or both. The log keeps the verbose view
+StartupSummaryRow = namedtuple("StartupSummaryRow", ["label", "value", "concise", "full"])
+StartupSummaryRow.__new__.__defaults__ = (False, True)
+
+
+# Returns whether the full startup summary should be shown, which either diagnostic mode implies
+def full_startup_summary_enabled():
+    return bool(VERBOSE_MODE or DEBUG_MODE)
+
+
+# Rows that detail the channel named right above them, indented so the block reads as one setting with its details
+STARTUP_SUMMARY_NESTED_LABELS = ("Email transport", "Email recipient", "Email images", "Webhook provider", "ntfy images")
+
+
+# Formats one summary row with an aligned value column, wrapping only the rollups that grow long
+def format_startup_summary_row(row):
+    indent = "  " if row.label in STARTUP_SUMMARY_NESTED_LABELS else ""
+    prefix = f"* {indent}{(row.label + ':'):<{30 - len(indent)}}"
+    if row.label in ("Notifications (email)", "Notifications (webhook)"):
+        return textwrap.fill(str(row.value), width=100, initial_indent=prefix, subsequent_indent=" " * len(prefix), break_long_words=False, break_on_hyphens=False) + "\n"
+    return f"{prefix}{row.value}\n"
+
+
+# Prints the summary, showing the concise rows unless the full view was asked for. The log file always keeps
+# the complete set, so a bug report made from a log carries every effective setting whatever the terminal showed
+def emit_startup_summary(rows, show_full=False, stream=None):
+    destination = sys.stdout if stream is None else stream
+    # A stream that does not split its output has no log file to hold the full view, so those writes go nowhere
+    write_log = getattr(destination, "log_only", lambda line: None)
+    write_terminal = getattr(destination, "terminal_only", None)
+    if write_terminal is None:
+        write_terminal = destination.write
+    for row in rows:
+        line = format_startup_summary_row(row)
+        if row.full:
+            write_log(line)
+        if row.full if show_full else row.concise:
+            write_terminal(line)
+    write_log("\n")
+    write_terminal("\n")
+    destination.flush()
+
+
+# Names the Spotify metadata backends this run would try, in the order it tries them
+def spotify_metadata_backend_description():
+    if not (TRACK_SONGS or USE_TRACK_DURATION_FROM_SPOTIFY):
+        return "Disabled"
+    return "OAuth app, then anonymous web player" if spotify_oauth_app_configured() else "Anonymous web player"
+
+
+# Hides the middle of an address's local part, so a log can be shared while the reader can still spot a typo
+def mask_email_address(address):
+    text = str(address or "").strip()
+    local, at_sign, domain = text.partition("@")
+    if not at_sign or not local or not domain:
+        return text
+    masked = f"{local[0]}{'*' * (len(local) - 2)}{local[-1]}" if len(local) > 2 else f"{local[0]}{'*' * (len(local) - 1)}"
+    return f"{masked}@{domain}"
+
+
+# Names the mail server this run would use, leaving out the account that signs in to it
+def startup_email_transport():
+    if not SMTP_HOST or not SMTP_PORT:
+        return "Not configured"
+    return f"{SMTP_HOST}:{SMTP_PORT} ({'STARTTLS' if SMTP_SSL else 'TLS off'})"
+
+
+# Names the configured webhook service and whether the channel is switched on, which are two separate settings
+def startup_webhook_provider():
+    if not normalized_webhook_provider() or not str(WEBHOOK_URL or "").strip():
+        return "Not configured"
+    return f"{webhook_provider_display_name()} ({'enabled' if WEBHOOK_ENABLED else 'disabled'})"
+
+
+# Builds every startup summary row, deciding per row whether it belongs in the concise view, the full view and the log
+def build_startup_summary(target=None, config_path=None, env_path=None, log_path=None):
+    grouped_secrets = dict(secrets_by_source())
+    logging_enabled = bool(log_path) and not DISABLE_LOGGING
+    tracked_fields = (TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME)
+    return [
+        StartupSummaryRow("Target", str(target) if target else "None", concise=True),
+        StartupSummaryRow("Polling intervals", f"[offline: {display_time(LASTFM_CHECK_INTERVAL)}] [active: {display_time(LASTFM_ACTIVE_CHECK_INTERVAL)}]", concise=True),
+        StartupSummaryRow("Inactivity timer", display_time(LASTFM_INACTIVITY_CHECK), concise=True),
+        StartupSummaryRow("Notifications (email)", _startup_notification_state(_startup_email_notification_categories()), concise=True),
+        StartupSummaryRow("Email transport", startup_email_transport()),
+        StartupSummaryRow("Email recipient", mask_email_address(RECEIVER_EMAIL) if RECEIVER_EMAIL else "Not configured"),
+        StartupSummaryRow("Notifications (webhook)", _startup_notification_state(_startup_webhook_notification_categories()), concise=True),
+        StartupSummaryRow("Webhook provider", startup_webhook_provider()),
+        StartupSummaryRow("Delivery confirmations", str(DELIVERY_CONFIRMATIONS)),
+        StartupSummaryRow("Output", str(log_path) if logging_enabled else "Terminal only (logging disabled)", concise=True, full=False),
+        StartupSummaryRow("Output logging", str(log_path) if logging_enabled else "Disabled"),
+        StartupSummaryRow("Config", str(config_path) if config_path else ("Discovery disabled" if CONFIG_DISCOVERY_DISABLED else "None"), concise=True),
+        StartupSummaryRow("Dotenv", str(env_path) if env_path else "None", concise=True),
+        # Each tracked feature earns a concise row only while it is actually switched on
+        StartupSummaryRow("Followings tracking", str(TRACK_FOLLOWINGS), concise=bool(TRACK_FOLLOWINGS)),
+        StartupSummaryRow("Followers tracking", str(TRACK_FOLLOWERS), concise=bool(TRACK_FOLLOWERS)),
+        StartupSummaryRow("Bio tracking", str(TRACK_BIO), concise=bool(TRACK_BIO)),
+        StartupSummaryRow("Display name tracking", str(TRACK_DISPLAY_NAME), concise=bool(TRACK_DISPLAY_NAME)),
+        StartupSummaryRow("Friends check interval", display_time(FRIENDS_CHECK_INTERVAL) if FRIENDS_CHECK_INTERVAL > 0 else "Disabled", concise=bool(any(tracked_fields) and FRIENDS_CHECK_INTERVAL > 0)),
+        StartupSummaryRow("Metadata backend", spotify_metadata_backend_description(), concise=bool(TRACK_SONGS or USE_TRACK_DURATION_FROM_SPOTIFY)),
+        # A cache row for a backend this run never reaches would read as a feature that is on
+        StartupSummaryRow("Spotify token cache", SP_TOKENS_FILE or "Memory only", concise=bool(SP_TOKENS_FILE and (TRACK_SONGS or USE_TRACK_DURATION_FROM_SPOTIFY) and spotify_oauth_app_configured())),
+        StartupSummaryRow("Spotify playback control", str(TRACK_SONGS), concise=bool(TRACK_SONGS)),
+        StartupSummaryRow("Track duration from Spotify", str(USE_TRACK_DURATION_FROM_SPOTIFY), concise=bool(USE_TRACK_DURATION_FROM_SPOTIFY)),
+        StartupSummaryRow("Duration marks", str(duration_marks_enabled())),
+        StartupSummaryRow("Play break multiplier", f"{LASTFM_BREAK_CHECK_MULTIPLIER} ({display_time(LASTFM_BREAK_CHECK_MULTIPLIER * LASTFM_ACTIVE_CHECK_INTERVAL)})"),
+        StartupSummaryRow("Progress indicator", str(PROGRESS_INDICATOR), concise=bool(PROGRESS_INDICATOR)),
+        StartupSummaryRow("Liveness output", display_time(LIVENESS_CHECK_INTERVAL) if LIVENESS_CHECK_INTERVAL else "Disabled", concise=bool(LIVENESS_CHECK_INTERVAL)),
+        StartupSummaryRow("CSV output", CSV_FILE or "Disabled", concise=bool(CSV_FILE)),
+        StartupSummaryRow("Monitored-track alerts", MONITOR_LIST_FILE or "Disabled", concise=bool(MONITOR_LIST_FILE)),
+        StartupSummaryRow("Status file", resolve_status_file(target) if target else "None"),
+        StartupSummaryRow("Terminal truncation", f"{TRUNCATE_CHARS} chars" if TRUNCATE_CHARS else "Disabled", concise=bool(TRUNCATE_CHARS)),
+        StartupSummaryRow("Process id", str(os.getpid())),
+        StartupSummaryRow("Python version", platform.python_version()),
+        StartupSummaryRow("Operating system", f"{platform.platform(terse=True)} ({platform.machine()})"),
+        StartupSummaryRow("Install method", install_method_display_name()),
+        StartupSummaryRow("Secrets from dotenv", ", ".join(grouped_secrets.get("dotenv file", [])) or "None"),
+        StartupSummaryRow("Secrets from environment", ", ".join(grouped_secrets.get("environment", [])) or "None"),
+        StartupSummaryRow("Secrets from config file", ", ".join(grouped_secrets.get("config file", [])) or "None"),
+        StartupSummaryRow("Secrets from command line", ", ".join(grouped_secrets.get("command line", [])) or "None"),
+        StartupSummaryRow("TLS verification", "On" if VERIFY_SSL else "Off, server certificates are not checked", concise=not VERIFY_SSL),
+        StartupSummaryRow("ASCII log separators", f"{ascii_log_separators_enabled()} (mode: {ASCII_LOG_SEPARATORS})"),
+        StartupSummaryRow("Coloured output", f"{COLOR_ENABLED} (setting: {COLORED_OUTPUT})"),
+        StartupSummaryRow("Verbose mode", str(VERBOSE_MODE), concise=bool(VERBOSE_MODE)),
+        StartupSummaryRow("Debug mode", str(DEBUG_MODE), concise=bool(DEBUG_MODE)),
+        # Points at the two modes for a reader who does not know they exist, so the full view drops it
+        StartupSummaryRow("More details", "use --verbose or --debug", concise=True, full=False),
+    ]
+
+
+# Renders the --help examples: one heading per task, then a comment and the command it describes
+def render_help_examples(groups, guide_url):
+    blocks = []
+    for title, entries in groups:
+        block = [f"{title}:"]
+        for comment, command in entries:
+            if len(block) > 1:
+                block.append("")
+            block.extend(f"  # {line}" for line in comment.split("\n"))
+            if command:
+                block.append(f"  {command}")
+        blocks.append("\n".join(block))
+    return "Examples:\n\n" + "\n\n".join(blocks) + f"\n\nGuide: {guide_url}\n"
+
+
+# Returns the --help epilog, listing the commands worth knowing rather than every command there is
+def help_examples():
+    prefix = render_command(include_paths=False)
+    groups = (
+        ("Getting started", (
+            ("Guided setup, recommended for the first run", f"{prefix} --setup"),
+            ("Or save the Last.fm API key and shared secret through hidden prompts", f"{prefix} --set-lastfm-credentials"),
+            ("Check the setup before relying on it", f"{prefix} --doctor <lastfm_username>"),
+            ("Start monitoring", f"{prefix} <lastfm_username>"),
+        )),
+        ("Notifications", (
+            ("Email when the user starts and stops listening", f"{prefix} <lastfm_username> -a -i"),
+            ("Send one test email", f"{prefix} --send-test-email"),
+            ("Send one test webhook", f"{prefix} --send-test-webhook"),
+        )),
+        ("Listening extras", (
+            ("Play every scrobble in your own Spotify client", f"{prefix} <lastfm_username> -g"),
+            ("Alert on the tracks and albums listed in a file", f"{prefix} <lastfm_username> -s tracks.txt"),
+            ("Write every scrobble to a CSV file", f"{prefix} <lastfm_username> -b scrobbles.csv"),
+        )),
+        ("Information and diagnostics", (
+            ("List the most recent tracks and exit", f"{prefix} -l <lastfm_username>"),
+            ("Trace what the tool is doing", f"{prefix} <lastfm_username> --debug"),
+        )),
+    )
+    return render_help_examples(groups, QUICK_START_GUIDE_URL)
+
+
+# Prints one labelled command on its own indented line, the shared shape across these tools
+def _wizard_print_command(label, command, suffix=""):
+    print(label)
+    print(f"    {colorize('section', command)}{colorize('info', suffix) if suffix else ''}\n")
+
+
+# Prints the command that starts monitoring with the files this run checked, so a report read on its own
+# ends with the next action rather than leaving the reader to assemble the command
+def print_doctor_next_steps(target_value=None, doctor_exit=0):
+    print(colorize("header", "\nNext steps\n"))
+    label = "After Doctor passes, start monitoring:" if doctor_exit else "Start monitoring:"
+    _wizard_print_command(label, render_command([target_value] if target_value else ['<lastfm_username>']))
+    # No trailing blank line: the command printer already left one and the report must not end on two
+    print(f"Guide: {colorize('link', QUICK_START_GUIDE_URL)}")
+
+
+# Prints the commands a newcomer needs next, instead of an argparse usage error
+def print_welcome_screen(input_func=None, interactive=None):
+    terminal_is_interactive = sys.stdin.isatty() if interactive is None else interactive
+    print(f"For <lastfm_username>, use the {LASTFM_TARGET_FORMS}.\n")
+    _wizard_print_command("Quickest start (already configured):", render_command(["<lastfm_username>"], include_paths=False))
+    setup_suffix = "   (or just answer Y below)" if terminal_is_interactive else ""
+    _wizard_print_command("Easiest start (guided setup wizard):", render_command(["--setup"], include_paths=False), setup_suffix)
+    _wizard_print_command("Check setup before monitoring:", render_command(["--doctor", "<lastfm_username>"], include_paths=False))
+    _wizard_print_command("Show recent tracks and exit:", render_command(["-l", "<lastfm_username>"], include_paths=False))
+    print(f"Full options: {colorize('section', render_command(['--help'], include_paths=False))}")
+    print(f"\nGuide:        {colorize('link', QUICK_START_GUIDE_URL)}\n")
+    if terminal_is_interactive:
+        try:
+            start_setup = _wizard_ask_yes_no("Run the guided setup wizard now?", default=True, input_func=input_func)
+        except (EOFError, KeyboardInterrupt):
+            # This prompt sits outside the wizard, which handles its own interrupts
+            print(colorize("warning", "Setup cancelled."))
+            return 1
+        if start_setup:
+            print()
+            return run_setup_wizard(input_func=input_func)
+    # Without a terminal there was nothing to answer, so a bare invocation stays the usage error it was
+    return 0 if terminal_is_interactive else 1
+
+
+# Runs every preflight check, then the approved delivery tests, returning zero only when nothing failed
+def run_doctor(target_value=None, config_path=None, env_path=None, input_func=None):
+    report = DoctorReport()
+    progress = _doctor_progress if _doctor_terminal_stream().isatty() else None
+    render_doctor_notice()
+    try:
+        for label, collect in (
+            ("environment", lambda: doctor_check_environment()),
+            ("configuration", lambda: doctor_check_configuration(config_path, env_path, target_value)),
+            ("connectivity", lambda: doctor_check_connectivity()),
+            ("authentication", lambda: doctor_check_authentication(report)),
+            ("Spotify metadata", lambda: doctor_check_spotify_metadata(report)),
+            ("the monitored profile", lambda: doctor_check_target(report, target_value)),
+            ("notifications", lambda: doctor_check_email_notifications(report) + doctor_check_webhook_notifications(report)),
+        ):
+            if progress is not None:
+                progress(label)
+            report.checks.extend(collect())
+    finally:
+        _doctor_progress_clear()
+    print(render_doctor_sections(report))
+    _doctor_offer_notification_tests(report, input_func=input_func)
+    print(render_doctor_summary(report.checks))
+    return 1 if any(check.status == "FAIL" for check in report.checks) else 0
+
+
+# Reads a duration written the way people type one, returning whole seconds or None when it is not one
+def parse_duration_input(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value) if value > 0 else None
+    if not isinstance(value, str):
+        return None
+    text = value.strip().casefold().replace(",", ".")
+    if not text:
+        return None
+    units = {"s": 1, "sec": 1, "secs": 1, "second": 1, "seconds": 1,
+             "m": 60, "min": 60, "mins": 60, "minute": 60, "minutes": 60,
+             "h": 3600, "hr": 3600, "hrs": 3600, "hour": 3600, "hours": 3600,
+             "d": 86400, "day": 86400, "days": 86400}
+    matches = re.findall(r"(\d+(?:\.\d+)?)\s*([a-z]*)", text)
+    # Reject anything the pattern did not fully consume, so "5x" or "abc" cannot read as a bare number
+    if not matches or re.sub(r"(\d+(?:\.\d+)?)\s*([a-z]*)", "", text).strip():
+        return None
+    total = 0.0
+    for amount, unit in matches:
+        if unit and unit not in units:
+            return None
+        total += float(amount) * units.get(unit, 1)
+    seconds = int(round(total))
+    return seconds if seconds > 0 else None
+
+
+# Reads a Last.fm username from a bare name or any profile URL, returning an empty string when it is neither
+def normalize_lastfm_username(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if "/" in text or text.casefold().startswith(("http://", "https://", "www.", "last.fm")):
+        match = re.search(r"last\.fm/(?:[a-z]{2}/)?user/([^/?#]+)", text, re.IGNORECASE)
+        if not match:
+            return ""
+        text = unquote(match.group(1)).strip()
+    # Last.fm allows a wide range of names, so only the characters a URL or a shell would break on are refused
+    return text if re.fullmatch(r"[^\s/?#@]+", text) else ""
+
+
+# Returns a stored value only when it is a real answer, so template placeholders are never offered as defaults
+def _wizard_default(value):
+    return str(value) if doctor_value_is_set(value if isinstance(value, str) else str(value or "")) else ""
+
+
+# Prints the shared line telling the user how defaults and cancelling work
+def _wizard_print_default_guidance():
+    print("Press Enter to accept the shown default. Ctrl+C cancels.\n")
+
+
+# Reads one setup line. Cancelling propagates to the one handler in run_setup_wizard, which reports that nothing was written
+def _wizard_input(prompt_text, input_func=None):
+    prompt = input if input_func is None else input_func
+    try:
+        return read_interactively(prompt, colorize("info", prompt_text))
+    except (EOFError, KeyboardInterrupt):
+        # The interrupted prompt owns the line break, so every handler prints its message alone
+        print()
+        raise
+
+
+# Asks one free-text question, returning the shown default when the answer is empty
+def _wizard_ask_text(question, default="", required=False, input_func=None):
+    suffix = f" [{default}]" if default else ""
+    while True:
+        answer = _wizard_input(f"{question}{suffix}: ", input_func=input_func).strip()
+        if not answer:
+            answer = default
+        if answer or not required:
+            return answer
+        print("  This value is required.")
+        if not _wizard_offer_retry(question, input_func=input_func):
+            return ""
+
+
+# Asks one yes or no question with a visible default
+def _wizard_ask_yes_no(question, default=True, input_func=None):
+    hint = "[Y/n]" if default else "[y/N]"
+    while True:
+        answer = _wizard_input(f"{question} {hint}: ", input_func=input_func).strip().casefold()
+        if not answer:
+            return default
+        if answer in ("y", "yes"):
+            return True
+        if answer in ("n", "no"):
+            return False
+        print("  Please answer 'y' or 'n'.")
+
+
+# Offers the one way out after an entry the wizard cannot use, so declining keeps every answer already given
+def _wizard_offer_retry(label, consequence="", input_func=None):
+    if consequence:
+        return not _wizard_ask_yes_no(f"Continue without the {label}? {consequence}", default=False, input_func=input_func)
+    return _wizard_ask_yes_no(f"Try entering the {label} again?", default=True, input_func=input_func)
+
+
+# Trims the parenthetical hint from a question, so the retry offer that repeats it stays one readable line
+def _wizard_retry_label(question):
+    return question.split(" (")[0].strip()
+
+
+# Asks one numbered multiple-choice question and returns the chosen index
+def _wizard_ask_choice(question, options, default_index=0, input_func=None):
+    print()
+    print(question)
+    for index, (label, description) in enumerate(options, 1):
+        marker = " (default)" if index - 1 == default_index else ""
+        print(f"  {colorize('username', str(index))}. {label}{colorize('info', marker)}")
+        if description:
+            for line in description.splitlines():
+                print(f"     {line}")
+    while True:
+        answer = _wizard_input(f"Choose [1-{len(options)}]: ", input_func=input_func).strip()
+        if not answer:
+            return default_index
+        if answer.isdigit() and 1 <= int(answer) <= len(options):
+            return int(answer) - 1
+        print(f"  Enter a number between 1 and {len(options)}.")
+
+
+# Asks until the user provides a positive whole number or accepts the default
+def _wizard_ask_positive_int(question, default, maximum=None, input_func=None):
+    while True:
+        answer = _wizard_ask_text(question, default=str(default), required=True, input_func=input_func)
+        # An empty answer means the retry offer was declined, so the default stands instead of asking again
+        if not answer:
+            return int(default)
+        try:
+            parsed = int(answer)
+        except ValueError:
+            parsed = 0
+        if parsed > 0 and (maximum is None or parsed <= maximum):
+            return parsed
+        print(f"  Enter a whole number from 1 through {maximum}." if maximum is not None else "  Enter a positive whole number.")
+        # A value the helper cannot use is a rejected entry, so it gets the same way out an empty one gets
+        if not _wizard_offer_retry(_wizard_retry_label(question), input_func=input_func):
+            print(f"  Keeping {default}.")
+            return int(default)
+
+
+# Renders a wizard duration as raw seconds plus a readable form, so the stored config value stays visible
+def _wizard_format_duration(seconds):
+    remaining = seconds
+    parts = []
+    for suffix, count in (("d", 86400), ("h", 3600), ("m", 60), ("s", 1)):
+        value, remaining = divmod(remaining, count)
+        if value:
+            parts.append(f"{value}{suffix}")
+    raw = f"{seconds}s"
+    readable = " ".join(parts) or raw
+    return raw if readable == raw else f"{raw} - {readable}"
+
+
+# Asks one duration, accepting the formats people actually type
+def _wizard_ask_duration(question, default, input_func=None):
+    prompt_text = f"{question} [{_wizard_format_duration(default)}]: "
+    while True:
+        answer = _wizard_input(prompt_text, input_func=input_func).strip()
+        if not answer:
+            return default
+        seconds = parse_duration_input(answer)
+        if seconds is not None:
+            return seconds
+        print("  Enter a positive duration such as 120, 2m, 1.5h, 1h 30m or 1d.")
+        if not _wizard_offer_retry(_wizard_retry_label(question), input_func=input_func):
+            print(f"  Keeping {_wizard_format_duration(default)}.")
+            return default
+
+
+# Asks one secret through a hidden prompt, so it never reaches the screen or the shell history
+def _wizard_ask_secret(question, getpass_func=None, strip=True):
+    hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
+    try:
+        with debug_output_suppressed():
+            return_value = str(read_secret_interactively(hidden_prompt, colorize("info", f"{question}: ")))
+        return return_value.strip() if strip else return_value
+    except (EOFError, KeyboardInterrupt):
+        print()
+        raise
+
+
+# Checks one setup destination without creating or modifying it, so an unwritable path is caught before any question
+def _wizard_validate_destination(path, label):
+    destination = Path(path).expanduser().resolve()
+    if destination.exists() and destination.is_dir():
+        raise ValueError(f"{label} must be a file path, not a directory")
+    parent = nearest_existing_parent(destination)
+    if not parent.is_dir():
+        raise ValueError(f"{label} does not have a usable parent directory")
+    if not os.access(str(parent), os.W_OK):
+        raise ValueError(f"{label} is not writable through parent '{parent}'")
+    return destination
+
+
+# Loads the selected setup baseline and preserves its dotenv path unless explicitly overridden
+def _wizard_seed_destination(state, env_file):
+    saved = {}
+    if state.config_path.is_file() and not load_config_file(state.config_path, namespace=saved):
+        raise ValueError(f"Configuration file '{state.config_path}' could not be read. Correct it before retrying setup.")
+    state.baseline_values.update({key: value for key, value in saved.items() if key not in SECRET_KEYS})
+    state.config_values.update(state.baseline_values)
+    selected = env_file if env_file is not None else saved.get("DOTENV_FILE") or state.env_path
+    if str(selected).casefold() == "none":
+        raise ValueError("Setup needs a writable dotenv destination. Pass --env-file PATH to choose one.")
+    state.env_path = _wizard_validate_destination(selected, "Dotenv destination")
+    if state.env_path == state.config_path.resolve():
+        raise ValueError("Configuration and dotenv destinations must be different files. Pass --env-file with another path.")
+    state.config_values["DOTENV_FILE"] = str(state.env_path)
+
+
+# Resolves both setup destinations, refusing the disabled settings that leave nowhere to write
+def _wizard_destinations(config_file=None, env_file=None):
+    # The sentinel is a deliberate choice rather than a broken path, so it gets the fix that undoes it
+    if config_file is not None and str(config_file).casefold() == "none":
+        raise RecoveryError(make_recovery_advice("config.invalid", "--setup has nowhere to write the configuration", recovery_fix_with_guide(f"Replace '--config-file none' with a writable path, or drop the flag to write {DEFAULT_CONFIG_FILENAME} in the current directory", CONFIG_GUIDE_URL), False))
+    if env_file is not None and str(env_file).casefold() == "none":
+        raise RecoveryError(make_recovery_advice("secret.entry", "--setup has nowhere to write the secrets", recovery_fix_with_guide("Replace '--env-file none' with a writable path, or drop the flag to write .env in the current directory", SECRETS_GUIDE_URL), False))
+    config_path = Path(config_file).expanduser() if config_file is not None else Path.cwd() / DEFAULT_CONFIG_FILENAME
+    env_path = Path(env_file).expanduser() if env_file is not None else Path.cwd() / ".env"
+    return _wizard_validate_destination(config_path, "Configuration destination"), _wizard_validate_destination(env_path, "Dotenv destination")
+
+
+# Confirms replacing an existing config before any question is asked, so a long run cannot end in a surprise
+def _wizard_choose_config_destination(config_path, input_func=None):
+    selected = Path(config_path)
+    while selected.exists() and not _wizard_ask_yes_no(f"Configuration file '{selected}' exists. A timestamped backup is kept. Rebuild it from your answers, starting from its current settings?", default=False, input_func=input_func):
+        alternative = _wizard_ask_text("Another config destination or leave empty to cancel", input_func=input_func)
+        if not alternative:
+            return None
+        try:
+            selected = _wizard_validate_destination(alternative, "Configuration destination")
+        except ValueError as exc:
+            print(f"  {exc}.")
+    return selected
+
+
+# Reads saved secrets with the same interpolation rules as normal startup
+def _wizard_private_values(env_path):
+    from dotenv.main import DotEnv
+    if not env_path or not Path(env_path).exists():
+        return {}
+    return DotEnv(str(env_path), interpolate=False, override=False).dict()
+
+
+# Returns genuine environment credentials without treating previously loaded file values as exports
+def _wizard_exported_secrets():
+    state = globals().get("DOTENV_RELOAD_STATE", {})
+    owned = set(globals().get("DOTENV_MANAGED_KEYS", ())) | set(globals().get("DOTENV_BASE_VALUES", ())) | set(state.get("base", ()))
+    exported = set(globals().get("EXPORTED_ENVIRONMENT_KEYS", ())) | set(globals().get("EXPORTED_SECRET_KEYS", ())) | set(state.get("exported", ()))
+    sources = globals().get("SECRET_SOURCES", {})
+    return {key: os.environ[key] for key in SECRET_KEYS if os.environ.get(key) and key not in command_line_secret_keys() and (key in exported or (key not in owned and sources.get(key) not in ("dotenv file", "dotenv file reload")))}
+
+
+# Returns the secret stored in the dotenv file or None when the file has no assignment for it
+def _wizard_saved_secret_value(key, env_path):
+    value = _wizard_private_values(env_path).get(key)
+    return value if isinstance(value, str) else None
+
+
+# Returns the effective credential and whether a startup export supplies it
+def effective_secret_after_setup(key, env_path, secret_updates):
+    if key in command_line_secret_keys():
+        return str(globals().get(key) or ""), False
+    exported = _wizard_exported_secrets().get(key)
+    if exported:
+        return exported, True
+    if key in secret_updates:
+        return str(secret_updates[key] or ""), False
+    saved = _wizard_saved_secret_value(key, env_path)
+    if saved is not None:
+        return saved, False
+    # Nothing private holds it, so the configuration file is what a restart would read
+    return str(globals().get(key) or ""), False
+
+
+# Reports whether setup will retain a usable credential from the selected file or pending answers
+def _wizard_existing_secret(key, env_path, secret_updates=None):
+    value = _wizard_exported_secrets().get(key)
+    if value is None:
+        value = (secret_updates or {}).get(key)
+    if value is None:
+        value = read_private_settings(env_path).get(key)
+    return doctor_value_is_set(value)
+
+
+# Queues one secret for the save step, asking first when the dotenv file already assigns it
+def _wizard_queue_secret(state, key, value, input_func=None):
+    if not value:
+        return False
+    if _dotenv_contains_key(state.env_path, key) and not _wizard_ask_yes_no(f"The dotenv file already contains {key}. Replace that value?", default=False, input_func=input_func):
+        print(f"  Existing {key} will be retained without being displayed or rewritten.")
+        return False
+    state.secret_updates[key] = value
+    return True
+
+
+# Holds every wizard answer until the user explicitly saves, so nothing is written during questioning
+class WizardSetupState:
+    # Starts from the values already in effect, which become both the defaults and the revert target
+    def __init__(self, config_path, env_path, baseline_values):
+        self.config_path = Path(config_path)
+        self.env_path = Path(env_path)
+        self.baseline_values = dict(baseline_values)
+        self.config_values = dict(baseline_values)
+        self.secret_updates = {}
+        self.retained_secrets = {}
+        self.target = ""
+        self.persist_target = True
+
+
+# The mail server settings the wizard collects, and how long its sign-in check waits for the server
+WIZARD_SMTP_CONFIG_KEYS = ("SMTP_HOST", "SMTP_PORT", "SMTP_SSL", "SMTP_USER", "SENDER_EMAIL", "RECEIVER_EMAIL")
+WIZARD_SMTP_TIMEOUT = 5
+
+# The email and webhook alert settings the wizard offers, in the order the questions are asked
+WIZARD_EMAIL_NOTIFICATION_KEYS = ("ACTIVE_NOTIFICATION", "INACTIVE_NOTIFICATION", "TRACK_NOTIFICATION", "SONG_NOTIFICATION", "SONG_ON_LOOP_NOTIFICATION", "OFFLINE_ENTRIES_NOTIFICATION", "FOLLOWERS_NOTIFICATION", "FOLLOWINGS_NOTIFICATION", "PROFILE_NOTIFICATION", "ERROR_NOTIFICATION")
+WIZARD_WEBHOOK_NOTIFICATION_KEYS = ("WEBHOOK_ACTIVE_NOTIFICATION", "WEBHOOK_INACTIVE_NOTIFICATION", "WEBHOOK_TRACK_NOTIFICATION", "WEBHOOK_SONG_NOTIFICATION", "WEBHOOK_SONG_ON_LOOP_NOTIFICATION", "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION", "WEBHOOK_FOLLOWERS_NOTIFICATION", "WEBHOOK_FOLLOWINGS_NOTIFICATION", "WEBHOOK_PROFILE_NOTIFICATION", "WEBHOOK_ERROR_NOTIFICATION")
+
+# The alerts the recommended preset switches on, named rather than counted: a message per song change is
+# too much for a default, and the alerts that need a monitored list or profile tracking are asked for there
+WIZARD_RECOMMENDED_EMAIL_KEYS = ("ACTIVE_NOTIFICATION", "INACTIVE_NOTIFICATION", "OFFLINE_ENTRIES_NOTIFICATION", "ERROR_NOTIFICATION")
+WIZARD_RECOMMENDED_WEBHOOK_KEYS = ("WEBHOOK_ACTIVE_NOTIFICATION", "WEBHOOK_INACTIVE_NOTIFICATION", "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION", "WEBHOOK_ERROR_NOTIFICATION")
+
+# What each alert is called in the questions and in the setup summary
+WIZARD_ALERT_LABELS = {
+    "ACTIVE_NOTIFICATION": "starts listening",
+    "INACTIVE_NOTIFICATION": "stops listening",
+    "TRACK_NOTIFICATION": "monitored track or album",
+    "SONG_NOTIFICATION": "every song change",
+    "SONG_ON_LOOP_NOTIFICATION": "song on loop",
+    "OFFLINE_ENTRIES_NOTIFICATION": "scrobbles added while offline",
+    "FOLLOWERS_NOTIFICATION": "follower changes",
+    "FOLLOWINGS_NOTIFICATION": "following changes",
+    "PROFILE_NOTIFICATION": "profile changes",
+    "ERROR_NOTIFICATION": "errors",
+}
+
+# The setting each alert needs before it can ever fire, so the wizard never offers an alert this setup cannot produce
+WIZARD_ALERT_REQUIREMENTS = {
+    "TRACK_NOTIFICATION": ("MONITOR_LIST_FILE",),
+    "FOLLOWERS_NOTIFICATION": ("TRACK_FOLLOWERS",),
+    "FOLLOWINGS_NOTIFICATION": ("TRACK_FOLLOWINGS",),
+    "PROFILE_NOTIFICATION": ("TRACK_BIO", "TRACK_DISPLAY_NAME"),
+}
+
+# The Spotify settings the wizard collects, and the tracking settings the friend and profile alerts depend on
+WIZARD_SPOTIFY_CONFIG_KEYS = ("USE_TRACK_DURATION_FROM_SPOTIFY", "TRACK_SONGS", "SP_TOKENS_FILE")
+WIZARD_TRACKING_CONFIG_KEYS = ("TRACK_FOLLOWERS", "TRACK_FOLLOWINGS", "TRACK_BIO", "TRACK_DISPLAY_NAME", "FRIENDS_CHECK_INTERVAL")
+
+
+# Each editable section: internal name, menu label and description, then the keys reverted when it is re-entered
+WIZARD_SECTIONS = (
+    ("Target", "Target", "Change the Last.fm user that is monitored.", ("LASTFM_USERNAME",), ()),
+    ("Polling", "Polling intervals", "Change how often Last.fm is checked.", ("LASTFM_CHECK_INTERVAL", "LASTFM_ACTIVE_CHECK_INTERVAL", "LASTFM_INACTIVITY_CHECK"), ()),
+    ("Authentication", "Authentication", "Enter the Last.fm API key and shared secret again.", (), ("LASTFM_API_KEY", "LASTFM_API_SECRET")),
+    ("Spotify", "Spotify track details", "Change track duration, playback and Spotify app credentials.", WIZARD_SPOTIFY_CONFIG_KEYS, ("SP_CLIENT_ID", "SP_CLIENT_SECRET")),
+    ("Tracking", "Profile tracking", "Change follower, following and profile tracking.", WIZARD_TRACKING_CONFIG_KEYS, ()),
+    ("Output", "Output files", "Change the log, CSV and monitored track list destinations.", ("DISABLE_LOGGING", "CSV_FILE", "MONITOR_LIST_FILE"), ()),
+    ("Email", "Email notifications", "Change SMTP details and email events.", WIZARD_SMTP_CONFIG_KEYS + WIZARD_EMAIL_NOTIFICATION_KEYS, ("SMTP_PASSWORD",)),
+    ("Webhook", "Webhook alerts", "Change Discord or ntfy details and events.", ("WEBHOOK_ENABLED", "WEBHOOK_PROVIDER") + WIZARD_WEBHOOK_NOTIFICATION_KEYS, ("WEBHOOK_URL", "NTFY_ACCESS_TOKEN")),
+    ("Destinations", "File destinations", "Change the configuration or dotenv output path.", (), ()),
+)
+
+
+# Restores one section to the values setup started with and drops any secret it had queued
+def _wizard_reset_section(state, config_keys, secret_keys):
+    for key in config_keys:
+        if key in state.baseline_values:
+            state.config_values[key] = state.baseline_values[key]
+        else:
+            state.config_values.pop(key, None)
+    for key in secret_keys:
+        state.secret_updates.pop(key, None)
+        if key in state.retained_secrets:
+            state.secret_updates[key] = state.retained_secrets[key]
+
+
+# Returns one declined section to the built-in template values, so nothing the user turned down is written
+def _wizard_clear_section(state, config_keys, secret_keys=()):
+    defaults = _config_template_defaults()
+    for key in config_keys:
+        if key in defaults:
+            state.config_values[key] = defaults[key]
+        else:
+            state.config_values.pop(key, None)
+    for key in secret_keys:
+        state.secret_updates.pop(key, None)
+
+
+# Mirrors the settled target into the config values, so an unpersisted target is left out of the file
+def _wizard_apply_target(state):
+    state.config_values["LASTFM_USERNAME"] = state.target if state.persist_target and state.target else ""
+
+
+# Asks for the monitored user, accepting a username or any Last.fm profile URL
+def _wizard_collect_target_section(state, initial_target=None, input_func=None):
+    question = "Last.fm username or profile URL to monitor"
+    while True:
+        answer = _wizard_ask_text(question, default=str(initial_target or state.target or ""), required=True, input_func=input_func)
+        if not answer:
+            # The question already offered another attempt and it was declined, so the section ends instead of asking again
+            break
+        username = normalize_lastfm_username(answer)
+        if username:
+            state.target = username
+            break
+        print(f"  '{answer}' is not a Last.fm username or profile URL.")
+        if not _wizard_offer_retry(question, input_func=input_func):
+            break
+    if not state.target:
+        print("  No target selected. Nothing can be monitored until one is set. Run --setup again or pass the target on the command line.")
+        _wizard_apply_target(state)
+        return
+    state.persist_target = _wizard_ask_yes_no("Persist this target in the generated config?", default=state.persist_target, input_func=input_func)
+    _wizard_apply_target(state)
+
+
+# Asks how often the tool checks and when a user counts as inactive
+def _wizard_collect_polling_section(state, input_func=None):
+    state.config_values["LASTFM_CHECK_INTERVAL"] = _wizard_ask_duration("Polling interval while the user is not listening (seconds or use s/m/h/d)", int(state.config_values.get("LASTFM_CHECK_INTERVAL") or LASTFM_CHECK_INTERVAL), input_func=input_func)
+    state.config_values["LASTFM_ACTIVE_CHECK_INTERVAL"] = _wizard_ask_duration("Polling interval while the user is listening (seconds or use s/m/h/d)", int(state.config_values.get("LASTFM_ACTIVE_CHECK_INTERVAL") or LASTFM_ACTIVE_CHECK_INTERVAL), input_func=input_func)
+    state.config_values["LASTFM_INACTIVITY_CHECK"] = _wizard_ask_duration("Silence after the last scrobble before the user counts as inactive", int(state.config_values.get("LASTFM_INACTIVITY_CHECK") or LASTFM_INACTIVITY_CHECK), input_func=input_func)
+
+
+# Signs in to Last.fm with the entered pair, so a rejected credential is caught during setup
+def _wizard_verify_lastfm_credentials(api_key, api_secret):
+    try:
+        pylast.LastFMNetwork(api_key, api_secret).get_top_artists(limit=1)
+    except Exception as exc:
+        exit_if_out_of_file_descriptors(exc)
+        return classify_recovery_error(exc, extra_secrets=[api_key, api_secret])
+    return None
+
+
+# Asks for the Last.fm API key and shared secret as one credential and checks the pair against Last.fm
+def _wizard_collect_auth_section(state, input_func=None, getpass_func=None, validator=None):
+    print(colorize_links(f"Create or view your Last.fm API key and shared secret: {LASTFM_API_REGISTRATION_URL}"))
+    print(colorize_links(f"Credentials of an application you already registered: {LASTFM_API_ACCOUNTS_URL}"))
+    configured = all(doctor_value_is_set(state.config_values.get(name)) or _wizard_existing_secret(name, state.env_path, secret_updates=state.secret_updates) for name in ("LASTFM_API_KEY", "LASTFM_API_SECRET"))
+    # The key and the secret are one credential, so the replace question covers the pair rather than each value
+    if configured and not _wizard_ask_yes_no("Replace the Last.fm API credentials already configured?", default=False, input_func=input_func):
+        return
+    verify = _wizard_verify_lastfm_credentials if validator is None else validator
+    while True:
+        api_key = _wizard_ask_secret("Last.fm API key", getpass_func=getpass_func)
+        api_secret = _wizard_ask_secret("Last.fm shared secret", getpass_func=getpass_func)
+        if not api_key or not api_secret:
+            # Monitoring cannot run without the pair, so leaving it unset has to be a decision rather than a fallthrough
+            if not _wizard_offer_retry("Last.fm API credentials", "Nothing can be monitored until both values are set", input_func=input_func):
+                return
+            continue
+        # Last.fm is contacted here, which takes long enough to look like a hang without a notice
+        print("  Checking the credentials with Last.fm ...")
+        advice = verify(api_key, api_secret)
+        if advice is None:
+            state.secret_updates["LASTFM_API_KEY"] = api_key
+            state.secret_updates["LASTFM_API_SECRET"] = api_secret
+            print("  Last.fm accepted the credentials.")
+            return
+        print(f"  {advice.summary}: {advice.detail}" if advice.detail else f"  {advice.summary}")
+        if advice.retryable:
+            # Being offline is the usual reason a correct pair fails here, so the values are kept rather than discarded
+            state.secret_updates["LASTFM_API_KEY"] = api_key
+            state.secret_updates["LASTFM_API_SECRET"] = api_secret
+            print("  The credentials were saved without being checked. Run --doctor to check them again.")
+            return
+        # A pair Last.fm keeps rejecting cannot be corrected from inside the loop, so the wizard must be leavable here too
+        if not _wizard_offer_retry("Last.fm API credentials", input_func=input_func):
+            return
+
+
+# Switches the Spotify metadata features off together, so a declined section leaves no half-configured app behind
+def _wizard_disable_spotify(state):
+    _wizard_clear_section(state, WIZARD_SPOTIFY_CONFIG_KEYS, ("SP_CLIENT_ID", "SP_CLIENT_SECRET"))
+    state.config_values["USE_TRACK_DURATION_FROM_SPOTIFY"] = False
+    state.config_values["TRACK_SONGS"] = False
+
+
+# Asks whether Spotify supplies track details and collects the optional app credentials behind that one gate
+def _wizard_collect_spotify_section(state, input_func=None, getpass_func=None):
+    enabled = bool(state.config_values.get("USE_TRACK_DURATION_FROM_SPOTIFY") or state.config_values.get("TRACK_SONGS"))
+    if not _wizard_ask_yes_no("Use Spotify for track details?", default=enabled, input_func=input_func):
+        _wizard_disable_spotify(state)
+        return
+    # A fresh opt-in has no earlier answer to keep, and the duration is the main reason to reach for Spotify at all
+    duration_default = bool(state.config_values.get("USE_TRACK_DURATION_FROM_SPOTIFY")) if enabled else True
+    state.config_values["USE_TRACK_DURATION_FROM_SPOTIFY"] = _wizard_ask_yes_no("Take track duration from Spotify? Last.fm often lacks it or reports it wrong", default=duration_default, input_func=input_func)
+    state.config_values["TRACK_SONGS"] = _wizard_ask_yes_no("Play each scrobbled track in your own Spotify client?", default=bool(state.config_values.get("TRACK_SONGS")), input_func=input_func)
+    if not (state.config_values["USE_TRACK_DURATION_FROM_SPOTIFY"] or state.config_values["TRACK_SONGS"]):
+        _wizard_disable_spotify(state)
+        return
+    print(colorize_links(f"  Without app credentials the anonymous Spotify web player supplies the metadata. Create an app at {SPOTIFY_DASHBOARD_URL}"))
+    configured = all(doctor_value_is_set(state.config_values.get(name)) or _wizard_existing_secret(name, state.env_path, secret_updates=state.secret_updates) for name in ("SP_CLIENT_ID", "SP_CLIENT_SECRET"))
+    question = "Replace the Spotify app credentials already configured?" if configured else "Add Spotify app credentials? They are optional and are tried before the anonymous backend"
+    if not _wizard_ask_yes_no(question, default=False, input_func=input_func):
+        if not configured:
+            print("  Keeping the anonymous Spotify web player, which needs no credentials.")
+        return
+    while True:
+        client_id = _wizard_ask_secret("Spotify client ID", getpass_func=getpass_func)
+        client_secret = _wizard_ask_secret("Spotify client secret", getpass_func=getpass_func)
+        if not client_id or not client_secret:
+            if not _wizard_offer_retry("Spotify app credentials", "The anonymous Spotify web player is used instead", input_func=input_func):
+                return
+            continue
+        print("  Checking the credentials with Spotify ...")
+        try:
+            spotify_get_access_token(client_id, client_secret, validate_credentials=True)
+        except Exception as exc:
+            exit_if_out_of_file_descriptors(exc)
+            print(f"  Spotify did not accept the credentials: {sanitize_error_text(exc, extra_secrets=[client_id, client_secret])}")
+            if not _wizard_offer_retry("Spotify app credentials", "The anonymous Spotify web player is used instead", input_func=input_func):
+                return
+            continue
+        state.secret_updates["SP_CLIENT_ID"] = client_id
+        state.secret_updates["SP_CLIENT_SECRET"] = client_secret
+        print("  Spotify accepted the credentials.")
+        state.config_values["SP_TOKENS_FILE"] = _wizard_normalize_json_path(_wizard_ask_text("Token cache file (blank keeps the tokens in memory only)", default=str(state.config_values.get("SP_TOKENS_FILE") or ""), input_func=input_func))
+        return
+
+
+# Asks which profile changes are watched, and how often, since one timer covers all of them
+def _wizard_collect_tracking_section(state, input_func=None):
+    questions = (
+        ("TRACK_FOLLOWERS", "Watch for follower changes?"),
+        ("TRACK_FOLLOWINGS", "Watch for following changes?"),
+        ("TRACK_DISPLAY_NAME", "Watch for display name changes?"),
+        ("TRACK_BIO", "Watch for About Me changes?"),
+    )
+    for key, question in questions:
+        state.config_values[key] = _wizard_ask_yes_no(question, default=bool(state.config_values.get(key)), input_func=input_func)
+    if any(state.config_values.get(key) for key, _question in questions):
+        state.config_values["FRIENDS_CHECK_INTERVAL"] = _wizard_ask_duration("How often to check for those changes", int(state.config_values.get("FRIENDS_CHECK_INTERVAL") or FRIENDS_CHECK_INTERVAL), input_func=input_func)
+
+
+# Adds the .csv extension when the answer carries none, so a bare name still names a CSV file
+def _wizard_normalize_csv_path(answer):
+    text = str(answer).strip()
+    if not text or Path(text).suffix:
+        return text
+    return text + ".csv"
+
+
+# Adds the .json extension when the answer carries none, so a bare name still names a JSON file
+def _wizard_normalize_json_path(answer):
+    text = str(answer).strip()
+    if not text or Path(text).suffix:
+        return text
+    return text + ".json"
+
+
+# Collects the files monitoring writes and the optional list of tracks to alert on
+def _wizard_collect_output_section(state, input_func=None):
+    state.config_values["DISABLE_LOGGING"] = not _wizard_ask_yes_no("Write the normal per-target log file?", default=not bool(state.config_values.get("DISABLE_LOGGING")), input_func=input_func)
+    saved_csv = str(state.config_values.get("CSV_FILE") or "")
+    # Asked as its own question, since Enter on the path prompt takes the shown default and so could never clear a saved one
+    if _wizard_ask_yes_no("Write a CSV file of the changes?", default=bool(saved_csv), input_func=input_func):
+        state.config_values["CSV_FILE"] = _wizard_normalize_csv_path(_wizard_ask_text("CSV output path", default=saved_csv, required=True, input_func=input_func))
+    else:
+        state.config_values["CSV_FILE"] = ""
+    while True:
+        answer = _wizard_ask_text("Optional file listing tracks and albums to alert on (blank disables it)", default=str(state.config_values.get("MONITOR_LIST_FILE") or ""), input_func=input_func).strip()
+        if not answer or Path(answer).expanduser().is_file():
+            state.config_values["MONITOR_LIST_FILE"] = answer
+            return
+        print(f"  '{answer}' does not exist. The alerts it drives would never fire.")
+        if not _wizard_offer_retry("track list file", "Monitored track alerts stay off", input_func=input_func):
+            state.config_values["MONITOR_LIST_FILE"] = ""
+            return
+
+
+# Returns the alerts this setup can actually produce, so a question is never asked about one that cannot fire
+def _wizard_available_alert_keys(state, keys):
+    available = []
+    for key in keys:
+        requirements = WIZARD_ALERT_REQUIREMENTS.get(key.replace("WEBHOOK_", "", 1) if key.startswith("WEBHOOK_") else key, ())
+        if requirements and not any(state.config_values.get(name) for name in requirements):
+            continue
+        available.append(key)
+    return tuple(available)
+
+
+# Switches every email alert off together, so an abandoned answer cannot leave half a mail server configured
+def _wizard_disable_email(state):
+    _wizard_clear_section(state, WIZARD_SMTP_CONFIG_KEYS, ("SMTP_PASSWORD",))
+    # Only the alerts the wizard offers are cleared, so alerts enabled by hand survive a declined email section
+    for key in WIZARD_EMAIL_NOTIFICATION_KEYS:
+        state.config_values[key] = False
+
+
+# Signs in to the collected mail server without sending anything, so a refused login is caught during setup
+def _wizard_verify_smtp(values, password):
+    names = ("SMTP_HOST", "SMTP_PORT", "SMTP_SSL", "SMTP_USER", "SMTP_PASSWORD", "SENDER_EMAIL", "RECEIVER_EMAIL")
+    previous = {name: globals()[name] for name in names}
+    smtp_object = None
+    try:
+        globals().update(values)
+        # A blank answer keeps the password already stored, which is the one the sign-in must then prove
+        globals()["SMTP_PASSWORD"] = password or previous["SMTP_PASSWORD"]
+        smtp_object = smtp_connect_and_login(SMTP_SSL, smtp_timeout=WIZARD_SMTP_TIMEOUT)
+        return None
+    except Exception as exc:
+        return classify_recovery_error(exc, "email")
+    finally:
+        if smtp_object is not None:
+            try:
+                smtp_object.quit()
+            except Exception as cleanup_error:
+                debug_swallowed_exception("SMTP session cleanup", cleanup_error)
+        globals().update(previous)
+
+
+# Reports the outcome of the sign-in check: True to continue, False to ask again, None to switch email off
+def _wizard_smtp_sign_in_accepted(values, password, input_func=None):
+    print("  Checking the sign-in with the mail server ...")
+    advice = _wizard_verify_smtp(values, password)
+    if advice is None:
+        print("  The mail server accepted the sign-in. No email was sent.")
+        return True
+    print(f"  {advice.summary}: {advice.detail}" if advice.detail else f"  {advice.summary}")
+    print(f"  To fix: {advice.fix}")
+    if _wizard_offer_retry("mail server settings", input_func=input_func):
+        return False
+    if advice.retryable:
+        # Being offline is the usual reason a correct setup fails here, so the answers are kept rather than discarded
+        print("  The settings were kept without being checked. Run --doctor to check the sign-in again.")
+        return True
+    print("  Email notifications stay off until the mail server accepts the settings.")
+    return None
+
+
+# Reports whether one required mail server answer was abandoned, switching the channel off when it was
+def _wizard_email_answer_missing(state, key):
+    if state.config_values.get(key):
+        return False
+    print("  Email notifications stay off until every mail server setting is answered.")
+    _wizard_disable_email(state)
+    return True
+
+
+# Reports whether the saved settings already send email, so a rerun proposes keeping the channel it has
+def _wizard_email_enabled(config_values):
+    # The error alert ships switched on, so on its own it counts only once a mail server has been named
+    for key in WIZARD_EMAIL_NOTIFICATION_KEYS:
+        if key != "ERROR_NOTIFICATION" and bool(config_values.get(key)):
+            return True
+    return bool(config_values.get("ERROR_NOTIFICATION")) and doctor_value_is_set(config_values.get("SMTP_HOST"))
+
+
+# Asks which alerts one channel sends, from the presets plus a custom branch over the alerts this setup can produce
+def _wizard_collect_alert_preset(state, question, keys, recommended, prefix="", input_func=None):
+    available = _wizard_available_alert_keys(state, keys)
+    recommended_available = tuple(key for key in recommended if key in available)
+    preset = _wizard_ask_choice(question, [
+        ("Activity and errors, recommended", "Alerts when listening starts or stops, when offline scrobbles arrive and when monitoring has a problem."),
+        ("Every supported alert", "Includes an alert on every single song change."),
+        ("Custom", "Choose each alert separately."),
+    ], input_func=input_func)
+    if preset == 0:
+        selected = {key: key in recommended_available for key in keys}
+    elif preset == 1:
+        selected = {key: key in available for key in keys}
+    else:
+        print()
+        selected = {}
+        for key in keys:
+            if key not in available:
+                selected[key] = False
+                continue
+            label = WIZARD_ALERT_LABELS[key.replace("WEBHOOK_", "", 1) if key.startswith("WEBHOOK_") else key]
+            selected[key] = _wizard_ask_yes_no(f"{prefix}{label}?", default=False, input_func=input_func)
+    state.config_values.update(selected)
+
+
+# Asks whether to send email alerts and collects only the settings that choice needs
+def _wizard_collect_email_section(state, input_func=None, getpass_func=None):
+    if not _wizard_ask_yes_no("Configure email notifications?", default=_wizard_email_enabled(state.config_values), input_func=input_func):
+        _wizard_disable_email(state)
+        return
+    while True:
+        state.config_values["SMTP_HOST"] = _wizard_ask_text("SMTP host", default=_wizard_default(state.config_values.get("SMTP_HOST")), required=True, input_func=input_func)
+        if _wizard_email_answer_missing(state, "SMTP_HOST"):
+            return
+        state.config_values["SMTP_PORT"] = _wizard_ask_positive_int("SMTP port", int(state.config_values.get("SMTP_PORT") or 587), maximum=65535, input_func=input_func)
+        state.config_values["SMTP_SSL"] = _wizard_ask_yes_no("Enable TLS/SSL for SMTP?", default=bool(state.config_values.get("SMTP_SSL")), input_func=input_func)
+        state.config_values["SMTP_USER"] = _wizard_ask_text("SMTP username", default=_wizard_default(state.config_values.get("SMTP_USER")), required=True, input_func=input_func)
+        if _wizard_email_answer_missing(state, "SMTP_USER"):
+            return
+        state.config_values["SENDER_EMAIL"] = _wizard_ask_text("Sender email", default=_wizard_default(state.config_values.get("SENDER_EMAIL")), required=True, input_func=input_func)
+        if _wizard_email_answer_missing(state, "SENDER_EMAIL"):
+            return
+        state.config_values["RECEIVER_EMAIL"] = _wizard_ask_text("Receiver email", default=_wizard_default(state.config_values.get("RECEIVER_EMAIL")), required=True, input_func=input_func)
+        if _wizard_email_answer_missing(state, "RECEIVER_EMAIL"):
+            return
+        password = _wizard_ask_secret("SMTP password", getpass_func=getpass_func, strip=False)
+        if password:
+            _wizard_queue_secret(state, "SMTP_PASSWORD", password, input_func=input_func)
+        # The sign-in has to prove the value the next run resolves rather than the one just typed. A declined
+        # replacement and an exported variable both leave setup reporting success for a password nothing will use
+        effective_password, supplied_by_export = effective_secret_after_setup("SMTP_PASSWORD", state.env_path, state.secret_updates)
+        if supplied_by_export and password:
+            print("  SMTP_PASSWORD is exported in this environment and an export wins at startup, so the next run uses that value rather than the one just entered.")
+            print("  The check below signs in with the exported value. Unset it to use the one saved here.")
+        outcome = _wizard_smtp_sign_in_accepted({name: state.config_values[name] for name in WIZARD_SMTP_CONFIG_KEYS}, effective_password, input_func=input_func)
+        if outcome is None:
+            _wizard_disable_email(state)
+            return
+        if outcome:
+            break
+    _wizard_collect_alert_preset(state, "Which email notifications should be enabled?", WIZARD_EMAIL_NOTIFICATION_KEYS, WIZARD_RECOMMENDED_EMAIL_KEYS, prefix="Email on ", input_func=input_func)
+
+
+# Switches the channel and every alert it owns off together, so a half-configured webhook cannot be written
+def _wizard_disable_webhook(state):
+    _wizard_clear_section(state, ("WEBHOOK_PROVIDER",), ("WEBHOOK_URL", "NTFY_ACCESS_TOKEN"))
+    state.config_values["WEBHOOK_ENABLED"] = False
+    state.config_values.update({name: False for name in WIZARD_WEBHOOK_NOTIFICATION_KEYS})
+
+
+# Asks whether to send webhook alerts and collects the provider, the hidden URL and the alert choices
+def _wizard_collect_webhook_section(state, input_func=None, getpass_func=None):
+    if not _wizard_ask_yes_no("Set up webhook alerts (Discord, ntfy etc.)?", default=bool(state.config_values.get("WEBHOOK_ENABLED")), input_func=input_func):
+        _wizard_disable_webhook(state)
+        return
+    provider_choice = _wizard_ask_choice("Which webhook service should receive alerts?", [
+        ("Discord", "Sends a Discord embed to one channel webhook."),
+        ("ntfy", "Sends a native notification to one ntfy topic URL."),
+    ], default_index=0 if normalized_webhook_provider(state.config_values.get("WEBHOOK_PROVIDER")) != "ntfy" else 1, input_func=input_func)
+    provider = "discord" if provider_choice == 0 else "ntfy"
+    state.config_values["WEBHOOK_PROVIDER"] = provider
+    if provider == "discord":
+        print("  In Discord: Edit Channel > Integrations > Webhooks > New Webhook > Copy Webhook URL.")
+    else:
+        print("  In ntfy: choose a hard-to-guess topic. Paste its complete topic URL, or just the topic name when it is hosted on ntfy.sh.")
+    replace_webhook = True
+    if _wizard_existing_secret("WEBHOOK_URL", state.env_path, secret_updates=state.secret_updates):
+        choice = _wizard_ask_choice("Which webhook URL should be used?", [
+            ("Keep the saved URL", "Keeps the private value without displaying or changing it."),
+            ("Paste a new URL", "Uses a hidden prompt then saves the new private value in the dotenv file."),
+        ], input_func=input_func)
+        replace_webhook = choice == 1
+    if replace_webhook:
+        while True:
+            answer = _wizard_ask_secret("Paste the Discord webhook URL" if provider == "discord" else "Paste the ntfy topic URL or ntfy.sh topic name", getpass_func=getpass_func)
+            webhook_url = normalize_ntfy_topic_url(answer) if provider == "ntfy" else answer.strip()
+            if validate_webhook_url(webhook_url):
+                state.secret_updates["WEBHOOK_URL"] = webhook_url
+                break
+            # Nothing can be delivered without a destination, so giving up has to stay reachable from the prompt.
+            # The branch is chosen by what was typed rather than by the normalized value, since a rejected ntfy
+            # topic normalizes to an empty string and would otherwise be reported as nothing entered
+            if not answer.strip():
+                if not _wizard_offer_retry("webhook URL", "Webhook alerts stay off until one is set", input_func=input_func):
+                    _wizard_disable_webhook(state)
+                    return
+                continue
+            if provider == "ntfy":
+                print("  Enter a complete HTTPS ntfy topic URL or a topic name containing up to 64 letters, numbers, dashes or underscores.")
+            else:
+                print("  That does not look like a complete HTTPS webhook URL. Copy it from the webhook service and try again.")
+            if not _wizard_offer_retry("webhook URL", input_func=input_func):
+                _wizard_disable_webhook(state)
+                return
+    if provider == "ntfy":
+        _wizard_collect_ntfy_access_token(state, input_func=input_func, getpass_func=getpass_func)
+    state.config_values["WEBHOOK_ENABLED"] = True
+    _wizard_collect_alert_preset(state, "Which webhook alerts should be sent?", WIZARD_WEBHOOK_NOTIFICATION_KEYS, WIZARD_RECOMMENDED_WEBHOOK_KEYS, prefix="Send a webhook alert on ", input_func=input_func)
+
+
+# Collects an optional ntfy access token without displaying it or contacting the service
+def _wizard_collect_ntfy_access_token(state, input_func=None, getpass_func=None):
+    if _wizard_existing_secret("NTFY_ACCESS_TOKEN", state.env_path, secret_updates=state.secret_updates):
+        choice = _wizard_ask_choice("Which ntfy authentication should be used?", [
+            ("Keep the saved access token", "Keeps the private value without displaying or changing it."),
+            ("Paste a new access token", "Uses a hidden prompt then saves the replacement in the dotenv file."),
+            ("Do not use an access token", "Disables the saved token. Authentication in the topic URL still works."),
+        ], input_func=input_func)
+        if choice == 0:
+            return
+        if choice == 2:
+            state.secret_updates["NTFY_ACCESS_TOKEN"] = ""
+            print("  The saved ntfy access token will be disabled without being displayed.")
+            return
+    elif not _wizard_ask_yes_no("Authenticate this ntfy topic with a separate access token?", default=False, input_func=input_func):
+        print("  No separate access token selected. Authentication already present in the topic URL still works.")
+        return
+    while True:
+        token = _wizard_ask_secret("Paste the ntfy access token only", getpass_func=getpass_func)
+        if not token or ("\r" not in token and "\n" not in token and not token.casefold().startswith(("bearer ", "basic "))):
+            if token:
+                state.secret_updates["NTFY_ACCESS_TOKEN"] = token
+            return
+        print("  Paste only the access token without a Bearer or Basic prefix.")
+        if not _wizard_offer_retry("ntfy access token", input_func=input_func):
+            return
+
+
+# Reads the selected private file before setup changes paths or pending answers
+def read_private_settings(env_path):
+    path = Path(env_path)
+    if not path.exists():
+        return {}
+    content = path.read_text(encoding="utf-8")
+    bindings = list(_dotenv_bindings(content))
+    invalid = next((binding for binding in bindings if binding.error), None)
+    if invalid is not None:
+        raise ValueError(f"Dotenv file '{path}' has invalid syntax near line {invalid.original.line}. Correct that assignment before retrying.")
+    return {binding.key: binding.value for binding in bindings if binding.key is not None}
+
+
+# Rechecks retained answers against the new destination before collecting replacement choices
+def _wizard_move_private_settings(state, selected_env):
+    retained = read_private_settings(state.env_path)
+    retained.update(state.secret_updates)
+    selected = read_private_settings(selected_env)
+    carried = {key: value for key, value in retained.items() if key in SECRET_KEYS and isinstance(value, str) and selected.get(key) is None}
+    state.retained_secrets = dict(carried)
+    state.secret_updates = dict(carried)
+    state.env_path = selected_env
+    for key in SECRET_KEYS:
+        value = selected.get(key, carried.get(key))
+        if isinstance(value, str):
+            state.config_values[key] = value
+
+
+# Changes where setup writes, re-asking the sections that hold secrets when the dotenv destination moves
+def _wizard_collect_destination_section(state, input_func=None, getpass_func=None):
+    new_config_path = state.config_path
+    current_config = Path(state.config_path).expanduser().resolve()
+    current_env = Path(state.env_path).expanduser().resolve()
+    while True:
+        config_text = _wizard_ask_text("Configuration file destination", default=str(state.config_path), required=True, input_func=input_func)
+        try:
+            selected_config = _wizard_validate_destination(config_text, "Configuration destination")
+            break
+        except ValueError as exc:
+            print(f"  {exc}.")
+            # Declining keeps the destination this run started with rather than asking for a path forever
+            if not _wizard_offer_retry("configuration destination", input_func=input_func):
+                print(f"  Keeping {state.config_path}.")
+                selected_config = current_config
+                break
+    # Both sides are compared resolved, so an unchanged answer written a different way is not read as a move
+    if selected_config != current_config:
+        chosen_config = _wizard_choose_config_destination(selected_config, input_func=input_func)
+        # Giving up on every offered path keeps the current destination rather than cancelling the whole setup
+        if chosen_config is not None:
+            new_config_path = chosen_config
+    while True:
+        env_text = _wizard_ask_text("Dotenv file destination", default=str(state.env_path), required=True, input_func=input_func)
+        selected_env = current_env
+        problem = ""
+        if env_text.casefold() == "none":
+            problem = "Setup needs a writable dotenv file and cannot use 'none'."
+        else:
+            try:
+                selected_env = _wizard_validate_destination(env_text, "Dotenv destination")
+            except ValueError as exc:
+                problem = f"{exc}."
+            else:
+                # One file cannot hold both, since saving the configuration would overwrite the secrets beside it
+                if selected_env == Path(new_config_path).expanduser().resolve():
+                    problem = "The dotenv file has to be a different file from the configuration."
+        if not problem:
+            break
+        print(f"  {problem}")
+        if not _wizard_offer_retry("dotenv destination", input_func=input_func):
+            print(f"  Keeping {state.env_path}.")
+            selected_env = current_env
+            break
+    if selected_env == Path(state.env_path).expanduser().resolve():
+        state.config_path = new_config_path
+        state.config_values["DOTENV_FILE"] = str(selected_env)
+        return
+    _wizard_move_private_settings(state, selected_env)
+    state.config_path = new_config_path
+    state.config_values["DOTENV_FILE"] = str(selected_env)
+    print("  The dotenv destination changed. Review authentication and notification settings. Values in the selected file are kept unless you replace them.")
+    _wizard_collect_auth_section(state, input_func=input_func, getpass_func=getpass_func)
+    print()
+    _wizard_collect_spotify_section(state, input_func=input_func, getpass_func=getpass_func)
+    print()
+    _wizard_collect_email_section(state, input_func=input_func, getpass_func=getpass_func)
+    print()
+    _wizard_collect_webhook_section(state, input_func=input_func, getpass_func=getpass_func)
+    for key, value in state.retained_secrets.items():
+        state.secret_updates.setdefault(key, value)
+
+
+# Runs one editable section again after resetting only the keys it owns
+def _wizard_edit_setup_section(state, input_func=None, getpass_func=None):
+    options = [(label, description) for _name, label, description, _config_keys, _secret_keys in WIZARD_SECTIONS]
+    options.append(("Return to summary", "Keep every current answer."))
+    choice = _wizard_ask_choice("Which setup section should be changed?", options, input_func=input_func)
+    if choice == len(WIZARD_SECTIONS):
+        return
+    name, _label, _description, config_keys, secret_keys = WIZARD_SECTIONS[choice]
+    _wizard_reset_section(state, config_keys, secret_keys)
+    if name == "Target":
+        state.target = ""
+    print()
+    collectors = {
+        "Target": lambda: _wizard_collect_target_section(state, input_func=input_func),
+        "Polling": lambda: _wizard_collect_polling_section(state, input_func=input_func),
+        "Authentication": lambda: _wizard_collect_auth_section(state, input_func=input_func, getpass_func=getpass_func),
+        "Spotify": lambda: _wizard_collect_spotify_section(state, input_func=input_func, getpass_func=getpass_func),
+        "Tracking": lambda: _wizard_collect_tracking_section(state, input_func=input_func),
+        "Output": lambda: _wizard_collect_output_section(state, input_func=input_func),
+        "Email": lambda: _wizard_collect_email_section(state, input_func=input_func, getpass_func=getpass_func),
+        "Webhook": lambda: _wizard_collect_webhook_section(state, input_func=input_func, getpass_func=getpass_func),
+        "Destinations": lambda: _wizard_collect_destination_section(state, input_func=input_func, getpass_func=getpass_func),
+    }
+    collectors[name]()
+
+
+# The theme part each setup summary row draws its value in, for rows whose value has a known kind
+WIZARD_SUMMARY_VALUE_STYLES = {
+    "Target": "username",
+    "Polling interval while idle": "duration",
+    "Polling interval while listening": "duration",
+    "Inactivity threshold": "duration",
+}
+
+
+# Colours one setup summary value from its row label
+def _wizard_summary_value(label, value):
+    text = str(value)
+    part = WIZARD_SUMMARY_VALUE_STYLES.get(label)
+    if part:
+        return colorize(part, text)
+    if text.startswith("enabled") or text in ("complete", "yes"):
+        return colorize("boolean_true", text)
+    if text in ("disabled", "incomplete", "no", "none", "not set"):
+        return colorize("boolean_false", text)
+    return text
+
+
+# Prints one aligned label and value block, so every summary row lines up
+def _wizard_print_summary_rows(rows):
+    width = max(len(label) for label, _ in rows) + 1
+    for label, value in rows:
+        print(f"  {(label + ':'):<{width}} {_wizard_summary_value(label, value)}")
+
+
+# Names the alerts one channel will send, or says none
+def _wizard_enabled_alerts(state, keys):
+    labels = [WIZARD_ALERT_LABELS[key.replace("WEBHOOK_", "", 1) if key.startswith("WEBHOOK_") else key] for key in keys if state.config_values.get(key)]
+    return ", ".join(labels) if labels else "none"
+
+
+# Shows everything that is about to be written, by name and never by secret value
+def _wizard_print_setup_summary(state):
+    credentials_set = all(key in state.secret_updates or doctor_value_is_set(state.config_values.get(key)) for key in ("LASTFM_API_KEY", "LASTFM_API_SECRET"))
+    tracked = [label for key, label in (("TRACK_FOLLOWERS", "followers"), ("TRACK_FOLLOWINGS", "followings"), ("TRACK_DISPLAY_NAME", "display name"), ("TRACK_BIO", "About Me")) if state.config_values.get(key)]
+    spotify_enabled = bool(state.config_values.get("USE_TRACK_DURATION_FROM_SPOTIFY") or state.config_values.get("TRACK_SONGS"))
+    spotify_app = "SP_CLIENT_ID" in state.secret_updates or doctor_value_is_set(state.config_values.get("SP_CLIENT_ID"))
+    email_alerts = _wizard_enabled_alerts(state, WIZARD_EMAIL_NOTIFICATION_KEYS)
+    webhook_alerts = _wizard_enabled_alerts(state, WIZARD_WEBHOOK_NOTIFICATION_KEYS) if state.config_values.get("WEBHOOK_ENABLED") else "none"
+    rows = [
+        ("Target", state.target or "not set"),
+        ("Persist target", "yes" if state.persist_target else "no"),
+        ("Polling interval while idle", _wizard_format_duration(int(state.config_values.get("LASTFM_CHECK_INTERVAL") or 0))),
+        ("Polling interval while listening", _wizard_format_duration(int(state.config_values.get("LASTFM_ACTIVE_CHECK_INTERVAL") or 0))),
+        ("Inactivity threshold", _wizard_format_duration(int(state.config_values.get("LASTFM_INACTIVITY_CHECK") or 0))),
+        ("Authentication status", "complete" if credentials_set else "incomplete"),
+        ("Spotify track details", ("enabled with an app" if spotify_app else "enabled, anonymous backend") if spotify_enabled else "disabled"),
+        ("Profile tracking", ", ".join(tracked) if tracked else "disabled"),
+        ("Email", "enabled" if email_alerts != "none" else "disabled"),
+        ("Email notifications", email_alerts),
+        ("Webhook", f"enabled ({webhook_provider_display_name(state.config_values.get('WEBHOOK_PROVIDER'))})" if state.config_values.get("WEBHOOK_ENABLED") else "disabled"),
+        ("Webhook alerts", webhook_alerts),
+        ("Output log", "disabled" if state.config_values.get("DISABLE_LOGGING") else "enabled"),
+        ("CSV output", state.config_values.get("CSV_FILE") or "disabled"),
+        ("Monitored track list", state.config_values.get("MONITOR_LIST_FILE") or "disabled"),
+        ("Config destination", state.config_path),
+        ("Dotenv destination", state.env_path),
+        ("Install method", install_method()),
+    ]
+    print(colorize("header", "\nSetup summary\n"))
+    _wizard_print_summary_rows(rows)
+
+
+# Loops on the summary until the user saves or explicitly discards, so nothing is written by accident
+def _wizard_review_setup(state, input_func=None, getpass_func=None):
+    while True:
+        state.secret_updates = {**state.retained_secrets, **state.secret_updates}
+        _wizard_print_setup_summary(state)
+        action = _wizard_ask_choice("What would you like to do?", [
+            ("Save settings", "Write the displayed settings to the selected files."),
+            ("Review or change settings", "Edit one section without losing the other answers."),
+            ("Discard answers and exit", "Leave the destination files unchanged."),
+        ], input_func=input_func)
+        if action == 0:
+            return True
+        if action == 1:
+            _wizard_edit_setup_section(state, input_func=input_func, getpass_func=getpass_func)
+            continue
+        print()
+        if _wizard_ask_yes_no("Discard all entered answers and exit?", default=False, input_func=input_func):
+            return False
+        print("  Setup answers retained.")
+
+
+# Prints where setup will write and which install method the printed commands are written for
+def _wizard_print_setup_destinations(method, config_path, env_path):
+    print(f"Detected install method: {colorize('username', method)}")
+    print(f"Configuration:          {config_path}")
+    print(f"Dotenv:                 {env_path}\n")
+
+
+# Puts the values setup just saved into effect, so doctor checks the written files instead of the pre-setup state
+def _wizard_apply_saved_values(state, env_path=None):
+    exported = _wizard_exported_secrets()
+    selected_path = state.env_path if env_path is None else env_path
+    try:
+        saved = _wizard_private_values(selected_path)
+    except (OSError, UnicodeError, ValueError) as exc:
+        print_recovery_error(exc, context="file", detail=f"Could not read saved secrets from '{selected_path}'")
+        raise SystemExit(1) from None
+    saved_config = _config_template_defaults()
+    if not load_config_file(state.config_path, namespace=saved_config):
+        raise SystemExit(1)
+    globals().update(saved_config)
+    for key in SECRET_KEYS:
+        if key in exported:
+            value, source = exported[key], "environment"
+        elif saved.get(key) is not None:
+            value, source = saved[key], "dotenv file"
+        else:
+            value, source = saved_config.get(key), "config file"
+        globals()[key] = value
+        if source == "dotenv file":
+            os.environ[key] = str(value)
+        elif key not in exported:
+            os.environ.pop(key, None)
+        record_secret_source(key, source)
+
+
+# Builds the exact local command that starts this monitor, used when setup offers to launch it
+def _wizard_local_command_args(target=None, config_path=None, env_path=None):
+    executable = sys.executable or ("python" if platform.system() == "Windows" else "python3")
+    arguments = [executable, "-m", TOOL_NAME] if install_method() == INSTALL_METHOD_PYPI else [executable, str(Path(__file__).resolve())]
+    if target:
+        arguments.append(str(target))
+    if config_path:
+        arguments.extend(["--config-file", str(config_path)])
+    if env_path:
+        arguments.extend(["--env-file", str(env_path)])
+    return arguments
+
+
+# Hands the terminal to the monitor, replacing this process where the platform allows it
+def _wizard_launch_monitor(arguments):
+    command = [str(argument) for argument in arguments]
+    if platform.system() == "Windows":
+        try:
+            return subprocess.run(command, check=False).returncode
+        except KeyboardInterrupt:
+            return 0
+    os.execv(command[0], command)
+    return 0
+
+
+# Runs the guided setup, holding every answer until the user saves
+def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input_func=None, getpass_func=None, interactive=None):
+    terminal_is_interactive = sys.stdin.isatty() if interactive is None else interactive
+    if not terminal_is_interactive:
+        print("The setup wizard needs an interactive terminal (TTY).")
+        print("Run --setup from an interactive shell or use --generate-config and edit the files manually.")
+        print(colorize_links(f"Guide: {QUICK_START_GUIDE_URL}"))
+        return 1
+
+    try:
+        config_path, env_path = _wizard_destinations(config_file, env_file)
+    except (ValueError, RecoveryError) as exc:
+        print_recovery_error(exc, context="file", detail=str(exc))
+        return 1
+
+    print(colorize("header", "Setup Wizard\n"))
+    print("This asks a few questions and writes a ready-to-run configuration.")
+    _wizard_print_default_guidance()
+    print("Secrets go to the dotenv file. Non-secret settings go to the config file.")
+    print()
+    _wizard_print_setup_destinations(install_method(), config_path, env_path)
+
+    baseline_values = {name: value for name, value in globals().items() if name in _config_allowed_names()}
+    state = WizardSetupState(config_path, env_path, baseline_values)
+    state.config_values["DOTENV_FILE"] = str(env_path)
+
+    try:
+        # Asked before anything else, so a config that has to be replaced is agreed to rather than discovered at Save
+        config_existed = Path(config_path).exists()
+        chosen_config = _wizard_choose_config_destination(config_path, input_func=input_func)
+        if chosen_config is None:
+            print("\n" + colorize("warning", "Setup cancelled. Destination files were not changed."))
+            return 1
+        state.config_path = chosen_config
+        _wizard_seed_destination(state, env_file)
+        # A destination nothing was asked about printed nothing, so the separator would leave a blank gap
+        if config_existed:
+            print()
+        _wizard_collect_target_section(state, initial_target, input_func=input_func)
+        print()
+        _wizard_collect_polling_section(state, input_func=input_func)
+        print()
+        _wizard_collect_auth_section(state, input_func=input_func, getpass_func=getpass_func)
+        print()
+        _wizard_collect_spotify_section(state, input_func=input_func, getpass_func=getpass_func)
+        print()
+        _wizard_collect_tracking_section(state, input_func=input_func)
+        print()
+        _wizard_collect_output_section(state, input_func=input_func)
+        print()
+        _wizard_collect_email_section(state, input_func=input_func, getpass_func=getpass_func)
+        print()
+        _wizard_collect_webhook_section(state, input_func=input_func, getpass_func=getpass_func)
+        if not _wizard_review_setup(state, input_func=input_func, getpass_func=getpass_func):
+            print("\n" + colorize("warning", "Setup cancelled. Destination files were not changed."))
+            return 1
+    except (OSError, UnicodeError, ValueError) as exc:
+        print_recovery_error(exc, context="config")
+        print("Correct the selected file or pass --env-file with a writable destination.")
+        return 1
+    except (EOFError, KeyboardInterrupt):
+        print(colorize("warning", "Setup cancelled. Destination files were not changed."))
+        return 1
+
+    # Everything above only filled the state, so this is the first and only point anything reaches disk
+    try:
+        preserved_dotenv = preserve_inline_config_secrets(state.config_path, state.env_path)
+        backup_path, _written = write_generated_config(state.config_path, generate_config_with_current_values(state.config_values), force=True, redact_secrets=True)
+    except Exception as exc:
+        print_recovery_error(exc, context="file", detail=f"Could not write the configuration to '{state.config_path}'")
+        return 1
+    dotenv_path = preserved_dotenv
+    # A cleared secret only has to leave a file that exists, so setup never creates one holding nothing
+    if any(state.secret_updates.values()) or (state.secret_updates and Path(state.env_path).expanduser().is_file()):
+        try:
+            dotenv_path = update_dotenv_file(state.env_path, state.secret_updates)
+        except Exception as exc:
+            print_recovery_error(exc, context="file", detail=f"Could not write secrets to '{state.env_path}'")
+            print(f"Configuration was saved to '{state.config_path}'. Setup is incomplete and monitoring was not started.")
+            print("Correct the dotenv destination then run --setup again with the same --config-file and --env-file. Review the saved settings before starting monitoring.")
+            return 1
+
+    print(colorize("header", "\nSaved files\n"))
+    print(f"  Configuration: {state.config_path}")
+    if backup_path:
+        print(f"  Backup:        {backup_path}")
+    if dotenv_path:
+        # The row prints the dotenv file path, not what the file holds
+        # codeql[py/clear-text-logging-sensitive-data]
+        print(f"  Secrets:       {dotenv_path}")
+
+    doctor_exit = None
+    if state.target:
+        print()
+    try:
+        if state.target and _wizard_ask_yes_no("Run doctor now? It writes no files and offers real delivery tests only with separate approval.", default=True, input_func=input_func):
+            print()
+            _wizard_apply_saved_values(state, env_path=state.env_path if state.env_path.is_file() else None)
+            doctor_exit = run_doctor(target_value=state.target, config_path=str(state.config_path), env_path=str(state.env_path) if state.env_path.is_file() else None)
+    except (EOFError, KeyboardInterrupt):
+        # The files are already written, so an interrupt here only skips the optional check
+        print(colorize("warning", "Setup is saved. Use the commands below when ready."))
+
+    env_argument = str(state.env_path) if state.env_path.is_file() else ""
+    # A persisted target is already in the config file, so the printed commands stay short
+    target_arguments = [] if state.persist_target or not state.target else [state.target]
+    print(colorize("header", "\nNext steps\n"))
+    _wizard_print_command("Check setup again:", render_command(["--doctor"] + target_arguments, config_path=str(state.config_path), env_path=env_argument))
+    start_label = "After Doctor passes, start monitoring:" if doctor_exit not in (None, 0) else "Start monitoring:"
+    _wizard_print_command(start_label, render_command(target_arguments, config_path=str(state.config_path), env_path=env_argument))
+    print(colorize_links(f"Guide: {QUICK_START_GUIDE_URL}\n"))
+
+    try:
+        # Only a doctor run that passed proves the saved setup can monitor, so the launch offer waits for it
+        start_monitoring = bool(state.target and doctor_exit == 0 and _wizard_ask_yes_no("Start monitoring now? Monitoring will continue until Ctrl+C.", default=True, input_func=input_func))
+    except (EOFError, KeyboardInterrupt):
+        # The files are already written, so an interrupt here only skips the optional launch
+        print(colorize("warning", "Setup is saved. Start monitoring with the command above when ready."))
+        return 0
+    if start_monitoring:
+        launch_arguments = _wizard_local_command_args(target=None if state.persist_target else state.target, config_path=state.config_path, env_path=state.env_path if state.env_path.is_file() else None)
+        sys.stdout.flush()
+        return _wizard_launch_monitor(launch_arguments)
+    return 0
+
+
+# Names one parsed argument the way the user could have typed it, since an argparse destination is not
+# always a flag: --debug is stored as debug_mode and a positional has no flag at all
+def conflicting_argument_name(parser, dest, argv=None):
+    typed = set(sys.argv[1:] if argv is None else argv)
+    # argparse exposes no public listing of its arguments, so the actions it holds are read directly
+    for action in getattr(parser, "_actions", ()):
+        if action.dest != dest:
+            continue
+        if not action.option_strings:
+            return str(action.metavar or dest.upper())
+        return next((option for option in action.option_strings if option in typed), action.option_strings[0])
+    return f"--{dest.replace('_', '-')}"
+
+
+# Applies every command-line override that only assigns a setting, so the preflight report and the
+# monitoring run are decided by the same values rather than by where in main each flag was handled
+def apply_cli_overrides(args):
+    global LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, USE_TRACK_DURATION_FROM_SPOTIFY, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, LASTFM_BREAK_CHECK_MULTIPLIER, LIVENESS_REMINDER_SECONDS, CSV_FILE, MONITOR_LIST_FILE, DISABLE_LOGGING, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, ERROR_NOTIFICATION, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, PROFILE_NOTIFICATION, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, FRIENDS_CHECK_INTERVAL, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, TRACK_SONGS, PROGRESS_INDICATOR, DO_NOT_SHOW_DURATION_MARKS
+
+    if args.lastfm_api_key:
+        LASTFM_API_KEY = args.lastfm_api_key
+        record_secret_source("LASTFM_API_KEY", "command line")
+
+    if args.lastfm_secret:
+        LASTFM_API_SECRET = args.lastfm_secret
+        record_secret_source("LASTFM_API_SECRET", "command line")
+
+    if args.spotify_creds:
+        SP_CLIENT_ID, separator, SP_CLIENT_SECRET = args.spotify_creds.partition(":")
+        if not separator or not SP_CLIENT_ID or not SP_CLIENT_SECRET:
+            print_recovery_error(RecoveryError(make_recovery_advice("config.invalid", "-z / --spotify-creds is not in the expected format", recovery_fix_with_guide("Pass the client id and the client secret as one value separated by a colon", SPOTIFY_APP_GUIDE_URL), False)))
+            sys.exit(1)
+        record_secret_source("SP_CLIENT_ID", "command line")
+        record_secret_source("SP_CLIENT_SECRET", "command line")
+
+    # Emitted once every layer has been applied, so a support transcript answers where each credential came from
+    grouped_secrets = secrets_by_source()
+    # One line per source rather than one field per secret, since a secret name followed by = is what the redaction pass removes
+    for secret_source, secret_names in grouped_secrets or [("none", [])]:
+        debug_print("Secret sources", source=secret_source, names=" ".join(secret_names) or None)
+
+    if SP_TOKENS_FILE:
+        SP_TOKENS_FILE = os.path.expanduser(SP_TOKENS_FILE)
+
+    if args.fetch_duration:
+        USE_TRACK_DURATION_FROM_SPOTIFY = args.fetch_duration
+
+    if args.check_interval:
+        LASTFM_CHECK_INTERVAL = args.check_interval
+
+    if args.active_interval:
+        LASTFM_ACTIVE_CHECK_INTERVAL = args.active_interval
+
+    if args.offline_timer:
+        LASTFM_INACTIVITY_CHECK = args.offline_timer
+
+    if args.break_multiplier:
+        LASTFM_BREAK_CHECK_MULTIPLIER = args.break_multiplier
+
+    # The interval can come from a config file, so the reminder is settled once every layer has been applied
+    numeric_errors = [] if isinstance(LIVENESS_CHECK_INTERVAL, (int, float)) else [f"LIVENESS_CHECK_INTERVAL must be a number, not {LIVENESS_CHECK_INTERVAL!r}"]
+    if numeric_errors and not getattr(args, "doctor", False):
+        print_recovery_error(context="config", detail="Invalid numeric settings: " + ", ".join(numeric_errors))
+        raise SystemExit(1)
+    if numeric_errors:
+        LIVENESS_REMINDER_SECONDS = 0
+    else:
+        LIVENESS_REMINDER_SECONDS = LIVENESS_CHECK_INTERVAL if LIVENESS_CHECK_INTERVAL > 0 else 0
+
+    if args.csv_file:
+        CSV_FILE = os.path.expanduser(args.csv_file)
+    else:
+        if CSV_FILE:
+            CSV_FILE = os.path.expanduser(CSV_FILE)
+
+    if args.monitor_list:
+        MONITOR_LIST_FILE = os.path.expanduser(args.monitor_list)
+    else:
+        if MONITOR_LIST_FILE:
+            MONITOR_LIST_FILE = os.path.expanduser(MONITOR_LIST_FILE)
+
+    if args.disable_logging is True:
+        DISABLE_LOGGING = True
+
+    if args.notify_active is True:
+        ACTIVE_NOTIFICATION = True
+
+    if args.notify_inactive is True:
+        INACTIVE_NOTIFICATION = True
+
+    if args.notify_track is True:
+        TRACK_NOTIFICATION = True
+
+    if args.notify_song_changes is True:
+        SONG_NOTIFICATION = True
+
+    if args.notify_offline_entries is True:
+        OFFLINE_ENTRIES_NOTIFICATION = True
+
+    if args.notify_loop is True:
+        SONG_ON_LOOP_NOTIFICATION = True
+
+    if args.notify_errors is False:
+        ERROR_NOTIFICATION = False
+
+    if args.notify_followers is True:
+        FOLLOWERS_NOTIFICATION = True
+
+    if args.notify_followings is True:
+        FOLLOWINGS_NOTIFICATION = True
+
+    if args.notify_profile is True:
+        PROFILE_NOTIFICATION = True
+
+    if args.track_followings is True:
+        TRACK_FOLLOWINGS = True
+
+    if args.track_followers is True:
+        TRACK_FOLLOWERS = True
+
+    if args.track_bio is True:
+        TRACK_BIO = True
+
+    if args.track_display_name is True:
+        TRACK_DISPLAY_NAME = True
+
+    if args.friends_check_interval:
+        FRIENDS_CHECK_INTERVAL = args.friends_check_interval
+
+    if args.friends_change_counter:
+        FRIENDS_CHANGE_COUNTER = args.friends_change_counter
+
+    if args.friends_retry_interval:
+        FRIENDS_RETRY_INTERVAL = args.friends_retry_interval
+
+    if args.track_in_spotify is True:
+        TRACK_SONGS = True
+
+    if args.progress is True:
+        PROGRESS_INDICATOR = True
+
+    if args.hide_duration_source is True:
+        DO_NOT_SHOW_DURATION_MARKS = True
+
+    if args.fetch_duration is True:
+        USE_TRACK_DURATION_FROM_SPOTIFY = True
 
 
 # Runs the command-line interface
 def main():
-    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, DEBUG_MODE, LASTFM_USERNAME_GLOBAL
+    global CLI_CONFIG_PATH, CONFIG_DISCOVERY_DISABLED, DOTENV_FILE, CLEAR_SCREEN, COLORED_OUTPUT, COLOR_THEME, LIVENESS_REMINDER_SECONDS, LASTFM_USERNAME, LASTFM_API_KEY, LASTFM_API_SECRET, SP_CLIENT_ID, SP_CLIENT_SECRET, SP_TOKENS_FILE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, LF_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, OFFLINE_ENTRIES_NOTIFICATION, ERROR_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_PROVIDER, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION, WEBHOOK_FOLLOWERS_NOTIFICATION, WEBHOOK_FOLLOWINGS_NOTIFICATION, WEBHOOK_PROFILE_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, LASTFM_CHECK_INTERVAL, LASTFM_ACTIVE_CHECK_INTERVAL, LASTFM_INACTIVITY_CHECK, TRACK_SONGS, PROGRESS_INDICATOR, USE_TRACK_DURATION_FROM_SPOTIFY, DO_NOT_SHOW_DURATION_MARKS, LASTFM_BREAK_CHECK_MULTIPLIER, SMTP_PASSWORD, stdout_bck, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, FRIENDS_CHECK_INTERVAL, FOLLOWERS_NOTIFICATION, FOLLOWINGS_NOTIFICATION, PROFILE_NOTIFICATION, FRIENDS_CHANGE_COUNTER, FRIENDS_RETRY_INTERVAL, VERBOSE_MODE, DEBUG_MODE, TRUNCATE_CHARS, LASTFM_USERNAME_GLOBAL
 
-    private_setup_flags = ("--set-webhook-url", "--set-lastfm-credentials", "--set-spotify-credentials")
-    if "--generate-config" in sys.argv and not any(flag in sys.argv for flag in private_setup_flags):
+    if "--generate-config" in sys.argv and not any(flag in sys.argv for flag in SECRET_ACTION_FLAGS):
         config_content = CONFIG_BLOCK.strip("\n") + "\n"
         try:
             idx = sys.argv.index("--generate-config")
             if idx + 1 < len(sys.argv) and not sys.argv[idx + 1].startswith("-"):
+                # Writing the file directly avoids the UTF-16 output redirection in some Windows PowerShell versions
                 output_file = sys.argv[idx + 1]
-                with open(output_file, "w", encoding="utf-8") as f:
-                    f.write(config_content)
+                backup_path, written = write_generated_config(output_file, config_content, force="--force" in sys.argv)
+                if not written:
+                    print("Config was not replaced. The existing file is unchanged")
+                    sys.exit(1)
                 print(f"Config written to: {output_file}")
+                if backup_path:
+                    print(f"Previous config backed up to: {backup_path}")
                 sys.exit(0)
         except (ValueError, IndexError):
             pass
+        except ConfigExistsError as exc:
+            print_recovery_error(exc, context="file.exists", detail=str(exc))
+            sys.exit(1)
+        except OSError as exc:
+            print_recovery_error(exc, context="file", detail=f"The config file could not be written: {exc}")
+            sys.exit(1)
         sys.stdout.buffer.write(config_content.encode("utf-8"))
         sys.stdout.buffer.flush()
         sys.exit(0)
 
-    if "--version" in sys.argv and not any(flag in sys.argv for flag in private_setup_flags):
+    if "--version" in sys.argv and not any(flag in sys.argv for flag in SECRET_ACTION_FLAGS):
         print(f"{os.path.basename(sys.argv[0])} v{VERSION}")
         sys.exit(0)
 
@@ -4770,13 +9685,30 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    clear_screen(CLEAR_SCREEN)
+    # The screen clearing and the version line both run before argparse, so the settings that decide
+    # them are resolved from the config file first rather than from the built-in defaults alone
+    apply_early_output_config()
 
-    print(f"Last.fm Monitoring Tool v{VERSION}\n")
+    # Read straight from sys.argv because argparse has not run yet, and the screen is cleared and the
+    # version line printed before it does. Debug mode is read first so it also traces the colour setup
+    if "--debug" in sys.argv:
+        DEBUG_MODE = True
 
-    parser = argparse.ArgumentParser(
-        prog="lastfm_monitor",
-        description=("Monitor a Last.fm user's scrobbles and send customizable email or webhook alerts [ https://github.com/misiektoja/lastfm_monitor/ ]"), formatter_class=argparse.RawTextHelpFormatter
+    if "--no-color" in sys.argv:
+        COLORED_OUTPUT = False
+
+    init_color_output(stdout_bck)
+
+    if CLEAR_SCREEN and DEBUG_MODE:
+        debug_print("Terminal screen clear", outcome="skipped", reason="debug mode is active")
+
+    clear_screen(CLEAR_SCREEN and not keep_terminal_history() and not DEBUG_MODE)
+
+    print_startup_banner()
+
+    parser = ColoredHelpParser(
+        prog=TOOL_NAME,
+        description=(f"Monitor a Last.fm user's scrobbles and send customizable email or webhook alerts [ {PROJECT_URL}/ ]"), epilog=help_examples(), formatter_class=argparse.RawTextHelpFormatter, **argparse_color_kwargs()
     )
 
     # Positional
@@ -4800,7 +9732,14 @@ def main():
         "--config-file",
         dest="config_file",
         metavar="PATH",
-        help="Location of the optional config file",
+        help="Location of the optional config file (auto-search if not set, disable with 'none')",
+    )
+    conf.add_argument(
+        "--doctor",
+        dest="doctor",
+        action="store_true",
+        default=None,
+        help="Run read-only preflight checks and report what is ready and what is not"
     )
     conf.add_argument(
         "--generate-config",
@@ -4808,6 +9747,18 @@ def main():
         const=True,
         metavar="FILENAME",
         help="Print default config template and exit (on Windows PowerShell, specify a filename to avoid redirect encoding issues)",
+    )
+    conf.add_argument(
+        "--force",
+        dest="force",
+        action="store_true",
+        help="Let --generate-config replace an existing file, after a timestamped backup",
+    )
+    conf.add_argument(
+        "--setup",
+        dest="setup",
+        action="store_true",
+        help="Run the guided setup and write a ready-to-run configuration",
     )
     conf.add_argument(
         "--env-file",
@@ -4820,6 +9771,12 @@ def main():
         dest="set_webhook_url",
         action="store_true",
         help="Save a Discord or ntfy webhook URL through a hidden prompt",
+    )
+    conf.add_argument(
+        "--set-smtp-password",
+        dest="set_smtp_password",
+        action="store_true",
+        help="Enter the SMTP password privately, check it against the mail server and save it to the dotenv file",
     )
     conf.add_argument(
         "--set-lastfm-credentials",
@@ -4854,8 +9811,8 @@ def main():
         metavar="SPOTIFY_CLIENT_ID:SPOTIFY_CLIENT_SECRET",
         help="Optional Spotify OAuth app credentials"
     )
-    # Notifications
-    notify = parser.add_argument_group("Notifications")
+    # Email notifications
+    notify = parser.add_argument_group("Email notifications")
     notify.add_argument(
         "-a", "--notify-active",
         dest="notify_active",
@@ -4913,6 +9870,13 @@ def main():
         help="Email when followings (friends) change"
     )
     notify.add_argument(
+        "--notify-profile",
+        dest="notify_profile",
+        action="store_true",
+        default=None,
+        help="Email when a tracked bio or display name changes"
+    )
+    notify.add_argument(
         "-e", "--no-error-notify",
         action="store_false",
         dest="notify_errors",
@@ -4923,7 +9887,7 @@ def main():
         "--send-test-email",
         dest="send_test_email",
         action="store_true",
-        help="Send a test email to verify SMTP settings"
+        help="Send test email to verify SMTP settings"
     )
 
     webhook_notify = parser.add_argument_group("Webhook notifications")
@@ -4940,6 +9904,7 @@ def main():
     webhook_notify.add_argument("--webhook-offline-entries", dest="webhook_offline_entries", action="store_true", default=None, help="Send a webhook alert when new scrobbles arrive while the user is offline")
     webhook_notify.add_argument("--webhook-followers", dest="webhook_followers", action="store_true", default=None, help="Send a webhook alert when followers change")
     webhook_notify.add_argument("--webhook-followings", dest="webhook_followings", action="store_true", default=None, help="Send a webhook alert when followings change")
+    webhook_notify.add_argument("--webhook-profile", dest="webhook_profile", action="store_true", default=None, help="Send a webhook alert when a tracked bio or display name changes")
     webhook_error_toggle = webhook_notify.add_mutually_exclusive_group()
     webhook_error_toggle.add_argument("--webhook-errors", dest="webhook_errors", action="store_true", default=None, help="Send webhook alerts when monitoring has a problem")
     webhook_error_toggle.add_argument("--no-webhook-error-notify", dest="webhook_errors", action="store_false", default=None, help="Disable webhook alerts when monitoring has a problem")
@@ -4980,25 +9945,25 @@ def main():
         dest="friends_check_interval",
         metavar="SECONDS",
         type=int,
-        help="How often to check for followers/followings changes"
+        help="How often to check for friend and profile changes"
     )
     times.add_argument(
         "--friends-change-counter",
         dest="friends_change_counter",
         metavar="N",
         type=int,
-        help="Number of consecutive checks to confirm friend changes"
+        help="Number of consecutive checks to confirm friend or profile changes"
     )
     times.add_argument(
         "--friends-retry-interval",
         dest="friends_retry_interval",
         metavar="SECONDS",
         type=int,
-        help="Retry timeout for friend change confirmation"
+        help="Retry timeout for friend or profile change confirmation"
     )
 
     # Listing mode
-    listing = parser.add_argument_group("Listing")
+    listing = parser.add_argument_group("User information & listing")
 
     listing.add_argument(
         "-l", "--list-recent",
@@ -5073,11 +10038,46 @@ def main():
         help="Track changes in user's followers"
     )
     opts.add_argument(
+        "--track-bio",
+        dest="track_bio",
+        action="store_true",
+        default=None,
+        help="Track changes in user's About You bio"
+    )
+    opts.add_argument(
+        "--track-display-name",
+        dest="track_display_name",
+        action="store_true",
+        default=None,
+        help="Track changes in user's public display name"
+    )
+    opts.add_argument(
         "-d", "--disable-logging",
         dest="disable_logging",
         action="store_true",
         default=None,
         help="Disable logging to lastfm_monitor_<username>.log"
+    )
+    opts.add_argument(
+        "--no-color",
+        dest="no_color",
+        action="store_true",
+        default=None,
+        help="Disable coloured output in the terminal"
+    )
+    opts.add_argument(
+        "--truncate",
+        dest="truncate",
+        metavar="N",
+        type=int,
+        help="Max characters per screen line (not log), use 999 to auto-detect terminal width, ignored if -d is set"
+    )
+    opts.add_argument(
+        "--verbose",
+        dest="verbose",
+        action="store_true",
+        default=None,
+        help="Print extra startup and runtime detail (overrides VERBOSE_MODE)"
     )
     opts.add_argument(
         "--debug",
@@ -5088,27 +10088,49 @@ def main():
     )
 
     args = parser.parse_args()
+    DOTENV_STARTUP_ERRORS.clear()
+    env_path = None
 
-    if len(sys.argv) == 1:
-        parser.print_help(sys.stderr)
-        sys.exit(1)
+    # Applied before the config file so its own failures and the secret resolution traces are visible, then
+    # applied again afterwards so a saved VERBOSE_MODE or DEBUG_MODE of False cannot erase the command line
+    apply_diagnostic_cli_flags(args)
 
     if args.config_file:
-        CLI_CONFIG_PATH = os.path.expanduser(args.config_file)
+        CONFIG_DISCOVERY_DISABLED = args.config_file.casefold() == "none"
+        # The sentinel is kept unexpanded, so every command this run prints reads back the setup it used
+        CLI_CONFIG_PATH = args.config_file if CONFIG_DISCOVERY_DISABLED else os.path.expanduser(args.config_file)
 
     cfg_path = find_config_file(CLI_CONFIG_PATH)
 
-    if not cfg_path and CLI_CONFIG_PATH:
-        print(f"* Error: Config file '{CLI_CONFIG_PATH}' does not exist")
+    # A missing path is still an error, since only the literal 'none' is a selection.
+    # Setup is allowed to name a file that does not exist yet, since creating it is the point
+    if not cfg_path and CLI_CONFIG_PATH and not CONFIG_DISCOVERY_DISABLED and not args.setup:
+        print_recovery_error(context="config", detail=f"Config file '{CLI_CONFIG_PATH}' does not exist")
         sys.exit(1)
 
     if cfg_path:
-        try:
-            with open(cfg_path, "r") as cf:
-                exec(cf.read(), globals())
-        except Exception as e:
-            print(f"* Error loading config file '{cfg_path}': {e}")
+        if not load_config_file(cfg_path):
             sys.exit(1)
+
+    apply_diagnostic_cli_flags(args)
+
+    if args.no_color is True:
+        COLORED_OUTPUT = False
+
+    # Re-initialised so a COLORED_OUTPUT or COLOR_THEME the config file sets reaches everything printed from here
+    init_color_output(stdout_bck)
+
+    # Runs after the config file is read, so a saved LASTFM_USERNAME counts as a target
+    if len(sys.argv) == 1 and not LASTFM_USERNAME:
+        sys.exit(print_welcome_screen())
+
+    apply_tls_verification_setting()
+
+    # Anything already set once the config file has been read came from the settings, edited in place or loaded
+    for secret in SECRET_KEYS:
+        record_secret_source(secret, "config file")
+
+    prepare_configured_paths(args)
 
     if args.env_file:
         DOTENV_FILE = os.path.expanduser(args.env_file)
@@ -5120,6 +10142,8 @@ def main():
         "set_webhook_url": args.set_webhook_url,
         "set_lastfm_credentials": args.set_lastfm_credentials,
         "set_spotify_credentials": args.set_spotify_credentials,
+        # Runs after the config file is read, so the mail server it signs in to is the one monitoring would use
+        "set_smtp_password": args.set_smtp_password,
     }
     selected_private_actions = [name for name, enabled in private_actions.items() if enabled]
     if len(selected_private_actions) > 1:
@@ -5128,131 +10152,150 @@ def main():
         allowed_private_args = {"config_file", "env_file", *private_actions}
         conflicts = [name for name, value in vars(args).items() if name not in allowed_private_args and value is not None and value is not False]
         if conflicts:
-            parser.error(f"--{selected_private_actions[0].replace('_', '-')} cannot be combined with " + ", ".join(f"--{name.replace('_', '-')}" for name in conflicts))
+            parser.error(f"--{selected_private_actions[0].replace('_', '-')} cannot be combined with " + ", ".join(conflicting_argument_name(parser, name) for name in conflicts))
         private_env_file = DOTENV_FILE or None
         runners = {
             "set_webhook_url": run_set_webhook_url,
             "set_lastfm_credentials": run_set_lastfm_credentials,
             "set_spotify_credentials": run_set_spotify_credentials,
+            "set_smtp_password": run_set_smtp_password,
         }
         try:
             runners[selected_private_actions[0]](env_file=private_env_file)
-        except PrivateSettingsError as exc:
-            print(f"* Error: {exc}")
+        except (PrivateSettingsError, RecoveryError) as exc:
+            print_recovery_error(exc, context=selected_private_actions[0])
             sys.exit(1)
         sys.exit(0)
+
+    # An empty export is a shell-profile leftover rather than a value, so it is dropped before the dotenv load,
+    # which would otherwise keep it and leave the file's value unused
+    for secret in SECRET_KEYS:
+        if os.environ.get(secret) == "":
+            os.environ.pop(secret)
+    exported_secrets = frozenset(secret for secret in SECRET_KEYS if os.getenv(secret))
 
     if DOTENV_FILE and DOTENV_FILE.lower() == 'none':
         env_path = None
     else:
         try:
-            from dotenv import load_dotenv, find_dotenv
+            from dotenv import find_dotenv
 
+            # Startup exports retain priority over file entries at startup and reload
             if DOTENV_FILE:
                 env_path = DOTENV_FILE
-                if not os.path.isfile(env_path):
+                # A command that is about to write that file is naming its destination, not a missing file
+                if not os.path.isfile(env_path) and not command_writes_dotenv(sys.argv[1:]):
                     print(f"* Warning: dotenv file '{env_path}' does not exist\n")
                 else:
-                    load_dotenv(env_path, override=True, interpolate=False)
+                    load_managed_dotenv(env_path, override=False, interpolate=False)
             else:
                 env_path = find_dotenv() or None
                 if env_path:
-                    load_dotenv(env_path, override=True, interpolate=False)
+                    load_managed_dotenv(env_path, override=False, interpolate=False)
         except ImportError:
             env_path = DOTENV_FILE if DOTENV_FILE else None
             if env_path:
-                print(f"* Warning: Cannot load dotenv file '{env_path}' because 'python-dotenv' is not installed\n\nTo install it, run:\n    pip install python-dotenv\n\nOnce installed, re-run this tool\n")
+                print_recovery_advice(missing_dependency_advice("python-dotenv", f"The dotenv file '{env_path}' was not loaded", "Or export the secrets as environment variables"), label="Warning")
+        except (OSError, UnicodeError, ValueError) as exc:
+            detail, fix = dotenv_load_problem(env_path, exc)
+            DOTENV_STARTUP_ERRORS[str(env_path)] = (detail, fix)
+            if not args.doctor:
+                print_recovery_advice(make_recovery_advice("file.unreadable", detail, recovery_fix_with_guide(fix, CONFIG_GUIDE_URL), False))
+                if not command_reports_configuration(args):
+                    sys.exit(1)
 
-    if env_path:
-        for secret in SECRET_KEYS:
-            val = os.getenv(secret)
-            if val is not None:
-                globals()[secret] = val
+    # Environment variables are a documented alternative to a dotenv file, so they apply even when no file was loaded
+    for secret in SECRET_KEYS:
+        val = os.getenv(secret)
+        if val is not None:
+            globals()[secret] = val
+            record_secret_source(secret, "environment" if secret in exported_secrets else "dotenv file")
 
     apply_webhook_cli_overrides(args, parser)
+    apply_cli_overrides(args)
+
+    # The positional wins over the saved setting, and every read below sees the settled target
+    if not args.username and LASTFM_USERNAME:
+        args.username = LASTFM_USERNAME
+
+    if args.setup:
+        # Runs here rather than earlier so the values already in effect become the defaults it offers
+        sys.exit(run_setup_wizard(initial_target=args.username, config_file=args.config_file or cfg_path, env_file=args.env_file))
+
+    if args.doctor:
+        doctor_exit = run_doctor(target_value=args.username, config_path=cfg_path, env_path=env_path)
+        # Printed here rather than inside the run, so the wizard's own next steps are not followed by a second copy
+        print_doctor_next_steps(args.username, doctor_exit)
+        sys.exit(doctor_exit)
+
+    configuration_errors = runtime_configuration_errors() + runtime_boolean_errors()
+    if configuration_errors:
+        print_recovery_advice(make_recovery_advice("config.invalid", "Invalid settings: " + ". ".join(configuration_errors), recovery_fix_with_guide("Correct the reported settings in the configuration file or command line", CONFIG_GUIDE_URL), False))
+        sys.exit(1)
+
+    # A target is optional only for the utility actions below. Checked after the dotenv file is resolved so the
+    # command this prints carries the files this run was given, and before the credentials because the username
+    # is on the command line the user just typed while a key may live in a file they have never created
+    if not args.username and not (args.send_test_email or args.send_test_webhook):
+        print_recovery_error(context="target.missing")
+        sys.exit(1)
 
     if args.send_test_email:
+        missing = mail_settings_missing(MAIL_DELIVERY_SETTINGS)
+        if missing:
+            print_recovery_error(context="email", detail=f"The mail server settings are incomplete, {join_setting_names(missing, 'and')} {'is' if len(missing) == 1 else 'are'} not set")
+            sys.exit(1)
         print("* Sending test email notification ...\n")
-        if send_email("lastfm_monitor: test email", "This is test email - your SMTP settings seems to be correct !", "", SMTP_SSL, smtp_timeout=5) == 0:
+        if send_email(TEST_EMAIL_SUBJECT, TEST_EMAIL_BODY, "", SMTP_SSL, smtp_timeout=DOCTOR_SMTP_TIMEOUT, report_delivery=False) == 0:
             print("* Email sent successfully !")
         else:
             sys.exit(1)
         sys.exit(0)
 
     if args.send_test_webhook:
-        print("* Sending a test webhook ...\n")
-        if send_webhook("Last.fm Monitor test", "Your webhook alerts are set up correctly.", "song", force=True) == 0:
-            print("* Test webhook sent successfully !")
+        if not validate_webhook_url():
+            print_recovery_error(context="webhook", detail="WEBHOOK_URL must contain a complete HTTPS link")
+            sys.exit(1)
+        print("* Sending test webhook notification ...\n")
+        if send_webhook(TEST_WEBHOOK_TITLE, TEST_WEBHOOK_BODY, "song", force=True, report_delivery=False) == 0:
+            print("* Webhook sent successfully !")
         else:
             sys.exit(1)
         sys.exit(0)
 
+    if WEBHOOK_ENABLED and not validate_webhook_url():
+        verbose_print("Webhook notifications are off because WEBHOOK_URL is not a complete HTTPS link")
+        WEBHOOK_ENABLED = False
+
     if not check_internet():
         sys.exit(1)
 
+    # Kept as a backstop, so every path below reads a target that is known to be set
     if not args.username:
-        print("* Error: LASTFM_USERNAME argument is required !")
+        print_recovery_error(context="target.missing")
         sys.exit(1)
 
-    if args.lastfm_api_key:
-        LASTFM_API_KEY = args.lastfm_api_key
-
-    if args.lastfm_secret:
-        LASTFM_API_SECRET = args.lastfm_secret
-
-    if args.spotify_creds:
-        SP_CLIENT_ID, separator, SP_CLIENT_SECRET = args.spotify_creds.partition(":")
-        if not separator or not SP_CLIENT_ID or not SP_CLIENT_SECRET:
-            print("* Error: -z / --spotify-creds has invalid format - use SP_CLIENT_ID:SP_CLIENT_SECRET")
-            sys.exit(1)
-
-    if SP_TOKENS_FILE:
-        SP_TOKENS_FILE = os.path.expanduser(SP_TOKENS_FILE)
-
-    if not LASTFM_API_KEY or LASTFM_API_KEY == "your_lastfm_api_key":
-        print("* Error: LASTFM_API_KEY (-u / --lastfm_api_key) value is empty or incorrect")
+    if not doctor_value_is_set(LASTFM_API_KEY):
+        print_recovery_error(context="secret.missing", detail="LASTFM_API_KEY (-u / --lastfm-api-key) is empty or still the placeholder value")
         sys.exit(1)
 
-    if not LASTFM_API_SECRET or LASTFM_API_SECRET == "your_lastfm_api_secret":
-        print("* Error: LASTFM_API_SECRET (-w / --lastfm-secret) value is empty or incorrect")
+    if not doctor_value_is_set(LASTFM_API_SECRET):
+        print_recovery_error(context="secret.missing", detail="LASTFM_API_SECRET (-w / --lastfm-secret) is empty or still the placeholder value")
         sys.exit(1)
-
-    if args.debug_mode is True:
-        DEBUG_MODE = True
 
     LASTFM_USERNAME_GLOBAL = args.username
 
-    if args.fetch_duration:
-        USE_TRACK_DURATION_FROM_SPOTIFY = args.fetch_duration
-
-    if args.check_interval:
-        LASTFM_CHECK_INTERVAL = args.check_interval
-        LIVENESS_CHECK_COUNTER = LIVENESS_CHECK_INTERVAL / LASTFM_CHECK_INTERVAL
-
-    if args.active_interval:
-        LASTFM_ACTIVE_CHECK_INTERVAL = args.active_interval
-
-    if args.offline_timer:
-        LASTFM_INACTIVITY_CHECK = args.offline_timer
-
-    if args.break_multiplier:
-        LASTFM_BREAK_CHECK_MULTIPLIER = args.break_multiplier
-
     network = pylast.LastFMNetwork(LASTFM_API_KEY, LASTFM_API_SECRET)
     user = network.get_user(args.username)
-
-    if args.csv_file:
-        CSV_FILE = os.path.expanduser(args.csv_file)
-    else:
-        if CSV_FILE:
-            CSV_FILE = os.path.expanduser(CSV_FILE)
 
     if CSV_FILE:
         try:
             with open(CSV_FILE, 'a', newline='', buffering=1, encoding="utf-8") as _:
                 pass
+            debug_print("CSV destination check", path=CSV_FILE, outcome="OK")
         except Exception as e:
-            print(f"* Error: CSV file cannot be opened for writing: {e}")
+            debug_print("CSV destination check", path=CSV_FILE, outcome="failed", error=f"{type(e).__name__}: {e}")
+            print_recovery_error(e, context="file.unwritable", detail=f"The CSV file '{CSV_FILE}' cannot be opened for writing")
             sys.exit(1)
 
     if args.list_recent:
@@ -5263,15 +10306,9 @@ def main():
         try:
             lastfm_list_tracks(args.username, user, network, tracks_n, CSV_FILE)
         except Exception as e:
-            print(f"* Error: {e}")
+            print_recovery_error(e)
             sys.exit(1)
         sys.exit(0)
-
-    if args.monitor_list:
-        MONITOR_LIST_FILE = os.path.expanduser(args.monitor_list)
-    else:
-        if MONITOR_LIST_FILE:
-            MONITOR_LIST_FILE = os.path.expanduser(MONITOR_LIST_FILE)
 
     if MONITOR_LIST_FILE:
         try:
@@ -5287,8 +10324,10 @@ def main():
                 for line in lines
                 if line.strip() and not line.strip().startswith("#")
             ]
+            debug_print("Monitored tracks read", path=MONITOR_LIST_FILE, tracks=len(lf_tracks), outcome="OK")
         except Exception as e:
-            print(f"* Error: File with Last.fm tracks cannot be opened: {e}")
+            debug_print("Monitored tracks read", path=MONITOR_LIST_FILE, outcome="failed", error=f"{type(e).__name__}: {e}")
+            print_recovery_error(e, context="file", detail=f"The file with Last.fm tracks '{MONITOR_LIST_FILE}' cannot be opened")
             sys.exit(1)
     else:
         lf_tracks = []
@@ -5296,91 +10335,33 @@ def main():
     try:
         ascii_log_separators_enabled()
     except ValueError as e:
-        print(f"* Error: {e}")
+        print_recovery_error(RecoveryError(make_recovery_advice("config.invalid", str(e), recovery_fix_with_guide('Set ASCII_LOG_SEPARATORS to "Auto", "On" or "Off"', TERMINAL_GUIDE_URL), False)))
         sys.exit(1)
 
-    if args.disable_logging is True:
-        DISABLE_LOGGING = True
+    TRUNCATE_CHARS = resolve_truncate_chars(args.truncate, TRUNCATE_CHARS, DISABLE_LOGGING)
 
     if not DISABLE_LOGGING:
-        log_path = Path(os.path.expanduser(LF_LOGFILE))
-        if log_path.parent != Path('.'):
-            if log_path.suffix == "":
-                log_path = log_path.parent / f"{log_path.name}_{args.username}.log"
-        else:
-            if log_path.suffix == "":
-                log_path = Path(f"{log_path.name}_{args.username}.log")
+        # The same helper the doctor reports from, so the reported destination is the one the run writes to
+        log_path = build_log_path(LF_LOGFILE, args.username)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         FINAL_LOG_PATH = str(log_path)
         sys.stdout = Logger(FINAL_LOG_PATH)
     else:
         FINAL_LOG_PATH = None
+        # Upstream text still reaches the terminal without a log file, so it is sanitized by a stream either way
+        sys.stdout = TerminalStream(sys.stdout)
 
-    if args.notify_active is True:
-        ACTIVE_NOTIFICATION = True
-
-    if args.notify_inactive is True:
-        INACTIVE_NOTIFICATION = True
-
-    if args.notify_track is True:
-        TRACK_NOTIFICATION = True
-
-    if args.notify_song_changes is True:
-        SONG_NOTIFICATION = True
-
-    if args.notify_offline_entries is True:
-        OFFLINE_ENTRIES_NOTIFICATION = True
-
-    if args.notify_loop is True:
-        SONG_ON_LOOP_NOTIFICATION = True
-
-    if args.notify_errors is False:
-        ERROR_NOTIFICATION = False
-
-    if args.notify_followers is True:
-        FOLLOWERS_NOTIFICATION = True
-
-    if args.notify_followings is True:
-        FOLLOWINGS_NOTIFICATION = True
-
-    if args.track_followings is True:
-        TRACK_FOLLOWINGS = True
-
-    if args.track_followers is True:
-        TRACK_FOLLOWERS = True
-
-    # Check for beautifulsoup4 if followers/followings tracking is enabled
-    if TRACK_FOLLOWINGS or TRACK_FOLLOWERS:
+    # Website tracking needs both the HTML parser and the browser impersonation transport
+    if friends_check_enabled():
         try:
-            import bs4  # type: ignore
+            # Imported only to check availability and report a friendly install command when it is missing
+            import bs4  # type: ignore  # noqa: F401
         except ImportError:
-            print("* Error: beautifulsoup4 is required for followers/followings tracking")
-            print("* Install it with: pip install beautifulsoup4")
+            print_recovery_error(RecoveryError(make_recovery_advice("dependency.missing", "Friend and profile tracking needs beautifulsoup4, which is not installed", recovery_fix_with_guide(f"Install it with: {install_dependency_command('beautifulsoup4')}", INSTALLATION_GUIDE_URL), False)))
             sys.exit(1)
-
-    if args.friends_check_interval:
-        FRIENDS_CHECK_INTERVAL = args.friends_check_interval
-
-    if args.friends_change_counter:
-        FRIENDS_CHANGE_COUNTER = args.friends_change_counter
-
-    if args.friends_retry_interval:
-        FRIENDS_RETRY_INTERVAL = args.friends_retry_interval
-
-    if args.track_in_spotify is True:
-        TRACK_SONGS = True
-
-    if args.progress is True:
-        PROGRESS_INDICATOR = True
-
-    if args.hide_duration_source is True:
-        DO_NOT_SHOW_DURATION_MARKS = True
-
-    if args.fetch_duration is True:
-        USE_TRACK_DURATION_FROM_SPOTIFY = True
-
-    if not USE_TRACK_DURATION_FROM_SPOTIFY:
-        DO_NOT_SHOW_DURATION_MARKS = True
+        if curl_req is None:
+            print_recovery_error(RecoveryError(missing_dependency_advice("curl_cffi", "Friend and profile tracking cannot run")))
+            sys.exit(1)
 
     if SMTP_HOST.startswith("your_smtp_server_"):
         ACTIVE_NOTIFICATION = False
@@ -5389,34 +10370,11 @@ def main():
         TRACK_NOTIFICATION = False
         OFFLINE_ENTRIES_NOTIFICATION = False
         SONG_ON_LOOP_NOTIFICATION = False
+        PROFILE_NOTIFICATION = False
         ERROR_NOTIFICATION = False
+        verbose_notice("Email notifications are off because SMTP_HOST is still the shipped placeholder")
 
-    print(f"* Last.fm polling intervals:\t[offline check: {display_time(LASTFM_CHECK_INTERVAL)}] [active check: {display_time(LASTFM_ACTIVE_CHECK_INTERVAL)}]\n*\t\t\t\t[inactivity: {display_time(LASTFM_INACTIVITY_CHECK)}]")
-    if TRACK_FOLLOWINGS or TRACK_FOLLOWERS:
-        print(f"* Friends/followers tracking:\t[followings = {TRACK_FOLLOWINGS}] [followers = {TRACK_FOLLOWERS}]" + (f" [interval: {display_time(FRIENDS_CHECK_INTERVAL)}]" if FRIENDS_CHECK_INTERVAL > 0 else ""))
-    for notification_summary_line in _startup_notification_summary_lines():
-        print(notification_summary_line)
-    if WEBHOOK_ENABLED and not validate_webhook_url():
-        print("* Warning: Webhook alerts are enabled but WEBHOOK_URL is not a complete HTTPS link")
-    print(f"* Progress indicator:\t\t{PROGRESS_INDICATOR}")
-    print(f"* Track listened songs:\t\t{TRACK_SONGS}")
-    print(f"* Track duration (Spotify):\t{USE_TRACK_DURATION_FROM_SPOTIFY}")
-    print(f"* Show duration marks:\t\t{not DO_NOT_SHOW_DURATION_MARKS}")
-    print(f"* Play break multiplier:\t{LASTFM_BREAK_CHECK_MULTIPLIER} ({display_time(LASTFM_BREAK_CHECK_MULTIPLIER * LASTFM_ACTIVE_CHECK_INTERVAL)})")
-    print(f"* Liveness check:\t\t{bool(LIVENESS_CHECK_INTERVAL)}" + (f" ({display_time(LIVENESS_CHECK_INTERVAL)})" if LIVENESS_CHECK_INTERVAL else ""))
-    print(f"* CSV logging enabled:\t\t{bool(CSV_FILE)}" + (f" ({CSV_FILE})" if CSV_FILE else ""))
-    print(f"* Alert on monitored tracks:\t{bool(MONITOR_LIST_FILE)}" + (f" ({MONITOR_LIST_FILE})" if MONITOR_LIST_FILE else ""))
-    print(f"* Output logging enabled:\t{not DISABLE_LOGGING}" + (f" ({FINAL_LOG_PATH})" if not DISABLE_LOGGING else ""))
-    print(f"* ASCII log separators:\t\t{ascii_log_separators_enabled()} (mode: {ASCII_LOG_SEPARATORS})")
-    if TRACK_SONGS or USE_TRACK_DURATION_FROM_SPOTIFY:
-        if spotify_oauth_app_configured():
-            print("* Spotify metadata backends:\tOAuth app -> anonymous web player")
-            print(f"* Spotify token cache file:\t{SP_TOKENS_FILE or 'None (memory only)'}")
-        else:
-            print("* Spotify metadata backends:\tanonymous web player")
-    print(f"* Configuration file:\t\t{cfg_path}")
-    print(f"* Dotenv file:\t\t\t{env_path or 'None'}")
-    print(f"* Debug mode:\t\t\t{DEBUG_MODE}\n")
+    emit_startup_summary(build_startup_summary(args.username, cfg_path, env_path, FINAL_LOG_PATH), show_full=full_startup_summary_enabled())
 
     # We define signal handlers only for Linux, Unix & MacOS since Windows has limited number of signals supported
     if platform.system() != 'Windows':

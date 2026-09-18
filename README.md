@@ -1,825 +1,151 @@
 # lastfm_monitor
 
-<p align="left">
-  <img src="https://img.shields.io/github/v/release/misiektoja/lastfm_monitor?style=flat-square&color=blue" alt="GitHub Release" />
-  <img src="https://img.shields.io/pypi/v/lastfm_monitor?style=flat-square&color=teal" alt="PyPI Version" />
-  <img src="https://img.shields.io/github/stars/misiektoja/lastfm_monitor?style=flat-square&color=magenta" alt="GitHub Stars" />
-  <img src="https://img.shields.io/badge/python-3.9+-blueviolet?style=flat-square" alt="Python Versions" />
-  <img src="https://img.shields.io/github/license/misiektoja/lastfm_monitor?style=flat-square&color=blue" alt="License" />
-  <img src="https://img.shields.io/github/last-commit/misiektoja/lastfm_monitor?style=flat-square&color=green" alt="Last Commit" />
-  <img src="https://img.shields.io/badge/maintenance-active-brightgreen?style=flat-square" alt="Maintenance" />
-</p>
+[![GitHub Release](https://img.shields.io/github/v/release/misiektoja/lastfm_monitor?style=flat-square&color=blue)](https://github.com/misiektoja/lastfm_monitor/releases)
+[![PyPI Version](https://img.shields.io/pypi/v/lastfm_monitor?style=flat-square&color=teal)](https://pypi.org/project/lastfm-monitor/)
+[![GitHub Stars](https://img.shields.io/github/stars/misiektoja/lastfm_monitor?style=flat-square&color=magenta)](https://github.com/misiektoja/lastfm_monitor)
+[![Python Versions](https://img.shields.io/badge/python-3.9+-blueviolet?style=flat-square)](https://pypi.org/project/lastfm-monitor/)
+[![License](https://img.shields.io/github/license/misiektoja/lastfm_monitor?style=flat-square&color=blue)](https://github.com/misiektoja/lastfm_monitor/blob/main/LICENSE)
+[![OpenSSF Scorecard](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.scorecard.dev%2Fprojects%2Fgithub.com%2Fmisiektoja%2Flastfm_monitor&query=%24.score&label=openssf%20scorecard&style=flat-square)](https://scorecard.dev/viewer/?uri=github.com/misiektoja/lastfm_monitor)
+[![Last Commit](https://img.shields.io/github/last-commit/misiektoja/lastfm_monitor?style=flat-square&color=green)](https://github.com/misiektoja/lastfm_monitor/commits/main)
+[![Maintenance](https://img.shields.io/badge/maintenance-active-brightgreen?style=flat-square)](https://github.com/misiektoja/lastfm_monitor)
 
 Powerful real-time tracker for Last.fm that brings your music data to life with automated Spotify playback, instant activity alerts and deep scrobble analytics.
-
-<a id="-quick-install"></a>
-### 🚀 Quick Install
-```sh
-pip install lastfm_monitor
-```
 
 <p align="center">
    <img src="https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/assets/lastfm_monitor.png" alt="lastfm_monitor_screenshot" width="90%"/>
 </p>
 
-<a id="features"></a>
-## Features
+<a id="quick-install-run"></a>
+### 🚀 Quick Install & Run
 
-- **Real-time tracking** of songs listened by Last.fm users (including detection of when a user gets online or offline)
-- Possibility to **automatically play songs** listened by the tracked user in your local Spotify client
-- Information about when a **user pauses or resumes playback** with the option to show a **track progress indicator**
-- Information about the **duration** the user listened to a song and whether the **song was skipped** and if it was **shorter or longer than the track duration**
-- **Tracking** of Last.fm user's **followers** and **followings** with notifications when users are added or removed
-- **Email notifications** for various events (user becomes active or inactive, specific or all songs, songs on loop, new entries appearing while user was offline, followers/followings changes, errors)
-- **Webhook notifications** through **Discord**, **ntfy** and compatible integrations with event-specific controls
-- **Saving all listened songs** with timestamps to the **CSV file**
-- **Last.fm Wrapped tool** for generating Spotify Wrapped-style statistics (top artists, tracks, albums) from CSV data
-- **Clickable** **Last.fm**, **Apple Music**, **YouTube Music**, **Amazon Music**, **Deezer**, **Tidal**, **Genius Lyrics**, **AZLyrics**, **Tekstowo.pl**, **Musixmatch** and **Lyrics.com** search URLs printed in the console and included in email notifications (configurable per service)
-- Displaying **basic statistics for the user's playing session** (duration, time span, number of listened and skipped songs, songs on loop, paused playback time and number of pauses, songs played count)
-- Support for detecting **offline mode**
-- Support for detecting **Spotify's private mode** (not 100% accurate)
-- **Status persistence** - automatically saves the last activity status and the number and list of followings/followers to JSON files to track changes across restarts
-- **Flexible configuration** - support for config files, dotenv files, environment variables and command-line arguments
-- Possibility to **control the running copy** of the script via signals
-- **Functional, procedural Python** (minimal OOP)
+New to Python or unsure what is installed? Follow the [Python install walkthrough](https://misiektoja.github.io/lastfm_monitor/installation/#new-to-python-check-and-install) first.
 
-<a id="table-of-contents"></a>
-## Table of Contents
-
-1. [Requirements](#requirements)
-2. [Installation](#installation)
-   * [Install from PyPI](#install-from-pypi)
-   * [Manual Installation](#manual-installation)
-   * [Upgrading](#upgrading)
-3. [Quick Start](#quick-start)
-4. [Configuration](#configuration)
-   * [Configuration File](#configuration-file)
-   * [Last.fm API Key and Shared Secret](#lastfm-api-key-and-shared-secret)
-   * [User Privacy Settings](#user-privacy-settings)
-   * [Spotify Metadata Backends](#spotify-metadata-backends)
-      * [Optional Spotify OAuth App Setup](#optional-spotify-oauth-app-setup)
-   * [SMTP Settings](#smtp-settings)
-   * [Webhook Settings](#webhook-settings)
-   * [Storing Secrets](#storing-secrets)
-5. [Usage](#usage)
-   * [Monitoring Mode](#monitoring-mode)
-   * [Listing Mode](#listing-mode)
-   * [Email Notifications](#email-notifications)
-   * [Webhook Notifications](#webhook-notifications)
-   * [CSV Export](#csv-export)
-   * [Last.fm Wrapped Tool](#lastfm-wrapped-tool)
-   * [Automatic Playback of Listened Tracks in the Spotify Client](#automatic-playback-of-listened-tracks-in-the-spotify-client)
-   * [Progress Indicator](#progress-indicator)
-   * [Getting Track Duration from Spotify](#getting-track-duration-from-spotify)
-   * [Private Mode Detection in Spotify](#private-mode-detection-in-spotify)
-   * [Check Intervals](#check-intervals)
-   * [Signal Controls (macOS/Linux/Unix)](#signal-controls-macoslinuxunix)
-   * [Coloring Log Output with GRC](#coloring-log-output-with-grc)
-6. [Change Log](#change-log)
-7. [License](#license)
-
-<a id="requirements"></a>
-## Requirements
-
-* Python 3.9 or higher
-* Libraries: [pyLast](https://github.com/pylast/pylast), `requests`, `python-dateutil`, [PyOTP](https://github.com/pyauth/pyotp), [Spotipy](https://github.com/spotipy-dev/spotipy), `python-dotenv`, `beautifulsoup4`
-
-Tested on:
-
-* **macOS**: Ventura, Sonoma, Sequoia, Tahoe
-* **Linux**: Raspberry Pi OS (Bullseye, Bookworm, Trixie), Ubuntu 24/25, Rocky Linux 8.x/9.x, Kali Linux 2024/2025
-* **Windows**: 10, 11
-
-It should work on other versions of macOS, Linux, Unix and Windows as well.
-
-<a id="installation"></a>
-## Installation
-
-<a id="install-from-pypi"></a>
-### Install from PyPI
+Install from PyPI:
 
 ```sh
 pip install lastfm_monitor
 ```
 
-<a id="manual-installation"></a>
-### Manual Installation
-
-Download the *[lastfm_monitor.py](https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/lastfm_monitor.py)* file to the desired location.
-
-Install dependencies via pip:
+Run the setup wizard:
 
 ```sh
-pip install pylast requests python-dateutil pyotp spotipy python-dotenv beautifulsoup4
+lastfm_monitor --setup
 ```
 
-Alternatively, from the downloaded *[requirements.txt](https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/requirements.txt)*:
+The wizard asks for the target, the Last.fm API credentials and optional notifications. Review the settings before saving them. See [Setup & First Run](https://misiektoja.github.io/lastfm_monitor/setup-and-first-run/) for how to get the Last.fm API key and shared secret and the required privacy settings.
 
-```sh
-pip install -r requirements.txt
-```
+For the manual single-file method, dependencies and upgrade commands, see [Installation](https://misiektoja.github.io/lastfm_monitor/installation/).
 
-<a id="upgrading"></a>
-### Upgrading
+<a id="features"></a>
+## Features
 
-To upgrade to the latest version when installed from PyPI:
+### 🔍 Listening and Profile Tracking
 
-```sh
-pip install lastfm_monitor -U
-```
+* **Listening activity**: Track songs, active and inactive periods, pauses and resumes.
+* **Playback detail**: Show listening duration, skipped tracks and an optional progress indicator.
+* **Profile changes**: Track followers, followed accounts, About Me bio and display name.
+* **Activity gaps**: Detect offline listening and estimate Spotify private mode, which is not always accurate.
 
-If you installed manually, download the newest *[lastfm_monitor.py](https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/lastfm_monitor.py)* file to replace your existing installation.
+### 📊 Playback and Insights
 
-<a id="quick-start"></a>
-## Quick Start
+* **Spotify playback**: Follow the tracked user's songs, pauses and resumes in your local Spotify client.
+* **Session statistics**: Summarize listening time, tracks, skips, repeats and pauses.
+* **Last.fm Wrapped**: Generate top artist, track and album statistics from CSV history.
+* **Music and lyrics links**: Open configurable searches from console output and email.
 
-- Grab your [Last.fm API Key and Shared Secret](#lastfm-api-key-and-shared-secret) and track the `lastfm_username` music activities:
+### 🔔 Notifications and History
 
+* **Event alerts**: Configure email, Discord and ntfy notifications for listening and profile changes.
+* **CSV history**: Save listened tracks with timestamps.
+* **Saved state**: Retain activity, friend lists and tracked profile fields across restarts.
 
-```sh
-lastfm_monitor <lastfm_username> -u "your_lastfm_api_key" -w "your_lastfm_api_secret"
-```
+### ⚙️ Setup and Configuration
 
-Or if you installed [manually](#manual-installation):
+* **Guided setup**: Configure the monitor with `--setup` and check readiness with `--doctor`.
+* **Flexible settings**: Use config files, dotenv files, environment variables and command-line options.
+* **Runtime controls**: Adjust the running monitor through supported signals.
 
-```sh
-python3 lastfm_monitor.py <lastfm_username> -u "your_lastfm_api_key" -w "your_lastfm_api_secret"
-```
+<a id="common-commands"></a>
+## Common Commands
 
-To get the list of all supported command-line arguments / flags:
+Use [Quick Install & Run](#-quick-install--run) above for first-time setup. The table uses PyPI commands. For the manual script equivalents, see [Run Individual Commands](https://misiektoja.github.io/lastfm_monitor/setup-and-first-run/#run-individual-commands).
 
-```sh
-lastfm_monitor --help
-```
+Replace the target placeholders with a Last.fm username. Monitoring requires the [Last.fm API key and shared secret](https://misiektoja.github.io/lastfm_monitor/setup-and-first-run/#lastfm-api-key-and-shared-secret) described in the setup guide.
 
-<a id="configuration"></a>
-## Configuration
+| I want to... | Run this |
+| --- | --- |
+| Configure the target, credentials and alerts | `lastfm_monitor --setup` |
+| Start monitoring with existing authentication | `lastfm_monitor <lastfm_username>` |
+| Check authentication, connectivity and one target | `lastfm_monitor --doctor <lastfm_username>` |
+| Enter or replace securely the Last.fm API key and shared secret | `lastfm_monitor --set-lastfm-credentials` |
+| Enter or replace securely the optional Spotify credentials for track details | `lastfm_monitor --set-spotify-credentials` |
+| Configure and test webhook alerts | Use the setup wizard or follow [Webhook Settings](https://misiektoja.github.io/lastfm_monitor/configuration/#webhook-settings) |
+| Save an SMTP password for email alerts | `lastfm_monitor --set-smtp-password` |
+| Send a test email | `lastfm_monitor --send-test-email` |
+| Save a new webhook URL | `lastfm_monitor --set-webhook-url` |
+| Send a test webhook | `lastfm_monitor --send-test-webhook` |
+| List the ten most recent tracks | `lastfm_monitor <lastfm_username> -l -n 10` |
+| Alert on the tracks and albums listed in a file | `lastfm_monitor <lastfm_username> -s tracks.txt` |
+| Write every scrobble to a CSV file | `lastfm_monitor <lastfm_username> -b scrobbles.csv` |
+| Play every scrobble in your own Spotify client | `lastfm_monitor <lastfm_username> -g` |
+| Use a specific configuration and secrets file | `lastfm_monitor --config-file lastfm_monitor.conf --env-file .env <lastfm_username>` |
+| List every supported command-line flag | `lastfm_monitor --help` |
 
-<a id="configuration-file"></a>
-### Configuration File
+The monitored account must expose the activity described in [User Privacy Settings](https://misiektoja.github.io/lastfm_monitor/setup-and-first-run/#user-privacy-settings).
 
-Most settings can be configured via command-line arguments.
+Running the tool with no arguments offers the wizard if you have not saved a user. If a user is already saved, it starts monitoring that user.
 
-If you want to have it stored persistently, generate a default config template and save it to a file named `lastfm_monitor.conf`:
+The tool runs until interrupted (`Ctrl+C`). Use `tmux` or `screen` for persistence and run multiple copies to monitor several users.
 
-```sh
-# On macOS, Linux or Windows Command Prompt (cmd.exe)
-lastfm_monitor --generate-config > lastfm_monitor.conf
+For credentials, saved users and notification setup, see the [full Setup & First Run guide](https://misiektoja.github.io/lastfm_monitor/setup-and-first-run/).
 
-# On Windows PowerShell (recommended to avoid encoding issues)
-lastfm_monitor --generate-config lastfm_monitor.conf
-```
+For the Spotify metadata backends, email and webhook setup, see [Configuration](https://misiektoja.github.io/lastfm_monitor/configuration/). For notification choices, listing commands, automatic playback and output files, see [Usage](https://misiektoja.github.io/lastfm_monitor/usage/).
 
-> **IMPORTANT**: In Windows PowerShell, do not use `>` for this command. Some PowerShell versions write redirected text as UTF-16, which makes Last.fm Monitor report a "null bytes" error. Pass the filename to `--generate-config` so Last.fm Monitor writes a UTF-8 file itself.
+If a run fails, start with [Doctor Preflight](https://misiektoja.github.io/lastfm_monitor/troubleshooting/#doctor-preflight).
 
-When you include the filename, Last.fm Monitor writes the template directly as UTF-8. This avoids PowerShell changing the file encoding during redirection.
+<a id="documentation"></a>
+## Documentation
 
-Edit the `lastfm_monitor.conf` file and change any desired configuration options (detailed comments are provided for each).
+Full documentation is available at **[misiektoja.github.io/lastfm_monitor](https://misiektoja.github.io/lastfm_monitor/)**:
 
-**New in v2.3:** The configuration file includes options to enable/disable music service URLs (Last.fm, Spotify, Apple Music, YouTube Music, Amazon Music, Deezer, Tidal) and lyrics service URLs (Genius, AZLyrics, Tekstowo.pl, Musixmatch, Lyrics.com) in console and email outputs.
-
-**New in v2.5:** The [track duration](#getting-track-duration-from-spotify) and [automatic playback](#automatic-playback-of-listened-tracks-in-the-spotify-client) features use the official OAuth app Web API when optional app credentials are configured. The anonymous web-player backend is the new automatic fallback and requires no Spotify credentials.
-
-<a id="lastfm-api-key-and-shared-secret"></a>
-### Last.fm API Key and Shared Secret
-
-- Create your Last.fm `API key` and `Shared secret` at: [https://www.last.fm/api/account/create](https://www.last.fm/api/account/create)
-   - Or get your existing credentials from: [https://www.last.fm/api/accounts](https://www.last.fm/api/accounts)
-
-- Provide the `LASTFM_API_KEY` and `LASTFM_API_SECRET` secrets using one of the following methods:
-   - Recommended: run `lastfm_monitor --set-lastfm-credentials` and enter both values through hidden prompts
-   - Pass it at runtime with `-u` / `--lastfm-api-key` and `-w` / `--lastfm-secret`
-   - Set it as an [environment variable](#storing-secrets) (e.g. `export LASTFM_API_KEY=...; export LASTFM_API_SECRET=...`)
-   - Add it to [.env file](#storing-secrets) (`LASTFM_API_KEY=...` and `LASTFM_API_SECRET=...`) for persistent use
-   - Fallback: hard-code it in the code or config file
-
-If you store the `LASTFM_API_KEY` and `LASTFM_API_SECRET` in a dotenv file you can update their values and send a `SIGHUP` signal to the process to reload the file with the new secret values without restarting the tool. More info in [Storing Secrets](#storing-secrets) and [Signal Controls (macOS/Linux/Unix)](#signal-controls-macoslinuxunix).
-
-The hidden setup command keeps both values out of shell history and process listings:
-
-```sh
-lastfm_monitor --set-lastfm-credentials
-```
-
-<a id="user-privacy-settings"></a>
-### User Privacy Settings
-
-In order to monitor Last.fm user activity, proper privacy settings need to be enabled on the monitored user account.
-
-The user should go to [Last.fm Privacy Settings](https://www.last.fm/settings/privacy).
-
-The **Hide recent listening information** setting should be disabled.
-
-Otherwise you will get this error message returned by the `pyLast` library: *'Login: User required to be logged in'*.
-
-<a id="spotify-metadata-backends"></a>
-### Spotify Metadata Backends
-
-The [track duration feature](#getting-track-duration-from-spotify) and [automatic playback feature](#automatic-playback-of-listened-tracks-in-the-spotify-client) both need Spotify track metadata:
-
-- Duration lookup needs the Spotify track duration
-- Automatic playback needs the Spotify track ID so the local Spotify client knows which track to play
-
-Spotify app credentials are not mandatory for either feature. The tool can obtain the required metadata from the anonymous web-player backend. If you configure OAuth app credentials, the official Spotify Web API is tried first.
-
-Version 2.5 uses this metadata order:
-
-1. Official Spotify Web API search through optional OAuth app Client Credentials
-2. Anonymous web-player search and Pathfinder `getTrack` metadata
-3. Last.fm duration as the final fallback
-
-<a id="optional-spotify-oauth-app-setup"></a>
-#### Optional Spotify OAuth App Setup
-
-Follow these steps if you want the official Spotify Web API to be the primary metadata backend:
-
-1. Log in to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
-2. Select **Create app**
-3. Enter an app name and description
-4. For **Redirect URI**, enter `http://127.0.0.1:1234`
-   - The Client Credentials flow does not redirect a user, but Spotify's app form requests a redirect URI
-   - Use the numeric loopback address exactly as shown because Spotify does not allow `localhost`
-5. Under the API selection, choose **Web API**
-6. Accept Spotify's Developer Terms of Service and create the app
-7. Open the app settings
-8. Copy the **Client ID**
-9. Select **View client secret** and copy the **Client Secret**
-
-Spotify currently requires the owner of a Development Mode app to have an active Spotify Premium subscription. See Spotify's [February 2026 Development Mode migration guide](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide) for the current restrictions.
-
-Provide `SP_CLIENT_ID` and `SP_CLIENT_SECRET` using one of these methods:
-
-- Recommended: run `lastfm_monitor --set-spotify-credentials` and enter both values through hidden prompts
-- Pass them at runtime with `-z` / `--spotify-creds`
-  - Use the `SP_CLIENT_ID:SP_CLIENT_SECRET` format with a colon between the values
-- Set them as [environment variables](#storing-secrets), for example `export SP_CLIENT_ID=...` and `export SP_CLIENT_SECRET=...`
-- Add them to a [dotenv file](#storing-secrets) as `SP_CLIENT_ID=...` and `SP_CLIENT_SECRET=...`
-- Add them to `lastfm_monitor.conf`
-- As a final fallback, hard-code them in `lastfm_monitor.py`
-
-Command-line example:
-
-```sh
-lastfm_monitor <lastfm_username> -z "your_spotify_app_client_id:your_spotify_app_client_secret"
-```
-
-The `-z` value may remain visible in shell history or process listings. Prefer the hidden setup command for persistent credentials:
-
-```sh
-lastfm_monitor --set-spotify-credentials
-```
-
-The tool refreshes OAuth app access tokens automatically. The token cache path is configured through `SP_TOKENS_FILE` and defaults to `.lastfm-monitor-oauth-app.json`. Set `SP_TOKENS_FILE` to an empty string to use memory-only caching.
-
-If you store `SP_CLIENT_ID` and `SP_CLIENT_SECRET` in a dotenv file, you can update them and send `SIGHUP` to reload the values without restarting the tool. See [Storing Secrets](#storing-secrets) and [Signal Controls](#signal-controls-macoslinuxunix).
-
-The OAuth backend relies on Spotipy's expiration-aware Client Credentials cache. It does not call a separate Web API endpoint to validate tokens. If credentials are absent, token retrieval fails or OAuth search returns incomplete metadata, the anonymous backend runs automatically.
-
-The tool fetches Spotify server time before generating the required v61 TOTP parameters. It caches the anonymous token until its expiration window and discovers the current persisted-query hashes from the active web-player bundle. An HTTP 401 refreshes the token once. A rejected persisted query refreshes its hash once.
-
-The v61 version and cipher bytes ship as the `SPOTIFY_TOTP_VERSION` and `SPOTIFY_TOTP_SECRET_CIPHER_BYTES` config options. If Spotify rotates the secret you can update them from the config file using the [spotify_monitor_secret_grabber](https://github.com/misiektoja/spotify_monitor/blob/dev/debug/spotify_monitor_secret_grabber.py) tool without a code change.
-
-Spotify metadata supplies the track duration, title, artists, album, URI and external URL. Last.fm duration remains the final fallback when Spotify web metadata is unavailable or incomplete.
-
-With `-r`, a successful duration from either Spotify backend is marked `S*`. Last.fm fallback duration is marked `L*`. Without `-r`, Last.fm remains the duration source while Spotify metadata can still resolve a track ID for `-g` playback.
-
-<a id="smtp-settings"></a>
-### SMTP Settings
-
-If you want to use email notifications functionality, configure SMTP settings in the `lastfm_monitor.conf` file.
-
-Verify your SMTP settings by using `--send-test-email` flag (the tool will try to send a test email notification):
-
-```sh
-lastfm_monitor --send-test-email
-```
-
-<a id="webhook-settings"></a>
-### Webhook Settings
-
-Webhook alerts work independently from email. Discord and ntfy are supported directly. Compatible services can use the Discord request format or the advanced payload and header settings.
-
-First save the private destination through a hidden prompt:
-
-```sh
-lastfm_monitor --set-webhook-url
-```
-
-The command validates that the destination is a complete HTTPS URL then updates only `WEBHOOK_URL` in `.env`. Existing values require confirmation. Use `--env-file PATH` to select another private settings file.
-
-Set `WEBHOOK_ENABLED = True` in `lastfm_monitor.conf` then choose `WEBHOOK_PROVIDER = "discord"` or `WEBHOOK_PROVIDER = "ntfy"`. Standard Discord and `ntfy.sh` URLs correct a mismatched configured provider automatically.
-
-Enable the events you want through the `WEBHOOK_*_NOTIFICATION` settings. Last.fm Monitor supports active, inactive, monitored track, every song, loop, offline entry, follower, following and error alerts. Matching command-line switches are listed under [Webhook Notifications](#webhook-notifications).
-
-Test delivery without starting monitoring:
-
-```sh
-lastfm_monitor --send-test-webhook
-```
-
-For automation or one-run tests, `--webhook-url URL` overrides the saved destination and enables webhooks. This value may remain visible in shell history or process listings, so `--set-webhook-url` is recommended for normal setup. `--webhook-provider {discord,ntfy}` overrides the request format for one run.
-
-Protected ntfy topics can use `NTFY_ACCESS_TOKEN` from an environment variable or dotenv file. The token is sent with Bearer authentication. A custom `Authorization` header can also be supplied through `WEBHOOK_HEADERS`.
-
-`WEBHOOK_USERNAME`, `WEBHOOK_AVATAR_URL`, `WEBHOOK_TEMPLATE`, `WEBHOOK_TRANSFORMS` and `WEBHOOK_HEADERS` provide the same Discord-format customization model as Spotify Monitor. Header values and template values support placeholders such as `{title}`, `{description}`, `{version}`, `{color}`, `{timestamp}`, `{username}` and `{avatar_url}`. `NTFY_SHORT = True` uses compact activity text on smaller screens without changing Discord or email content.
-
-Last.fm Monitor does not attach artwork to ntfy alerts because it does not retrieve a trusted artwork source. Webhook delivery remains text-only.
-
-<a id="storing-secrets"></a>
-### Storing Secrets
-
-It is recommended to store secrets like `LASTFM_API_KEY`, `LASTFM_API_SECRET`, `SP_CLIENT_ID`, `SP_CLIENT_SECRET`, `SMTP_PASSWORD`, `WEBHOOK_URL` or `NTFY_ACCESS_TOKEN` as either an environment variable or in a dotenv file.
-
-The safest interactive entry methods write only the selected values to `.env` through hidden prompts:
-
-```sh
-lastfm_monitor --set-lastfm-credentials
-lastfm_monitor --set-spotify-credentials
-lastfm_monitor --set-webhook-url
-```
-
-Each command accepts `--env-file PATH`. Existing values require confirmation and the update is atomic. `--env-file none` is rejected because these commands must save their values.
-
-Set the needed environment variables using `export` on **Linux/Unix/macOS/WSL** systems:
-
-```sh
-export LASTFM_API_KEY="your_lastfm_api_key"
-export LASTFM_API_SECRET="your_lastfm_api_secret"
-export SP_CLIENT_ID="your_spotify_app_client_id"
-export SP_CLIENT_SECRET="your_spotify_app_client_secret"
-export SMTP_PASSWORD="your_smtp_password"
-export WEBHOOK_URL="your_private_webhook_url"
-export NTFY_ACCESS_TOKEN="your_ntfy_access_token"
-```
-
-On **Windows Command Prompt** use `set` instead of `export` and on **Windows PowerShell** use `$env`.
-
-Alternatively store them persistently in a dotenv file (recommended):
-
-```ini
-LASTFM_API_KEY="your_lastfm_api_key"
-LASTFM_API_SECRET="your_lastfm_api_secret"
-SP_CLIENT_ID="your_spotify_app_client_id"
-SP_CLIENT_SECRET="your_spotify_app_client_secret"
-SMTP_PASSWORD="your_smtp_password"
-WEBHOOK_URL="your_private_webhook_url"
-NTFY_ACCESS_TOKEN="your_ntfy_access_token"
-```
-
-By default the tool will auto-search for dotenv file named `.env` in current directory and then upward from it.
-
-You can specify a custom file with `DOTENV_FILE` or `--env-file` flag:
-
-```sh
-lastfm_monitor <lastfm_username> --env-file /path/.env-lastfm_monitor
-```
-
- You can also disable `.env` auto-search with `DOTENV_FILE = "none"` or `--env-file none`:
-
-```sh
-lastfm_monitor <lastfm_username> --env-file none
-```
-
-As a fallback, you can also store secrets in the configuration file or source code.
-
-<a id="usage"></a>
-## Usage
-
-<a id="monitoring-mode"></a>
-### Monitoring Mode
-
-To monitor specific user activity, just type Last.fm username as a command-line argument (`lastfm_username` in the example below):
-
-```sh
-lastfm_monitor <lastfm_username>
-```
-
-If you have not set `LASTFM_API_KEY` and `LASTFM_API_SECRET` secrets, you can use `-u` and `-w` flags:
-
-```sh
-lastfm_monitor <lastfm_username> -u "your_lastfm_api_key" -w "your_lastfm_api_secret"
-```
-
-To provide optional Spotify OAuth app credentials for one run, use `-z` / `--spotify-creds`:
-
-```sh
-lastfm_monitor <lastfm_username> -z "your_spotify_app_client_id:your_spotify_app_client_secret"
-```
-
-By default, the tool looks for a configuration file named `lastfm_monitor.conf` in:
- - current directory
- - home directory (`~`)
- - script directory
-
- If you generated a configuration file as described in [Configuration](#configuration), but saved it under a different name or in a different directory, you can specify its location using the `--config-file` flag:
-
-
-```sh
-lastfm_monitor <lastfm_username> --config-file /path/lastfm_monitor_new.conf
-```
-
-To enable tracking of followers and/or followings changes:
-- set `TRACK_FOLLOWERS` and/or `TRACK_FOLLOWINGS` to `True`
-- or use the `--track-followers` and/or `--track-followings` flags
-
-```sh
-lastfm_monitor <lastfm_username> --track-followers --track-followings
-```
-
-The tool runs until interrupted (`Ctrl+C`). Use `tmux` or `screen` for persistence.
-
-You can monitor multiple Last.fm users by running multiple copies of the script.
-
-The tool automatically saves its output to `lastfm_monitor_<username>.log` file. It can be changed in the settings via `LF_LOGFILE` configuration option or disabled completely via `DISABLE_LOGGING` / `-d` flag.
-
-Set `ASCII_LOG_SEPARATORS` to `"Auto"` (default) to use ASCII separator-only lines on Windows, `"On"` to use them on every operating system or `"Off"` to preserve Unicode separators in logs everywhere. Terminal separators stay Unicode. Log files and all other logged text remain UTF-8.
-
-The tool also saves the last activity information (artist, track, timestamp) to `lastfm_<username>_last_activity.json` file and the number and list of followings and followers to `lastfm_<username>_followings.json` and `lastfm_<username>_followers.json` files (if tracking is enabled), so this data can be reused if the tool is restarted.
-
-<a id="listing-mode"></a>
-### Listing Mode
-
-There is another mode of the tool that prints the recently listened tracks for the user (`-l` flag).
-
-You can also add the `-n` flag to specify how many tracks should be displayed, by default it shows the last 30 tracks:
-
-```sh
-lastfm_monitor <lastfm_username> -l  -n 10
-```
-
-<p align="center">
-   <img src="https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/assets/lastfm_monitor_listing.png" alt="lastfm_monitor_listing" width="90%"/>
-</p>
-
-If you want to not only display, but also save the list of recently listened track to a CSV file, use the `-l` flag with `-b` indicating the CSV file. As before, you can add the `-n` flag to specify how many tracks should be displayed/saved:
-
-```sh
-lastfm_monitor <lastfm_username> -l -n 10 -b lastfm_tracks_username.csv
-```
-
-<a id="email-notifications"></a>
-### Email Notifications
-
-To enable email notifications when a user becomes active:
-- set `ACTIVE_NOTIFICATION` to `True`
-- or use the `-a` flag
-
-```sh
-lastfm_monitor <lastfm_username> -a
-```
-
-To be informed when a user gets inactive:
-- set `INACTIVE_NOTIFICATION` to `True`
-- or use the `-i` flag
-
-```sh
-lastfm_monitor <lastfm_username> -i
-```
-
-Inactivity emails include recent songs from the session with skipped and continued track status. Configure the number of recent songs to include via the `INACTIVE_EMAIL_RECENT_SONGS_COUNT` configuration option.
-
-To be notified when new entries appear when the user is offline:
-- set `OFFLINE_ENTRIES_NOTIFICATION` to `True`
-- or use the `-f` flag
-
-```sh
-lastfm_monitor <lastfm_username> -f
-```
-
-To get email notifications when a monitored track or album plays:
-- set `TRACK_NOTIFICATION` to `True`
-- or use the `-t` flag
-
-For that feature you also need to create a file with a list of songs you want to track (one track or album per line). Specify the file using the `MONITOR_LIST_FILE` or `-s` flag:
-
-Example file `lastfm_tracks_username`:
-
-```
-we fell in love in october
-Like a Stone
-Half Believing
-Something Changed
-I Will Be There
-```
-
-You can comment out specific lines with # if needed.
-
-Then run the tool with `-t` and `-s` flags:
-
-```sh
-lastfm_monitor <lastfm_username> -t -s lastfm_tracks_username
-```
-
-To enable email notifications for every song listened by the user:
-- set `SONG_NOTIFICATION` to `True`
-- or use the `-j` flag
-
-```sh
-lastfm_monitor <lastfm_username> -j
-```
-
-To be notified when a user listens to the same song on loop:
-- set `SONG_ON_LOOP_NOTIFICATION` to `True`
-- or use the `-x` flag
-
-```sh
-lastfm_monitor <lastfm_username> -x
-```
-
-To disable sending an email on errors (enabled by default):
-- set `ERROR_NOTIFICATION` to `False`
-- or use the `-e` flag
-
-```sh
-lastfm_monitor <lastfm_username> -e
-```
-
-To be notified when a user's followers change:
-- set `FOLLOWERS_NOTIFICATION` to `True`
-- or use the `--notify-followers` flag
-
-```sh
-lastfm_monitor <lastfm_username> --track-followers --notify-followers
-```
-
-To be notified when a user's followings (friends) change:
-- set `FOLLOWINGS_NOTIFICATION` to `True`
-- or use the `--notify-followings` flag
-
-```sh
-lastfm_monitor <lastfm_username> --track-followings --notify-followings
-```
-
-Notifications for changed followers and/or followings are only sent if tracking functionality is enabled (`--track-followers` and/or `--track-followings` flags).
-
-You can also decide to use Last.fm or Spotify URL in "Last played:" / "Track:" field in HTML email notifications (see `USE_LASTFM_URL_IN_LAST_PLAYED` config option).
-
-Make sure you defined your SMTP settings earlier (see [SMTP settings](#smtp-settings)).
-
-Example email:
-
-<p align="center">
-   <img src="https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/assets/lastfm_monitor_email_notifications.png" alt="lastfm_monitor_email_notifications" width="90%"/>
-</p>
-
-<a id="webhook-notifications"></a>
-### Webhook Notifications
-
-Webhook event choices mirror email controls while remaining independent. Enable the master switch in the config file or for one run:
-
-```sh
-lastfm_monitor <lastfm_username> --webhook
-```
-
-Choose events with config settings or matching command-line flags:
-
-| Event | Config setting | Command-line flag |
-|---|---|---|
-| User becomes active | `WEBHOOK_ACTIVE_NOTIFICATION` | `--webhook-active` |
-| User becomes inactive | `WEBHOOK_INACTIVE_NOTIFICATION` | `--webhook-inactive` |
-| Monitored track or album plays | `WEBHOOK_TRACK_NOTIFICATION` | `--webhook-track` |
-| Every song change | `WEBHOOK_SONG_NOTIFICATION` | `--webhook-song-changes` |
-| Song plays on loop | `WEBHOOK_SONG_ON_LOOP_NOTIFICATION` | `--webhook-loop` |
-| Offline scrobbles arrive | `WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION` | `--webhook-offline-entries` |
-| Followers change | `WEBHOOK_FOLLOWERS_NOTIFICATION` | `--webhook-followers` |
-| Followings change | `WEBHOOK_FOLLOWINGS_NOTIFICATION` | `--webhook-followings` |
-| Monitoring error occurs | `WEBHOOK_ERROR_NOTIFICATION` | `--webhook-errors` |
-
-An event flag also enables the master switch for that run. Use `--no-webhook` to disable configured webhook delivery. Use `--no-webhook-error-notify` to disable only error webhooks.
-
-Examples:
-
-```sh
-lastfm_monitor <lastfm_username> --webhook-active --webhook-inactive
-lastfm_monitor <lastfm_username> --webhook-song-changes --webhook-loop
-lastfm_monitor <lastfm_username> --track-followers --webhook-followers
-```
-
-Email and webhook delivery attempts remain independent. When loop, monitored-track and every-song choices overlap, Last.fm Monitor sends no more than one alert per channel for that song change.
-
-See [Webhook Settings](#webhook-settings) for Discord, ntfy, private URL setup, test delivery and advanced request customization.
-
-<a id="csv-export"></a>
-### CSV Export
-
-If you want to save all listened songs to a CSV file, set `CSV_FILE` or use `-b` flag:
-
-```sh
-lastfm_monitor <lastfm_username> -b lastfm_tracks_username.csv
-```
-
-The file will be automatically created if it does not exist.
-
-<a id="lastfm-wrapped-tool"></a>
-### Last.fm Wrapped Tool
-
-The *[lastfm_wrapped.py](https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/tools/lastfm_wrapped.py)* script generates Spotify Wrapped-style statistics from CSV files created by `lastfm_monitor.py`.
-
-It analyzes your listening data and provides insights including top artists, tracks and albums for a specified time period.
-
-**Basic Usage:**
-
-By default, it generates statistics for the current year (January 1 to November 15, similar to Spotify Wrapped):
-
-```sh
-python3 tools/lastfm_wrapped.py lastfm_tracks_username.csv
-```
-
-**Custom Date Range:**
-
-You can specify a custom date range using `--from` and `--to` flags:
-
-```sh
-python3 tools/lastfm_wrapped.py lastfm_tracks_username.csv --from 2024-01-01 --to 2024-12-31
-```
-
-**Top N Items:**
-
-By default, it shows the top 5 items in each category, just like Spotify Wrapped. You can change this with the `--top-n` flag:
-
-```sh
-python3 tools/lastfm_wrapped.py lastfm_tracks_username.csv --top-n 10
-```
-
-**Example Output:**
-
-The tool displays:
-- Total scrobbles for the period
-- Top artists (by play count)
-- Top tracks (by play count)
-- Top albums (by play count)
-
-<a id="automatic-playback-of-listened-tracks-in-the-spotify-client"></a>
-### Automatic Playback of Listened Tracks in the Spotify Client
-
-If you want the tool to automatically play the tracks listened to by the user in your local Spotify client:
-- set `TRACK_SONGS` to `True`
-- or use the `-g` flag
-
-```sh
-lastfm_monitor <lastfm_username> -g
-```
-
-Your Spotify client needs to be installed and running for this feature to work.
-
-Automatic playback needs a Spotify track ID for every scrobble. The tool resolves that ID through the [Spotify metadata backends](#spotify-metadata-backends). It tries the official OAuth app Web API when credentials are configured, then uses the anonymous web-player backend. OAuth app credentials are optional.
-
-The local playback action itself uses the configured platform method such as AppleScript on macOS or D-Bus on Linux. It does not use Spotify Web API playback control.
-
-The tool fully supports automatic playback on **Linux** and **macOS**. This means it will automatically play the changed track. It will also automatically pause and resume playback following the tracked user's actions. Additionally, it can pause or play an indicated track once the user becomes inactive (see the `SP_USER_GOT_OFFLINE_TRACK_ID` configuration option).
-
-For **Windows**, it works in a semi-automatic way: if you have the Spotify client running and you are not listening to any song, then the first track will play automatically. However, subsequent tracks will be located in the client, but you will need to press the play button manually.
-
-You can change the playback method per platform using the corresponding configuration option.
-
-For **macOS** set `SPOTIFY_MACOS_PLAYING_METHOD` to one of the following values:
--  "**apple-script**" (recommended, **default**)
--  "trigger-url"
-
-For **Linux** set `SPOTIFY_LINUX_PLAYING_METHOD` to one of the following values:
-- "**dbus-send**" (most common one, **default**)
-- "qdbus" (try if dbus-send does not work)
-- "trigger-url"
-
-For **Windows** set `SPOTIFY_WINDOWS_PLAYING_METHOD` to one of the following values:
-- "**start-uri**" (recommended, **default**)
-- "spotify-cmd"
-- "trigger-url"
-
-The recommended defaults should work for most people.
-
-<a id="progress-indicator"></a>
-### Progress Indicator
-
-If you want to see a real-time progress indicator showing the exact minute and second of the track the user is currently listening to:
-- set `PROGRESS_INDICATOR` to `True`
-- or use the `-p` flag
-
-```sh
-lastfm_monitor <lastfm_username> -p
-```
-
-<p align="center">
-   <img src="https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/assets/lastfm_monitor_progress_indicator.png" alt="lastfm_monitor_progress_indicator" width="90%"/>
-</p>
-
-For this functionality to work correctly, it is suggested to set the active check interval (`LASTFM_ACTIVE_CHECK_INTERVAL` / `-k` flag) to a low value (such as 2-5 seconds).
-
-<a id="getting-track-duration-from-spotify"></a>
-### Getting Track Duration from Spotify
-
-If you want the tool to fetch the track duration from Spotify instead of Last.fm, which very often reports the wrong duration (or none at all):
-- set `USE_TRACK_DURATION_FROM_SPOTIFY` to `True`
-- or use the `-r` flag
-
-```sh
-lastfm_monitor <lastfm_username> -r
-```
-
-Track duration is resolved through the [Spotify metadata backends](#spotify-metadata-backends). The official OAuth app Web API is tried first when credentials are configured. The anonymous web-player backend runs next. Last.fm duration is used only if both Spotify backends fail or return incomplete metadata.
-
-You will be able to tell if the track duration comes from Spotify as it has an S* suffix at the end (e.g. **3 minutes 42 seconds S\***), while those coming from Last.fm have an L* (e.g. **2 minutes 13 seconds L\***).
-
-You can disable showing the track duration marks (L* S*) via the `-q` flag.
-
-```sh
-lastfm_monitor <lastfm_username> -r -q
-```
-
-Duration marks are not displayed if the functionality to retrieve track duration from Spotify is disabled.
-
-<a id="private-mode-detection-in-spotify"></a>
-### Private Mode Detection in Spotify
-
-The tool includes functionality to detect when private mode is potentially used in Spotify and even estimates the duration of its usage. It is enabled by default and is not configurable.
-
-It is not 100% accurate. I have observed that when private mode is used, especially for extended periods, it often results in many duplicate entries being created in a Last.fm account after private mode is disabled. This leads to different tracks having the same start timestamp.
-
-I suspect this is related to a bug in Spotify and mainly occurs when the user has Spotify on multiple devices.
-
-However, keep in mind that this is not 100% accurate. I have observed duplicate entries even without private mode, but in such cases, the number of duplicate entries is limited. Therefore, do not treat it as something completely certain, but it is a pretty good indicator that private mode was used.
-
-<p align="center">
-   <img src="https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/assets/lastfm_monitor_private_mode.png" alt="lastfm_monitor_private_mode" width="90%"/>
-</p>
-
-<a id="check-intervals"></a>
-### Check Intervals
-
-If you want to customize music polling intervals, use `-k` and `-c` flags (or corresponding configuration options):
-
-```sh
-lastfm_monitor <lastfm_username> -k 2 -c 10
-```
-
-* `LASTFM_ACTIVE_CHECK_INTERVAL`, `-k`: check interval when the user is online, i.e. currently playing (seconds)
-* `LASTFM_CHECK_INTERVAL`, `-c`: check interval when the user is considered offline, i.e. not playing music (seconds)
-
-If you want to change the time required to mark the user as inactive (the timer starts once the user stops playing the music), use `-o` flag (or `LASTFM_INACTIVITY_CHECK` configuration option):
-
-```sh
-lastfm_monitor <lastfm_username> -o 120
-```
-
-Followers/followings tracking functionality uses a separate check interval which you can set via `FRIENDS_CHECK_INTERVAL` configuration option or `--friends-check-interval` flag. This is independent from the music polling intervals.
-
-To avoid false notifications caused by transient API glitches, changes are only confirmed after a number of consecutive checks (default: 3). You can configure this via `FRIENDS_CHANGE_COUNTER` option or `--friends-change-counter` flag. This setting also controls the threshold for suppressing repeated error messages.
-
-You can also configure the retry timeout used when confirming transient changes or errors via `FRIENDS_RETRY_INTERVAL` configuration option or `--friends-retry-interval` flag.
-
-<a id="signal-controls-macoslinuxunix"></a>
-### Signal Controls (macOS/Linux/Unix)
-
-The tool has several signal handlers implemented which allow to change behavior of the tool without a need to restart it with new configuration options / flags.
-
-List of supported signals:
-
-| Signal | Description |
-| ----------- | ----------- |
-| USR1 | Toggle email notifications when user gets active/inactive or new offline entries show up (-a, -i, -f) |
-| USR2 | Toggle email notifications for every song (-j) |
-| URG  | Toggle showing of progress indicator (-p) |
-| CONT | Toggle email notifications for tracked songs (-t) |
-| PIPE | Toggle email notifications when user plays song on loop (-x) |
-| TRAP | Increase the inactivity check timer (by 30 seconds) (-o) |
-| ABRT | Decrease the inactivity check timer (by 30 seconds) (-o) |
-| HUP | Reload secrets from .env file |
-
-Send signals with `kill` or `pkill`, e.g.:
-
-```sh
-pkill -USR1 -f "lastfm_monitor <lastfm_username>"
-```
-
-As Windows supports limited number of signals, this functionality is available only on Linux/Unix/macOS.
-
-<a id="coloring-log-output-with-grc"></a>
-### Coloring Log Output with GRC
-
-You can use [GRC](https://github.com/garabik/grc) to color logs.
-
-Add to your GRC config (`~/.grc/grc.conf`):
-
-```
-# monitoring log file
-.*_monitor_.*\.log
-conf.monitor_logs
-```
-
-Now copy the [conf.monitor_logs](https://raw.githubusercontent.com/misiektoja/lastfm_monitor/refs/heads/main/grc/conf.monitor_logs) to your `~/.grc/` and log files should be nicely colored when using `grc` tool.
-
-Example:
-
-```sh
-grc tail -F -n 100 lastfm_monitor_<username>.log
-```
+| Page | What it covers |
+| --- | --- |
+| [Installation](https://misiektoja.github.io/lastfm_monitor/installation/) | Python walkthrough, PyPI or manual installation, upgrades |
+| [Setup & First Run](https://misiektoja.github.io/lastfm_monitor/setup-and-first-run/) | Setup wizard, Last.fm credentials, privacy settings, the first monitoring run |
+| [Configuration](https://misiektoja.github.io/lastfm_monitor/configuration/) | Config file, Spotify metadata backends, SMTP, webhooks, storing secrets, check intervals |
+| [Usage](https://misiektoja.github.io/lastfm_monitor/usage/) | Monitoring mode, listing mode, notifications, CSV export, automatic playback, signals, terminal output |
+| [Troubleshooting](https://misiektoja.github.io/lastfm_monitor/troubleshooting/) | `--doctor` preflight checks, what to do when something fails, `--verbose` and `--debug` output |
+| [Testing](https://misiektoja.github.io/lastfm_monitor/testing/) | Running the offline suite, the linter and the docs build |
+| [About](https://misiektoja.github.io/lastfm_monitor/about/) | Change log, contributing, security, license, support |
 
 <a id="change-log"></a>
 ## Change Log
 
 See [RELEASE_NOTES.md](https://github.com/misiektoja/lastfm_monitor/blob/main/RELEASE_NOTES.md) for details.
 
+<a id="contributing"></a>
+## Contributing
+
+Bug reports, documentation fixes and code contributions are welcome. See [CONTRIBUTING.md](https://github.com/misiektoja/lastfm_monitor/blob/main/CONTRIBUTING.md) for the development setup, the checks CI enforces and what a change needs before it is merged. Participation is covered by the [Code of Conduct](https://github.com/misiektoja/lastfm_monitor/blob/main/CODE_OF_CONDUCT.md).
+
+<a id="security"></a>
+## Security
+
+Report a suspected vulnerability privately through [GitHub security advisories](https://github.com/misiektoja/lastfm_monitor/security/advisories/new), never as a public issue. [SECURITY.md](https://github.com/misiektoja/lastfm_monitor/blob/main/SECURITY.md) covers the reporting process, the supported versions and the security posture of stored credentials and configuration loading.
+
+<a id="maintainers"></a>
+## Maintainers
+
+- **misiektoja** ([@misiektoja](https://github.com/misiektoja))
+
 <a id="license"></a>
 ## License
 
-Licensed under GPLv3. See [LICENSE](https://github.com/misiektoja/lastfm_monitor/blob/main/LICENSE).
+Licensed under GPLv3. See [LICENSE](https://github.com/misiektoja/lastfm_monitor/blob/main/LICENSE). Dependency licenses are listed in [THIRD_PARTY_NOTICES.md](https://github.com/misiektoja/lastfm_monitor/blob/main/THIRD_PARTY_NOTICES.md).
+
+<a id="support"></a>
+## Support
+
+Questions, bug reports and vulnerability reports each have a place, listed in [SUPPORT.md](https://github.com/misiektoja/lastfm_monitor/blob/main/SUPPORT.md).
+
+If the project is useful to you, you can support its development through [GitHub Sponsors](https://github.com/sponsors/misiektoja) or [Buy Me a Coffee](https://buymeacoffee.com/misiektoja).

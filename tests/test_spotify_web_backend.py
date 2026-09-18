@@ -47,6 +47,7 @@ class SpotifyWebBackendTests(unittest.TestCase):
         monitor.SP_CLIENT_SECRET = ""
         monitor.SP_TOKENS_FILE = ""
         monitor.SP_OAUTH_MEMORY_CACHE_HANDLER = None
+        monitor.SP_OAUTH_SEARCH_COOLDOWNS.clear()
         monitor.SP_CACHED_WEB_ACCESS_TOKEN = None
         monitor.SP_WEB_ACCESS_TOKEN_EXPIRES_AT = 0
         monitor.SP_CACHED_WEB_CLIENT_ID = ""
@@ -73,6 +74,10 @@ class SpotifyWebBackendTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 monitor.generate_totp()
         with patch.object(monitor, "SPOTIFY_TOTP_SECRET_CIPHER_BYTES", ("bad", 55)):
+            with self.assertRaises(ValueError):
+                monitor.generate_totp()
+        # A single number in place of the sequence is truthy, so it has to be rejected before anything iterates it
+        with patch.object(monitor, "SPOTIFY_TOTP_SECRET_CIPHER_BYTES", 17):
             with self.assertRaises(ValueError):
                 monitor.generate_totp()
         with patch.object(monitor, "SPOTIFY_TOTP_VERSION", 0):
@@ -124,7 +129,7 @@ class SpotifyWebBackendTests(unittest.TestCase):
         self.assertEqual(second, "oauth-token")
         memory_cache.assert_called_once_with()
         self.assertEqual(credentials.call_count, 2)
-        credentials.assert_called_with(client_id="client-id", client_secret="client-secret", requests_timeout=monitor.FUNCTION_TIMEOUT, cache_handler=cache_handler)
+        credentials.assert_called_with(client_id="client-id", client_secret="client-secret", requests_timeout=monitor.FUNCTION_TIMEOUT, cache_handler=cache_handler, requests_session=monitor.SPOTIFY_SESSION)
         self.assertEqual(auth_manager.get_access_token.call_args_list, [call(as_dict=False), call(as_dict=False)])
         get.assert_not_called()
 
@@ -194,7 +199,8 @@ class SpotifyWebBackendTests(unittest.TestCase):
 
     # Verifies the Spotify session retries transient failures on idempotent reads including the GraphQL POST
     def test_spotify_session_retries_post(self):
-        methods = getattr(monitor.SPOTIFY_SESSION.get_adapter(monitor.SPOTIFY_WEB_QUERY_URL), "max_retries").allowed_methods
+        # get_adapter is typed as returning BaseAdapter, which does not declare max_retries
+        methods = getattr(monitor.SPOTIFY_SESSION.get_adapter(monitor.SPOTIFY_WEB_QUERY_URL), "max_retries").allowed_methods  # noqa: B009
         self.assertIn("POST", methods)
         self.assertIn("GET", methods)
 

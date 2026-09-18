@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lastfm_monitor"
-version = "2.6.2"
+version = "2.7"
 description = "Track Last.fm listening activity in real time with Spotify integration, automated playback, scrobble history and instant notifications"
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -19,6 +19,9 @@ dependencies = [
   "spotipy>=2.24.0",
   "python-dotenv>=0.19",
   "beautifulsoup4>=4.9.0",
+  # curl_cffi 0.15.0 fixed a redirect-based SSRF and dropped Python 3.9, so 3.9 keeps the last release that supports it
+  "curl_cffi>=0.15.0; python_version >= '3.10'",
+  "curl_cffi>=0.13.0; python_version < '3.10'",
 ]
 classifiers = [
   "Programming Language :: Python :: 3",
@@ -35,6 +38,11 @@ classifiers = [
 ]
 keywords = ["lastfm", "monitoring", "tracking", "real-time", "osint", "pylast", "spotify"]
 
+[project.optional-dependencies]
+test = ["hypothesis>=6.100", "pytest>=7.0", "pyyaml>=6.0"]
+# Pinned so a new ruff release cannot fail CI on a rule that did not exist when the change was written
+lint = ["ruff==0.16.4"]
+
 [project.urls]
 Homepage = "https://github.com/misiektoja/lastfm_monitor"
 Source   = "https://github.com/misiektoja/lastfm_monitor"
@@ -46,3 +54,21 @@ lastfm_monitor = "lastfm_monitor:main"
 [tool.setuptools]
 py-modules = ["lastfm_monitor"]
 include-package-data = true
+
+[tool.ruff]
+target-version = "py39"
+
+[tool.ruff.lint]
+# Defect rules only: syntax errors, pyflakes and bugbear. Formatting and import order are left
+# to the surrounding code, which keeps each function definition on one physical line
+select = ["E9", "F", "B"]
+# Both are style preferences that would rewrite hundreds of existing lines without fixing a defect
+ignore = ["F541", "B904"]
+
+[tool.pytest.ini_options]
+# Run the in-repo source, never an installed copy, by putting the project root first on sys.path
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-ra"
+# The offline end-to-end run starts a loopback server and a subprocess, so it is marked for selection
+markers = ["e2e: drives the whole CLI against a local Last.fm fixture"]

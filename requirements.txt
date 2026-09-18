@@ -5,3 +5,8 @@ pyotp
 spotipy
 python-dotenv
 beautifulsoup4
+# 3.10 and newer resolve 0.15.0 or later, which fixed a redirect-based SSRF; 3.9 resolves 0.13.0, the last release that supports it
+curl_cffi
+
+# Optional for display-width-aware terminal truncation (TRUNCATE_CHARS, --truncate)
+# wcwidth

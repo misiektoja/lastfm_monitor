@@ -35,7 +35,7 @@ def configure_discord(monkeypatch):
 # Verifies the generated config exposes webhook settings while retaining private placeholders
 def test_config_block_contains_complete_webhook_settings():
     compile(monitor.CONFIG_BLOCK, "<generated-config>", "exec")
-    for setting in ("WEBHOOK_ENABLED", "WEBHOOK_PROVIDER", "WEBHOOK_URL", "WEBHOOK_USERNAME", "WEBHOOK_AVATAR_URL", "WEBHOOK_ACTIVE_NOTIFICATION", "WEBHOOK_INACTIVE_NOTIFICATION", "WEBHOOK_TRACK_NOTIFICATION", "WEBHOOK_SONG_NOTIFICATION", "WEBHOOK_SONG_ON_LOOP_NOTIFICATION", "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION", "WEBHOOK_FOLLOWERS_NOTIFICATION", "WEBHOOK_FOLLOWINGS_NOTIFICATION", "WEBHOOK_ERROR_NOTIFICATION", "WEBHOOK_HEADERS", "WEBHOOK_TEMPLATE", "WEBHOOK_TRANSFORMS", "NTFY_ACCESS_TOKEN", "NTFY_SHORT"):
+    for setting in ("WEBHOOK_ENABLED", "WEBHOOK_PROVIDER", "WEBHOOK_URL", "WEBHOOK_USERNAME", "WEBHOOK_AVATAR_URL", "WEBHOOK_ACTIVE_NOTIFICATION", "WEBHOOK_INACTIVE_NOTIFICATION", "WEBHOOK_TRACK_NOTIFICATION", "WEBHOOK_SONG_NOTIFICATION", "WEBHOOK_SONG_ON_LOOP_NOTIFICATION", "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION", "WEBHOOK_FOLLOWERS_NOTIFICATION", "WEBHOOK_FOLLOWINGS_NOTIFICATION", "WEBHOOK_PROFILE_NOTIFICATION", "WEBHOOK_ERROR_NOTIFICATION", "WEBHOOK_HEADERS", "WEBHOOK_TEMPLATE", "WEBHOOK_TRANSFORMS", "NTFY_ACCESS_TOKEN", "NTFY_SHORT"):
         assert f"{setting} =" in monitor.CONFIG_BLOCK
     assert "WEBHOOK_URL" in monitor.SECRET_KEYS
     assert "NTFY_ACCESS_TOKEN" in monitor.SECRET_KEYS
@@ -43,15 +43,17 @@ def test_config_block_contains_complete_webhook_settings():
 
 # Verifies startup summaries use short labels and unstarred bounded continuation lines
 def test_startup_notification_summaries_use_compact_rollups(monkeypatch):
-    email_settings = {"ACTIVE_NOTIFICATION": True, "INACTIVE_NOTIFICATION": True, "TRACK_NOTIFICATION": True, "SONG_NOTIFICATION": True, "SONG_ON_LOOP_NOTIFICATION": True, "OFFLINE_ENTRIES_NOTIFICATION": True, "ERROR_NOTIFICATION": True, "FOLLOWERS_NOTIFICATION": True, "FOLLOWINGS_NOTIFICATION": True}
-    webhook_settings = {"WEBHOOK_ENABLED": True, "WEBHOOK_ACTIVE_NOTIFICATION": True, "WEBHOOK_INACTIVE_NOTIFICATION": True, "WEBHOOK_TRACK_NOTIFICATION": True, "WEBHOOK_SONG_NOTIFICATION": True, "WEBHOOK_SONG_ON_LOOP_NOTIFICATION": True, "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION": True, "WEBHOOK_ERROR_NOTIFICATION": True, "WEBHOOK_FOLLOWERS_NOTIFICATION": True, "WEBHOOK_FOLLOWINGS_NOTIFICATION": True}
+    email_settings = {"ACTIVE_NOTIFICATION": True, "INACTIVE_NOTIFICATION": True, "TRACK_NOTIFICATION": True, "SONG_NOTIFICATION": True, "SONG_ON_LOOP_NOTIFICATION": True, "OFFLINE_ENTRIES_NOTIFICATION": True, "ERROR_NOTIFICATION": True, "FOLLOWERS_NOTIFICATION": True, "FOLLOWINGS_NOTIFICATION": True, "PROFILE_NOTIFICATION": True}
+    webhook_settings = {"WEBHOOK_ENABLED": True, "WEBHOOK_ACTIVE_NOTIFICATION": True, "WEBHOOK_INACTIVE_NOTIFICATION": True, "WEBHOOK_TRACK_NOTIFICATION": True, "WEBHOOK_SONG_NOTIFICATION": True, "WEBHOOK_SONG_ON_LOOP_NOTIFICATION": True, "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION": True, "WEBHOOK_ERROR_NOTIFICATION": True, "WEBHOOK_FOLLOWERS_NOTIFICATION": True, "WEBHOOK_FOLLOWINGS_NOTIFICATION": True, "WEBHOOK_PROFILE_NOTIFICATION": True}
     for setting, value in {**email_settings, **webhook_settings}.items():
         monkeypatch.setattr(monitor, setting, value)
-    expected_email = "* Notifications (email):        On (active, inactive, tracked, songs, loops, offline, errors,\n                                followers, followings)"
-    expected_webhook = "* Notifications (webhook):      On (active, inactive, tracked, songs, loops, offline, errors,\n                                followers, followings)"
-    assert monitor._startup_notification_summary_lines() == [expected_email, expected_webhook]
+    expected_email = "* Notifications (email):        On (active, inactive, tracked, songs, loops, offline, errors,\n                                followers, followings, profile)\n"
+    expected_webhook = "* Notifications (webhook):      On (active, inactive, tracked, songs, loops, offline, errors,\n                                followers, followings, profile)\n"
+    rows = {row.label: row for row in monitor.build_startup_summary("someuser")}
+    assert monitor.format_startup_summary_row(rows["Notifications (email)"]) == expected_email
+    assert monitor.format_startup_summary_row(rows["Notifications (webhook)"]) == expected_webhook
     assert all(len(line) <= 100 for summary in (expected_email, expected_webhook) for line in summary.splitlines())
-    assert "\n*" not in expected_email + expected_webhook
+    assert all(not line.startswith("*") for summary in (expected_email, expected_webhook) for line in summary.splitlines()[1:])
 
 
 # Verifies webhook categories remain off while the master switch is disabled
@@ -59,7 +61,7 @@ def test_startup_webhook_summary_respects_master_switch(monkeypatch):
     monkeypatch.setattr(monitor, "WEBHOOK_ENABLED", False)
     monkeypatch.setattr(monitor, "WEBHOOK_ACTIVE_NOTIFICATION", True)
     monkeypatch.setattr(monitor, "WEBHOOK_ERROR_NOTIFICATION", True)
-    assert monitor._startup_notification_summary_lines()[1] == "* Notifications (webhook):      Off"
+    assert monitor._startup_notification_state(monitor._startup_webhook_notification_categories()) == "Off"
 
 
 # Verifies URL validation and provider detection reject unsafe destinations
@@ -72,14 +74,14 @@ def test_webhook_url_validation_and_detection():
 
 
 # Verifies every Last.fm-specific event has an independent webhook switch
-@pytest.mark.parametrize("notification_type,setting", [("active", "WEBHOOK_ACTIVE_NOTIFICATION"), ("inactive", "WEBHOOK_INACTIVE_NOTIFICATION"), ("track", "WEBHOOK_TRACK_NOTIFICATION"), ("song", "WEBHOOK_SONG_NOTIFICATION"), ("loop", "WEBHOOK_SONG_ON_LOOP_NOTIFICATION"), ("offline_entries", "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION"), ("followers", "WEBHOOK_FOLLOWERS_NOTIFICATION"), ("followings", "WEBHOOK_FOLLOWINGS_NOTIFICATION"), ("error", "WEBHOOK_ERROR_NOTIFICATION")])
+@pytest.mark.parametrize("notification_type,setting", [("active", "WEBHOOK_ACTIVE_NOTIFICATION"), ("inactive", "WEBHOOK_INACTIVE_NOTIFICATION"), ("track", "WEBHOOK_TRACK_NOTIFICATION"), ("song", "WEBHOOK_SONG_NOTIFICATION"), ("loop", "WEBHOOK_SONG_ON_LOOP_NOTIFICATION"), ("offline_entries", "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION"), ("followers", "WEBHOOK_FOLLOWERS_NOTIFICATION"), ("followings", "WEBHOOK_FOLLOWINGS_NOTIFICATION"), ("profile", "WEBHOOK_PROFILE_NOTIFICATION"), ("error", "WEBHOOK_ERROR_NOTIFICATION")])
 def test_webhook_event_switches_are_independent(monkeypatch, notification_type, setting):
-    for variable in ("WEBHOOK_ACTIVE_NOTIFICATION", "WEBHOOK_INACTIVE_NOTIFICATION", "WEBHOOK_TRACK_NOTIFICATION", "WEBHOOK_SONG_NOTIFICATION", "WEBHOOK_SONG_ON_LOOP_NOTIFICATION", "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION", "WEBHOOK_FOLLOWERS_NOTIFICATION", "WEBHOOK_FOLLOWINGS_NOTIFICATION", "WEBHOOK_ERROR_NOTIFICATION"):
+    for variable in ("WEBHOOK_ACTIVE_NOTIFICATION", "WEBHOOK_INACTIVE_NOTIFICATION", "WEBHOOK_TRACK_NOTIFICATION", "WEBHOOK_SONG_NOTIFICATION", "WEBHOOK_SONG_ON_LOOP_NOTIFICATION", "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION", "WEBHOOK_FOLLOWERS_NOTIFICATION", "WEBHOOK_FOLLOWINGS_NOTIFICATION", "WEBHOOK_PROFILE_NOTIFICATION", "WEBHOOK_ERROR_NOTIFICATION"):
         monkeypatch.setattr(monitor, variable, False)
     monkeypatch.setattr(monitor, "WEBHOOK_ENABLED", True)
     monkeypatch.setattr(monitor, setting, True)
     assert monitor.webhook_event_enabled(notification_type)
-    assert sum(monitor.webhook_event_enabled(event) for event in ("active", "inactive", "track", "song", "loop", "offline_entries", "followers", "followings", "error")) == 1
+    assert sum(monitor.webhook_event_enabled(event) for event in ("active", "inactive", "track", "song", "loop", "offline_entries", "followers", "followings", "profile", "error")) == 1
 
 
 # Verifies Discord payloads preserve customization while disabling mentions
@@ -123,6 +125,41 @@ def test_webhook_rate_limit_is_capped(monkeypatch):
     assert sleeps == [monitor.WEBHOOK_MAX_RETRY_AFTER_SECONDS]
 
 
+HTML_BODY = "<html><head></head><body>Track: <b><a href=\"https://last.fm/t\">A &amp; B - Title</a></b><br>Duration: 3:45<br><br>Last activity: <b>Tue 15 Sep 2026, 20:17:27</b><br>Timestamp: Tue 15 Sep 2026, 20:19:02</body></html>"
+
+
+# Verifies the email body's formatting survives as the Discord markdown subset rather than reaching Discord as tags
+def test_an_html_body_becomes_discord_markdown():
+    assert monitor.html_body_to_discord_markdown(HTML_BODY) == (
+        "Track: **[A & B - Title](https://last.fm/t)**\n"
+        "Duration: 3:45\n\n"
+        "Last activity: **Tue 15 Sep 2026, 20:17:27**\n"
+        "Timestamp: Tue 15 Sep 2026, 20:19:02"
+    )
+
+
+# Verifies a body with nothing to convert stays usable rather than producing stray markers
+@pytest.mark.parametrize("body, expected", [("", ""), ("<body>Plain line</body>", "Plain line"), ("<body>Count: <b></b></body>", "Count:")])
+def test_a_body_without_formatting_converts_cleanly(body, expected):
+    assert monitor.html_body_to_discord_markdown(body) == expected
+
+
+# Verifies the formatted body reaches Discord while ntfy keeps the plain one, since ntfy shows the markers literally
+@pytest.mark.parametrize("provider, destination, expected", [("discord", "https://discord.com/api/webhooks/123/private-token", "Last: **now**"), ("ntfy", "https://ntfy.sh/a-private-topic", "Last: now")])
+def test_only_discord_receives_the_formatted_body(monkeypatch, provider, destination, expected):
+    configure_discord(monkeypatch)
+    monkeypatch.setattr(monitor, "WEBHOOK_PROVIDER", provider)
+    monkeypatch.setattr(monitor, "WEBHOOK_URL", destination)
+    seen = []
+    real_values = monitor.build_webhook_values
+    monkeypatch.setattr(monitor, "build_webhook_values", lambda title, description, notification_type: seen.append(description) or real_values(title, description, notification_type))
+    monkeypatch.setattr(monitor, "post_webhook_request", lambda *args, **kwargs: Mock(status_code=204, headers={}, text=""))
+
+    monitor.send_webhook("Title", "Last: now", "song", force=True, discord_description="Last: **now**")
+
+    assert seen == [expected]
+
+
 # Verifies email and webhook attempts remain independent and compact text stays ntfy-only
 def test_notification_channels_are_independent_and_ntfy_short_is_scoped(monkeypatch):
     configure_discord(monkeypatch)
@@ -134,13 +171,13 @@ def test_notification_channels_are_independent_and_ntfy_short_is_scoped(monkeypa
     monkeypatch.setattr(monitor, "send_webhook", webhook)
     assert monitor.send_notification_channels("song", "Normal title", "Normal body", email_enabled=True, webhook_enabled=True, subject_short="Short title", body_short="Short body") == (True, True)
     email.assert_called_once_with("Normal title", "Normal body", "", monitor.SMTP_SSL)
-    webhook.assert_called_once_with("Short title", "Short body", "song", force=True)
+    webhook.assert_called_once_with("Short title", "Short body", "song", force=True, discord_description="")
 
 
 # Verifies runtime webhook flags enable selected events and correct known provider mismatches
 def test_webhook_cli_overrides(monkeypatch):
     configure_discord(monkeypatch)
-    args = monitor.argparse.Namespace(webhook_provider=None, webhook_url="https://ntfy.sh/private-topic", webhook_enabled=None, webhook_active=True, webhook_inactive=None, webhook_track=None, webhook_song_changes=None, webhook_loop=None, webhook_offline_entries=None, webhook_followers=None, webhook_followings=None, webhook_errors=False)
+    args = monitor.argparse.Namespace(webhook_provider=None, webhook_url="https://ntfy.sh/private-topic", webhook_enabled=None, webhook_active=True, webhook_inactive=None, webhook_track=None, webhook_song_changes=None, webhook_loop=None, webhook_offline_entries=None, webhook_followers=None, webhook_followings=None, webhook_profile=None, webhook_errors=False)
     parser = Mock()
     monitor.apply_webhook_cli_overrides(args, parser)
     assert monitor.WEBHOOK_PROVIDER == "ntfy"
@@ -155,3 +192,134 @@ def test_ntfy_message_is_bounded():
     _, message = monitor.build_ntfy_webhook_message("Title", ("a" * monitor.NTFY_MESSAGE_LIMIT_BYTES) + "x")
     assert len(message.encode("utf-8")) <= monitor.NTFY_MESSAGE_LIMIT_BYTES
     assert message.endswith(monitor.NTFY_TRUNCATION_SUFFIX)
+
+
+# Verifies every delivery carries the deadline and refuses a redirect, which could retarget the payload
+def test_webhook_delivery_is_bounded_and_does_not_follow_redirects(monkeypatch):
+    configure_discord(monkeypatch)
+    post = Mock(return_value=FakeResponse())
+    monkeypatch.setattr(monitor.WEBHOOK_SESSION, "post", post)
+
+    assert monitor.send_webhook("Track changed", "Artist - Song", "song", force=True) == 0
+    request = post.call_args
+    assert request.args == (monitor.WEBHOOK_URL,)
+    assert request.kwargs["timeout"] == monitor.WEBHOOK_TIMEOUT_SECONDS
+    assert request.kwargs["allow_redirects"] is False
+
+
+# Verifies a destination replaced mid-delivery is refused rather than posted to blindly
+def test_webhook_delivery_refuses_a_destination_that_stopped_validating(monkeypatch):
+    configure_discord(monkeypatch)
+    monkeypatch.setattr(monitor, "WEBHOOK_URL", "http://example.test/hook")
+    post = Mock(return_value=FakeResponse())
+    monkeypatch.setattr(monitor.WEBHOOK_SESSION, "post", post)
+
+    with pytest.raises(monitor.req.exceptions.InvalidURL):
+        monitor.post_webhook_request(json={"content": "body"})
+    post.assert_not_called()
+
+
+DISCORD_DESTINATION = "https://discord.com/api/webhooks/123/private-token"
+NTFY_DESTINATION = "https://ntfy.sh/a-private-topic"
+UNRECOGNISED_DESTINATION = "https://hooks.example.test/services/an-unrecognised-destination"
+
+
+# Points the reload at one dotenv file and restores every global it can change
+@pytest.fixture
+def reloadable(tmp_path, monkeypatch):
+    env = tmp_path / ".env"
+    monkeypatch.setattr(monitor, "DOTENV_FILE", str(env))
+    monkeypatch.setattr(monitor, "WEBHOOK_URL", DISCORD_DESTINATION)
+    monkeypatch.setattr(monitor, "WEBHOOK_PROVIDER", "discord")
+    monkeypatch.setattr(monitor, "SECRET_SOURCES", {})
+    for secret in monitor.SECRET_KEYS:
+        monkeypatch.delenv(secret, raising=False)
+    return env
+
+
+class TestSecretReload:
+
+    # A destination edited into the dotenv file can belong to the other service
+    def test_a_reloaded_url_moves_the_provider_with_it(self, reloadable, capsys):
+        reloadable.write_text(f'WEBHOOK_URL="{NTFY_DESTINATION}"\n', encoding="utf-8")
+        monitor.reload_secrets_signal_handler(monitor.signal.SIGHUP, None)
+        assert monitor.WEBHOOK_URL == NTFY_DESTINATION
+        assert monitor.WEBHOOK_PROVIDER == "ntfy"
+        assert "* Updated webhook provider to ntfy" in capsys.readouterr().out
+
+    # A reload trace says which secret arrived and whether the new value is set, never any part of the value
+    def test_the_reload_traces_the_secret_without_showing_it(self, reloadable, capsys, monkeypatch):
+        monkeypatch.setattr(monitor, "DEBUG_MODE", True)
+        reloadable.write_text(f'WEBHOOK_URL="{NTFY_DESTINATION}"\n', encoding="utf-8")
+
+        monitor.reload_secrets_signal_handler(monitor.signal.SIGHUP, None)
+
+        output = capsys.readouterr().out
+        assert f"Secret reload: name=WEBHOOK_URL, path={reloadable}, value=set" in output
+        assert "a-private-topic" not in output.split("Secret reload:", 1)[1].splitlines()[0]
+
+    # The stored value is casefolded for comparisons, which is not how the service spells itself
+    def test_the_message_uses_the_service_spelling(self, reloadable, capsys, monkeypatch):
+        monkeypatch.setattr(monitor, "WEBHOOK_URL", NTFY_DESTINATION)
+        monkeypatch.setattr(monitor, "WEBHOOK_PROVIDER", "ntfy")
+        reloadable.write_text(f'WEBHOOK_URL="{DISCORD_DESTINATION}"\n', encoding="utf-8")
+        monitor.reload_secrets_signal_handler(monitor.signal.SIGHUP, None)
+        assert monitor.WEBHOOK_PROVIDER == "discord"
+        assert "* Updated webhook provider to Discord" in capsys.readouterr().out
+
+    def test_an_unrecognised_url_leaves_the_configured_provider_alone(self, reloadable, capsys):
+        reloadable.write_text(f'WEBHOOK_URL="{UNRECOGNISED_DESTINATION}"\n', encoding="utf-8")
+        monitor.reload_secrets_signal_handler(monitor.signal.SIGHUP, None)
+        assert monitor.WEBHOOK_URL == UNRECOGNISED_DESTINATION
+        assert monitor.WEBHOOK_PROVIDER == "discord"
+        assert "Updated webhook provider" not in capsys.readouterr().out
+
+    def test_a_url_for_the_configured_provider_says_nothing(self, reloadable, capsys):
+        reloadable.write_text(f'WEBHOOK_URL="{DISCORD_DESTINATION}"\n', encoding="utf-8")
+        monitor.reload_secrets_signal_handler(monitor.signal.SIGHUP, None)
+        assert "Updated webhook provider" not in capsys.readouterr().out
+
+    # The cached handler holds tokens issued to the previous application
+    def test_new_spotify_app_credentials_drop_the_cached_handler(self, reloadable, monkeypatch):
+        monkeypatch.setattr(monitor, "SP_OAUTH_MEMORY_CACHE_HANDLER", object())
+        monkeypatch.setattr(monitor, "SP_CLIENT_ID", "old-client-id")
+        reloadable.write_text('SP_CLIENT_ID="new-client-id"\n', encoding="utf-8")
+        monitor.reload_secrets_signal_handler(monitor.signal.SIGHUP, None)
+        assert monitor.SP_CLIENT_ID == "new-client-id"
+        assert monitor.SP_OAUTH_MEMORY_CACHE_HANDLER is None
+
+    def test_a_reloaded_secret_is_reported_as_coming_from_the_dotenv_file(self, reloadable):
+        reloadable.write_text(f'WEBHOOK_URL="{NTFY_DESTINATION}"\n', encoding="utf-8")
+        monitor.reload_secrets_signal_handler(monitor.signal.SIGHUP, None)
+        assert monitor.SECRET_SOURCES["WEBHOOK_URL"] == "dotenv file"
+
+    def test_the_sentinel_switches_the_reload_off(self, reloadable, monkeypatch, capsys):
+        reloadable.write_text(f'WEBHOOK_URL="{NTFY_DESTINATION}"\n', encoding="utf-8")
+        # A file actually named 'none', so the sentinel cannot be satisfied by the path simply not existing
+        (reloadable.parent / "none").write_text(f'WEBHOOK_URL="{NTFY_DESTINATION}"\n', encoding="utf-8")
+        monkeypatch.chdir(reloadable.parent)
+        monkeypatch.setattr(monitor, "DOTENV_FILE", "none")
+        monitor.reload_secrets_signal_handler(monitor.signal.SIGHUP, None)
+        assert monitor.WEBHOOK_URL == DISCORD_DESTINATION
+        assert "Reloaded" not in capsys.readouterr().out
+
+
+# Verifies a link whose text repeats its destination reaches Discord bare, because a masked link there prints as plain text
+def test_self_labeled_links_stay_bare_in_discord_markdown():
+    profile_url = "https://www.last.fm/user/misiektoja"
+    markdown = monitor.html_body_to_discord_markdown(f"Profile: <a href=\"{profile_url}\">{profile_url}</a><br>")
+    assert markdown == f"Profile: {profile_url}"
+
+
+# Verifies a link with its own text keeps the masked form Discord renders as a hyperlink
+def test_labeled_links_keep_the_masked_discord_form():
+    body_html = "Genius lyrics URL: <a href=\"https://genius.com/a-t\">Artist - Track</a>"
+    assert monitor.html_body_to_discord_markdown(body_html) == "Genius lyrics URL: [Artist - Track](https://genius.com/a-t)"
+
+
+# Verifies an image link becomes its alt text or a bare URL instead of an empty masked link
+def test_image_links_never_produce_an_empty_discord_label():
+    with_alt = "<a href=\"https://www.last.fm/music/Artist\"><img src=\"https://lastfm.freetls.fastly.net/a.png\" alt=\"Cover\"></a>"
+    without_alt = "<a href=\"https://www.last.fm/music/Artist\"><img src=\"https://lastfm.freetls.fastly.net/a.png\"></a>"
+    assert monitor.html_body_to_discord_markdown(with_alt) == "[Cover](https://www.last.fm/music/Artist)"
+    assert monitor.html_body_to_discord_markdown(without_alt) == "https://www.last.fm/music/Artist"
