@@ -97,6 +97,15 @@ def row_named(rows, label):
     return next(row for row in rows if row.label == label)
 
 
+# Gives both channels a destination, since the rollup rows report a channel with none as off whatever its alert types are
+def configure_channel_destinations(monkeypatch):
+    monkeypatch.setattr(monitor, "SMTP_HOST", "smtp.example.com")
+    monkeypatch.setattr(monitor, "SMTP_PORT", 587)
+    monkeypatch.setattr(monitor, "RECEIVER_EMAIL", "michal.k@example.com")
+    monkeypatch.setattr(monitor, "WEBHOOK_PROVIDER", "discord")
+    monkeypatch.setattr(monitor, "WEBHOOK_URL", "https://discord.com/api/webhooks/123/private-token")
+
+
 # Runs main through the real config load and startup summary, stopping where the monitoring loop would start
 def run_main_to_the_loop(tmp_path, config_body="", arguments=()):
     config_path = tmp_path / "lastfm.conf"
@@ -289,6 +298,7 @@ class TestTheValues:
         assert row_named(monitor.build_startup_summary("someuser"), "Duration marks").value == "False"
 
     def test_the_notification_rows_roll_up_the_alerts_each_channel_sends(self, monkeypatch):
+        configure_channel_destinations(monkeypatch)
         monkeypatch.setattr(monitor, "ACTIVE_NOTIFICATION", True)
         monkeypatch.setattr(monitor, "ERROR_NOTIFICATION", True)
         monkeypatch.setattr(monitor, "WEBHOOK_ENABLED", False)
@@ -319,6 +329,7 @@ class TestWhatEachViewPrints:
 
     # The rollup grows past the terminal width once every alert is on, so it wraps into the value column
     def test_a_long_rollup_wraps_under_its_own_value_column(self, monkeypatch):
+        configure_channel_destinations(monkeypatch)
         for setting in ("ACTIVE_NOTIFICATION", "INACTIVE_NOTIFICATION", "TRACK_NOTIFICATION", "SONG_NOTIFICATION", "SONG_ON_LOOP_NOTIFICATION", "OFFLINE_ENTRIES_NOTIFICATION", "ERROR_NOTIFICATION", "FOLLOWERS_NOTIFICATION", "FOLLOWINGS_NOTIFICATION", "PROFILE_NOTIFICATION"):
             monkeypatch.setattr(monitor, setting, True)
         rendered = monitor.format_startup_summary_row(row_named(monitor.build_startup_summary("someuser"), "Notifications (email)"))
