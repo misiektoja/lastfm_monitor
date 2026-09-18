@@ -434,6 +434,8 @@ To avoid false notifications caused by transient Last.fm responses, friend and p
 
 You can also configure the retry timeout used when confirming transient changes or errors via `FRIENDS_RETRY_INTERVAL` configuration option or `--friends-retry-interval` flag.
 
+When the check keeps failing, for example because Last.fm blocks or breaks the pages this feature reads, the retry timeout doubles after each failed attempt until it reaches `FRIENDS_CHECK_INTERVAL`. A short outage is still retried quickly, while an outage lasting hours settles at the normal check interval instead of retrying every `FRIENDS_RETRY_INTERVAL` seconds. The failure is reported once it reaches the `FRIENDS_CHANGE_COUNTER` threshold and then at most once an hour until it clears.
+
 <a id="liveness-reminder"></a>
 ### Liveness Reminder
 

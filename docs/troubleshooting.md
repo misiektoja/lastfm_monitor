@@ -66,6 +66,8 @@ If browser verification persists, [update the installation and its dependencies]
 
 Temporary website errors, including HTTP 600, also use bounded retries. Use `--debug` to see the HTTP status and retry attempts. The normal friend and profile check interval defaults to 90 minutes. Explicit saved intervals still apply.
 
+When the errors keep coming, the wait between checks doubles after each failed attempt until it reaches `FRIENDS_CHECK_INTERVAL`, so an outage lasting hours is not requested at the `FRIENDS_RETRY_INTERVAL` pace. The failure is reported once, then at most once an hour, and a recovery line is printed when the checks work again. Music monitoring is unaffected, since it uses the Last.fm API rather than the website.
+
 <a id="terminal-colours-look-wrong"></a>
 ## Terminal Colours Look Wrong
 
