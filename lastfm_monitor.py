@@ -3107,6 +3107,10 @@ def debug_print(_operation, **fields):
     if DEBUG_MODE:
         # Sanitized here rather than at each call site, since one caller interpolating a secret is enough to leak it
         message = format_diagnostic_line(_operation, fields)
+        # Every message is redacted by sanitize_error_text, which CodeQL does not model as a sanitizer. The
+        # reported flows carry secret_fields output, which names the setting and its source rather than its value
+
+        # codeql[py/clear-text-logging-sensitive-data]
         print(f"[DEBUG {datetime.now().strftime('%H:%M:%S')}] {sanitize_error_text(message)}")
 
 
