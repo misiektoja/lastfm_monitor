@@ -2,15 +2,20 @@
 
 This is a high-level summary of the most important changes.
 
-# Changes in 2.7.1 (TBD)
+# Changes in 2.8 (TBD)
 
-Version **2.7.1** slows the friend and profile checks down while Last.fm refuses the pages they read and names that failure instead of reporting it as an unrecognised error. It also keeps the alert a failing check sends inside that check's report on screen and reports an alert channel that still holds the values from the sample configuration as unset.
+Version **2.8** gives every monitoring failure alert one subject and body, follows it with a recovery alert when the failure clears and points network failures at a new **Connection Problems** guide. It also slows the friend and profile checks down while Last.fm refuses the pages they read and names that failure instead of reporting it as an unrecognised error, keeps the alert a failing check sends inside that check's report on screen and reports an alert channel that still holds the values from the sample configuration as unset.
+
+**Features and improvements**:
+
+- **IMPROVE:** **Failure alerts share one shape** - Every monitoring failure email and webhook uses the subject **`Last.fm Monitor error: <what went wrong> (user: <lastfm_username>)`** and lists the fix, the guide link, how many checks failed in a row, since when and when the next retry is. A **recovery alert** with the same routing follows when the failure clears, naming how long the outage lasted. `-e` / `--no-error-notify` and `--no-webhook-error-notify` switch both off
 
 **Bug fixes**:
 
 - **BUGFIX:** **Last.fm website failures are named** - The follower, following and profile pages report their HTTP status as text, which no classification rule recognised, so a failing check printed the raw internal message followed by **`To fix: Re-run with --debug to see the technical cause`**. A nonstandard status such as **`HTTP 600`** now reports that Last.fm answered the website request with it, notes that music monitoring is unaffected and links the website tracking guide. A website **`503`** or **`429`** reads as the outage or the rate limit it is
 - **BUGFIX:** **Friend and profile checks back off while they keep failing** - A lasting Last.fm website failure was retried every **`FRIENDS_RETRY_INTERVAL`** seconds whatever **`FRIENDS_CHECK_INTERVAL`** was set to, so a run configured to check every 3 hours kept requesting the refused pages every 90 seconds and printed the same error every tenth attempt. The wait now doubles after each failed attempt up to the regular check interval, the error is repeated at most once an hour and the report names when the next check is due. A check that ends the outage restarts the regular interval instead of running again on the next cycle
 - **BUGFIX:** **Alert deliveries stay inside their report** - The hourly **`Monitoring degraded`** reminder closed its report before the error alert was sent, so **`Sending email notification to ...`** and its webhook equivalent landed under the separator and started a second, headless block. The reminder now closes below its delivery lines, keeping one check's report in one block
+- **BUGFIX:** **Network failures point at the right page** - A timed-out or unreachable Last.fm request and a Last.fm server error ended with a **`Guide:`** link to **Verbose and Debug Output**, which explains the logging levels and says nothing about connection problems. Those reports now link to the new **Connection Problems** section, which explains the automatic retries and what to check if the failure continues. The file descriptor limit has its own section and a file the tool could not read or write links to the configuration file guide
 - **BUGFIX:** **Unset alert channels are reported as unset** - The verbose startup summary read the values the sample configuration ships as a real destination, so a run that had never been given a mail server printed **`Email transport: your_smtp_server_ssl:587`**, a recipient of **`your_receiver_email`** and a webhook provider of **`Discord`**. Those rows now read **`Not configured`** and the channel rollup above them reads **`Off (not configured)`** rather than naming alert types nothing could deliver
 
 # Changes in 2.7 (18 Sep 2026)
