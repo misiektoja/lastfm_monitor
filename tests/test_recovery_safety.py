@@ -252,3 +252,16 @@ def test_every_failing_path_defers_the_reminder_trailer(monitor):
     assert all("close=False" in call for call in calls), calls
     # One trailer inside the helper and at least one in every path that defers it
     assert source.count('print_cur_ts("Liveness check, timestamp:\\t")') >= len(calls) + 1
+
+
+# Verifies the recovery report can hold its trailer, so the recovery alert it delivers is printed inside the
+# report rather than under the separator that ended it
+def test_the_recovery_report_can_hold_its_trailer(monitor, capsys):
+    monitor.print_outage_recovery("watched-target", 300, close=False)
+    held = capsys.readouterr().out
+    monitor.print_outage_recovery("watched-target", 300)
+    closed = capsys.readouterr().out
+
+    assert "* Monitoring recovered for watched-target after 5 minutes" in held
+    assert "Timestamp:" not in held, "a recovery that closes itself leaves the alert outside the report"
+    assert "Timestamp:" in closed

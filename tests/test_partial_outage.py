@@ -94,4 +94,5 @@ def test_now_playing_outage_survives_successful_history(tmp_path):
     result = subprocess.run([sys.executable, "-c", driver], cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
     deliveries = json.loads(next(line.split("=", 1)[1] for line in result.stdout.splitlines() if line.startswith("DELIVERIES=")))
-    assert deliveries == [2, 6], result.stdout + result.stderr
+    # The first outage is alerted on cycle 2, the cycle that clears it sends the recovery alert and the second outage alerts again
+    assert deliveries == [2, 4, 6], result.stdout + result.stderr
