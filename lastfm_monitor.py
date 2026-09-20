@@ -135,7 +135,7 @@ SONG_ON_LOOP_NOTIFICATION = False
 # Can also be enabled via the -f flag
 OFFLINE_ENTRIES_NOTIFICATION = False
 
-# Whether to send an email on errors
+# Whether to send an email on errors and the recovery alert that follows
 # Can also be disabled via the -e flag
 ERROR_NOTIFICATION = True
 
@@ -204,7 +204,7 @@ WEBHOOK_FOLLOWINGS_NOTIFICATION = False
 # Can also be enabled via the --webhook-profile flag
 WEBHOOK_PROFILE_NOTIFICATION = False
 
-# Whether to send a webhook notification on monitoring errors
+# Whether to send a webhook notification on monitoring errors and the recovery alert that follows
 # Can also be enabled via --webhook-errors or disabled via --no-webhook-error-notify
 WEBHOOK_ERROR_NOTIFICATION = True
 
@@ -739,6 +739,8 @@ TERMINAL_GUIDE_URL = f"{DOCS_BASE_URL}/usage/#terminal-output"
 SPOTIFY_APP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#optional-spotify-oauth-app-setup"
 DOCTOR_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#doctor-preflight"
 DIAGNOSTICS_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#verbose-and-debug-output"
+CONNECTION_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#connection-problems"
+DESCRIPTOR_LIMIT_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#too-many-open-files"
 INTERVALS_GUIDE_URL = f"{DOCS_BASE_URL}/usage/#check-intervals"
 WEBSITE_TRACKING_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#lastfm-website-tracking"
 
@@ -913,9 +915,10 @@ from email.utils import parsedate_to_datetime
 import pyotp
 
 
-# Tracks the error alert per channel: what was delivered, and how long a channel that failed waits before the next attempt
+# Tracks the error alert per channel: what was delivered, how long a channel that failed waits before the next
+# attempt and which failure the outage last reported, so the recovery alert can name it
 class ErrorAlertState:
-    # Starts with nothing delivered and no channel on hold
+    # Starts with nothing delivered, no channel on hold and no failure remembered
     def __init__(self) -> None:
         self.email_sent = False
         self.webhook_sent = False
@@ -923,10 +926,15 @@ class ErrorAlertState:
         self.webhook_failures = 0
         self.email_retry_at = 0
         self.webhook_retry_at = 0
+        self.summary = ""
 
-    # Forgets the delivered alert and any hold, so the next failure earns each channel a new one
+    # Forgets the delivered alert, any hold and the remembered failure, so the next failure earns each channel a new one
     def reset(self) -> None:
         self.__init__()
+
+    # Remembers what the outage last failed with, since the recovery alert is built after the failure is gone
+    def remember(self, advice) -> None:
+        self.summary = advice.summary
 
     # Tells whether a channel still owes the alert and its wait after a failed attempt, if any, has passed
     def pending(self, channel: str, enabled, now: int) -> bool:
@@ -2350,7 +2358,7 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
 
     # Checked ahead of every context, since a local descriptor limit is not a failure of whatever call hit it
     if error is not None and is_too_many_open_files(error):
-        return advice("resource.exhausted", "This process ran out of file descriptors, which is a local limit and not a Last.fm problem", "Raise the file descriptor limit, for example with 'ulimit -n 4096', or set LimitNOFILE= if you run under systemd, then restart the tool", False, DIAGNOSTICS_GUIDE_URL)
+        return advice("resource.exhausted", "This process ran out of file descriptors, which is a local limit and not a Last.fm problem", "Raise the file descriptor limit, for example with 'ulimit -n 4096', or set LimitNOFILE= if you run under systemd, then restart the tool", False, DESCRIPTOR_LIMIT_GUIDE_URL)
 
     if context == "config":
         if "does not exist" in message or "no such file" in message:
@@ -2413,12 +2421,12 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
         return advice("file.exists", safe_detail or "The destination file already exists", f"Re-run with --force to replace it after a timestamped backup, or write to a different path with '{render_command(['--generate-config', '<new-file>'], include_paths=False)}'", False, CONFIG_GUIDE_URL)
 
     if context == "file.unwritable":
-        return advice("file.unwritable", safe_detail or "A file the tool keeps could not be written", "Check that the directory exists and is writable, or choose another path", False, DIAGNOSTICS_GUIDE_URL)
+        return advice("file.unwritable", safe_detail or "A file the tool keeps could not be written", "Check that the directory exists and is writable, or choose another path", False, CONFIG_GUIDE_URL)
 
     if context == "file":
         if any(term in message for term in ("cannot load", "cannot be opened", "unreadable", "not valid utf-8", "no such file", "cannot be read")):
-            return advice("file.unreadable", safe_detail or "A file the tool keeps could not be read", "Check the path and its permissions, or delete the file so it is recreated", False, DIAGNOSTICS_GUIDE_URL)
-        return advice("file.unwritable", safe_detail or "A file the tool keeps could not be written", "Check that the directory exists and is writable, or choose another path", False, DIAGNOSTICS_GUIDE_URL)
+            return advice("file.unreadable", safe_detail or "A file the tool keeps could not be read", "Check the path and its permissions, or delete the file so it is recreated", False, CONFIG_GUIDE_URL)
+        return advice("file.unwritable", safe_detail or "A file the tool keeps could not be written", "Check that the directory exists and is writable, or choose another path", False, CONFIG_GUIDE_URL)
 
     # Runtime, which is the monitoring loop, the listing mode and every Last.fm call either of them makes.
     # The pylast status is checked first, because Last.fm answers HTTP 200 with a numeric error code in the body.
@@ -2431,7 +2439,7 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
     if lastfm_status in (6, 7):
         return advice("target.not_found", safe_detail or "Last.fm has no user with that name", "Check the username, since a deleted or renamed account cannot be monitored", False, USAGE_GUIDE_URL)
     if lastfm_status in (8, 11, 16) or (lastfm_status is not None and lastfm_status >= 500):
-        return advice("lastfm.unavailable", "The Last.fm API is temporarily unavailable", "This is usually a Last.fm outage. The tool will keep retrying", True, DIAGNOSTICS_GUIDE_URL)
+        return advice("lastfm.unavailable", "Last.fm is temporarily unavailable", "Usually nothing to do, the tool retries on its own. If it continues, wait for Last.fm to recover", True, CONNECTION_GUIDE_URL)
 
     if "last.fm returned a browser verification page" in message:
         return advice("lastfm.challenge", "Last.fm is asking for browser verification", "The tool will keep retrying. If this persists, update curl_cffi and check the Last.fm page in a browser", True, WEBSITE_TRACKING_GUIDE_URL)
@@ -2447,11 +2455,11 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
     if "user not found" in message or "no user with that name" in message or http_status == 404:
         return advice("target.not_found", safe_detail or "Last.fm has no user with that name", "Check the username, since a deleted or renamed account cannot be monitored", False, USAGE_GUIDE_URL)
     if (http_status is not None and http_status >= 500) or (text_status is not None and text_status >= 500) or "temporarily unavailable" in message or "service unavailable" in message or "bad gateway" in message:
-        return advice("lastfm.unavailable", "The Last.fm API is temporarily unavailable", "This is usually a Last.fm outage. The tool will keep retrying", True, DIAGNOSTICS_GUIDE_URL)
+        return advice("lastfm.unavailable", "Last.fm is temporarily unavailable", "Usually nothing to do, the tool retries on its own. If it continues, wait for Last.fm to recover", True, CONNECTION_GUIDE_URL)
     if "timed out" in message or "timeout" in message:
-        return advice("network.timeout", "The Last.fm request timed out", "Check connectivity. The tool will keep retrying", True, DIAGNOSTICS_GUIDE_URL)
+        return advice("network.timeout", "Last.fm did not answer in time", "Usually nothing to do, the tool retries on its own. If it continues, check network access, DNS, firewall and proxy settings", True, CONNECTION_GUIDE_URL)
     if any(term in message for term in ("connection", "name resolution", "failed to resolve", "network is unreachable", "no connectivity", "family not supported", "aborted")):
-        return advice("network.unavailable", "Last.fm could not be reached", "Check connectivity, DNS and any proxy. The tool will keep retrying", True, DIAGNOSTICS_GUIDE_URL)
+        return advice("network.unavailable", "Last.fm could not be reached", "Usually nothing to do, the tool retries on its own. If it continues, check network access, DNS, firewall and proxy settings", True, CONNECTION_GUIDE_URL)
     if "invalid" in message and "username" in message:
         return advice("target.invalid", safe_detail or "That is not a usable Last.fm username", f"Pass the {LASTFM_TARGET_FORMS}", False, USAGE_GUIDE_URL)
     return advice("unknown", safe_detail or "The request could not be completed", unknown_failure_fix(), True, DIAGNOSTICS_GUIDE_URL)
@@ -2551,9 +2559,73 @@ def print_outage_change(target, advice):
 
 
 # Reports that a failure cleared, since a throttled failure no longer stops printing when it is over
-def print_outage_recovery(target, lasted):
+def print_outage_recovery(target, lasted, close=True):
     print(f"* Monitoring recovered for {target} after {display_time(max(1, lasted))}")
-    print_cur_ts("Timestamp:\t\t\t")
+    # A caller with a recovery alert still to deliver closes the report itself, so the delivery lines stay inside it
+    if close:
+        print_cur_ts("Timestamp:\t\t\t")
+
+
+# Builds the subject every failure alert shares, so an inbox fed by several monitors sorts them by tool
+def recovery_alert_subject(advice, target):
+    return f"Last.fm Monitor error: {advice.summary} (user: {target})"
+
+
+# Lists the paragraphs of a failure alert in order, counting the failed checks only once there is more than one
+# to count and adding the technical detail only in debug mode and only when it says more than the summary
+def recovery_alert_paragraphs(advice, retry_seconds, failed_checks=0, failing_since=0):
+    paragraphs = [advice.summary, f"To fix: {advice.fix}"]
+    retry_lines = []
+    if failed_checks > 1:
+        retry_lines.append(f"Failed checks in a row: {failed_checks}")
+        retry_lines.append(f"Failing since: {get_date_from_ts(int(failing_since))}")
+    retry_lines.append(f"Next retry in: {display_time(retry_seconds)}")
+    paragraphs.append("\n".join(retry_lines))
+    if DEBUG_MODE and advice.detail and advice.detail != advice.summary:
+        paragraphs.append(f"Technical detail: {advice.detail}")
+    return paragraphs
+
+
+# Builds the plain text failure alert, with the timestamp the email carries and the webhook leaves out
+def recovery_alert_body(advice, retry_seconds, failed_checks=0, failing_since=0, timestamp=True):
+    body = "\n\n".join(recovery_alert_paragraphs(advice, retry_seconds, failed_checks, failing_since))
+    return body + get_cur_ts("\n\nTimestamp: ") if timestamp else body
+
+
+# Builds the HTML failure alert with the summary in bold, keeping the line breaks the fix and its guide link carry
+def recovery_alert_body_html(advice, retry_seconds, failed_checks=0, failing_since=0, timestamp=True):
+    paragraphs = recovery_alert_paragraphs(advice, retry_seconds, failed_checks, failing_since)
+    rendered = [f"<b>{html_text(paragraphs[0])}</b>"] + [html_text(paragraph) for paragraph in paragraphs[1:]]
+    return f"<html><head></head><body>{'<br><br>'.join(rendered)}{get_cur_ts('<br><br>Timestamp: ') if timestamp else ''}</body></html>"
+
+
+# Builds the subject of the alert that says a reported outage is over
+def recovered_alert_subject(target, lasted):
+    return f"Last.fm Monitor recovered: monitoring {target} resumed after {display_time(lasted)}"
+
+
+# Builds the plain text recovery alert naming the failure it closes, with the timestamp only the email carries
+def recovered_alert_body(target, lasted, summary, timestamp=True):
+    body = f"Monitoring recovered for {target} after {display_time(lasted)}.\n\nThe failure was: {summary}"
+    return body + get_cur_ts("\n\nTimestamp: ") if timestamp else body
+
+
+# Builds the HTML recovery alert to match the plain text one
+def recovered_alert_body_html(target, lasted, summary, timestamp=True):
+    body = f"Monitoring recovered for <b>{escape(str(target))}</b> after <b>{escape(display_time(lasted))}</b>.<br><br>The failure was: {html_text(summary)}"
+    return f"<html><head></head><body>{body}{get_cur_ts('<br><br>Timestamp: ') if timestamp else ''}</body></html>"
+
+
+# Sends the recovery alert on each channel whose failure alert was delivered, so nobody hears about the end of an
+# outage they were never told about, and returns whether anything was attempted
+def send_outage_recovery_alert(target, lasted, error_alert):
+    email_enabled = bool(error_alert.email_sent and ERROR_NOTIFICATION)
+    webhook_enabled = bool(error_alert.webhook_sent and webhook_event_enabled("error"))
+    if not (email_enabled or webhook_enabled):
+        return False
+    lasted = max(1, int(lasted))
+    send_notification_channels("error", recovered_alert_subject(target, lasted), recovered_alert_body(target, lasted, error_alert.summary), recovered_alert_body_html(target, lasted, error_alert.summary), email_enabled=email_enabled, webhook_enabled=webhook_enabled, webhook_body=recovered_alert_body(target, lasted, error_alert.summary, timestamp=False), webhook_body_html=recovered_alert_body_html(target, lasted, error_alert.summary, timestamp=False))
+    return True
 
 
 # Tracks the last uninterrupted recovery category so a long outage cannot repeat the same hint every cycle
@@ -3061,7 +3133,7 @@ def send_webhook(title: str, description: str, notification_type: str = "song", 
 
 
 # Sends one alert through the enabled email and webhook channels
-def send_notification_channels(notification_type: str, subject: str, body: str, body_html: str = "", email_enabled: bool = False, webhook_enabled: Optional[bool] = None, subject_short: str = "", body_short: str = "") -> Tuple[bool, bool]:
+def send_notification_channels(notification_type: str, subject: str, body: str, body_html: str = "", email_enabled: bool = False, webhook_enabled: Optional[bool] = None, subject_short: str = "", body_short: str = "", webhook_body: str = "", webhook_body_html: str = "") -> Tuple[bool, bool]:
     email_attempted = bool(email_enabled)
     webhook_attempted = webhook_event_enabled(notification_type) if webhook_enabled is None else bool(webhook_enabled)
     email_delivered = False
@@ -3074,8 +3146,10 @@ def send_notification_channels(notification_type: str, subject: str, body: str, 
         print(f"Sending webhook notification via {webhook_provider_display_name()}")
         use_short_content = NTFY_SHORT is True and normalized_webhook_provider() == "ntfy"
         webhook_subject = (subject_short or subject) if use_short_content else subject
-        webhook_body = (body_short or body) if use_short_content else body
-        webhook_delivered = send_webhook(webhook_subject, webhook_body, notification_type, force=True, discord_description=html_body_to_discord_markdown(body_html)) == 0
+        # An alert may hand the webhook its own body, such as one without the timestamp line only the email needs
+        webhook_text = (body_short or body) if use_short_content else (webhook_body or body)
+        discord_source = webhook_body_html if webhook_body else body_html
+        webhook_delivered = send_webhook(webhook_subject, webhook_text, notification_type, force=True, discord_description=html_body_to_discord_markdown(discord_source)) == 0
         debug_print("Notification dispatch", type=notification_type, channel="webhook", outcome="OK" if webhook_delivered else "failed")
     # Delivery rather than the attempt, so a channel that failed is tried again while one that arrived is not sent twice
     return email_delivered, webhook_delivered
@@ -6055,11 +6129,14 @@ def decode(password: str) -> str:
         raise ValueError("decrypted bytes are not valid UTF-8") from exc
 
 
-# Clears error delivery state only after the required requests for a monitoring check succeed
+# Clears error delivery state only after the required requests for a monitoring check succeed, telling every
+# channel that heard about the outage that it is over
 def complete_monitor_check(username, outage, error_alert, recovery_hint_tracker):
     outage_lasted = outage.recovered()
     if outage_lasted is not None:
-        print_outage_recovery(username, outage_lasted)
+        print_outage_recovery(username, outage_lasted, close=False)
+        send_outage_recovery_alert(username, outage_lasted, error_alert)
+        print_cur_ts("Timestamp:\t\t\t")
     error_alert.reset()
     recovery_hint_tracker.reset()
 
@@ -7420,14 +7497,14 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             now = int(time.time())
             error_email_enabled = alert_due and error_alert.pending("email", ERROR_NOTIFICATION, now)
             error_webhook_enabled = alert_due and error_alert.pending("webhook", webhook_event_enabled("error"), now)
+            error_alert.remember(advice)
             if error_email_enabled or error_webhook_enabled:
-                if advice.code == "auth.api_key_invalid":
-                    m_subject = f"Last.fm API key error! (user: {username})"
-                else:
-                    m_subject = f"Last.fm monitoring error (user: {username})"
-                m_body = f"{advice.summary}{nl_ch}{nl_ch}To fix: {advice.fix}{nl_ch}{nl_ch}Last.fm Monitor will retry in {display_time(sleep_interval)}.{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                m_body_html = f"<html><head></head><body>{html_text(advice.summary)}<br><br>To fix: {html_text(advice.fix)}<br><br>Last.fm Monitor will retry in {escape(display_time(sleep_interval))}.{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
-                email_delivered, webhook_delivered = send_notification_channels("error", m_subject, m_body, m_body_html, email_enabled=error_email_enabled, webhook_enabled=error_webhook_enabled)
+                m_subject = recovery_alert_subject(advice, username)
+                m_body = recovery_alert_body(advice, sleep_interval, outage.failures, outage.since)
+                m_body_html = recovery_alert_body_html(advice, sleep_interval, outage.failures, outage.since)
+                webhook_body = recovery_alert_body(advice, sleep_interval, outage.failures, outage.since, timestamp=False)
+                webhook_body_html = recovery_alert_body_html(advice, sleep_interval, outage.failures, outage.since, timestamp=False)
+                email_delivered, webhook_delivered = send_notification_channels("error", m_subject, m_body, m_body_html, email_enabled=error_email_enabled, webhook_enabled=error_webhook_enabled, webhook_body=webhook_body, webhook_body_html=webhook_body_html)
                 error_alert.record("email", error_email_enabled, email_delivered, now)
                 error_alert.record("webhook", error_webhook_enabled, webhook_delivered, now)
                 reported = True
@@ -9953,7 +10030,7 @@ def main():
         action="store_false",
         dest="notify_errors",
         default=None,
-        help="Disable email on errors (e.g. invalid API key)"
+        help="Disable email on errors and the recovery alert that follows"
     )
     notify.add_argument(
         "--send-test-email",
@@ -9979,7 +10056,7 @@ def main():
     webhook_notify.add_argument("--webhook-profile", dest="webhook_profile", action="store_true", default=None, help="Send a webhook alert when a tracked bio or display name changes")
     webhook_error_toggle = webhook_notify.add_mutually_exclusive_group()
     webhook_error_toggle.add_argument("--webhook-errors", dest="webhook_errors", action="store_true", default=None, help="Send webhook alerts when monitoring has a problem")
-    webhook_error_toggle.add_argument("--no-webhook-error-notify", dest="webhook_errors", action="store_false", default=None, help="Disable webhook alerts when monitoring has a problem")
+    webhook_error_toggle.add_argument("--no-webhook-error-notify", dest="webhook_errors", action="store_false", default=None, help="Disable webhook alerts when monitoring has a problem and the recovery alert that follows")
     webhook_notify.add_argument("--send-test-webhook", dest="send_test_webhook", action="store_true", help="Send one test webhook without starting monitoring")
 
     # Intervals & Timers
