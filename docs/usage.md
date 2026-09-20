@@ -188,15 +188,17 @@ To be notified when a user listens to the same song on loop:
 lastfm_monitor <lastfm_username> -x
 ```
 
-To disable sending an email on errors (enabled by default):
+To disable sending an email on errors and the recovery alert that follows (enabled by default):
 - set `ERROR_NOTIFICATION` to `False`
-- or use the `-e` flag
+- or use the `-e` / `--no-error-notify` flag
 
 ```sh
 lastfm_monitor <lastfm_username> -e
 ```
 
-Email and webhook error alerts are sent after **2 minutes** of a continuing failure. Problems that need your action, such as a rejected API key, alert immediately. Each kind of failure alerts once per channel. Failed deliveries are retried after 5 minutes, with increasing waits up to an hour. Alerts can fire again after monitoring recovers.
+Email and webhook error alerts are sent after **2 minutes** of a continuing failure. Problems that need your action, such as a rejected API key, alert immediately. The subject reads `Last.fm Monitor error: <what went wrong> (user: <lastfm_username>)` and the alert lists the fix, a guide link, how many checks failed in a row, since when and when the next check runs. Each kind of failure alerts once per channel. Failed deliveries are retried after 5 minutes, with increasing waits up to an hour.
+
+When the failure clears, a `Last.fm Monitor recovered` alert goes to every channel that received the failure alert, naming how long the outage lasted and what it was. A later outage alerts again. `-e` / `--no-error-notify` switches off both the email failure alert and its recovery alert, and `--no-webhook-error-notify` does the same for the webhook.
 
 To be notified when a user's followers change:
 - set `FOLLOWERS_NOTIFICATION` to `True`
@@ -254,9 +256,9 @@ Choose events with config settings or matching command-line flags:
 | Followers change | `WEBHOOK_FOLLOWERS_NOTIFICATION` | `--webhook-followers` |
 | Followings change | `WEBHOOK_FOLLOWINGS_NOTIFICATION` | `--webhook-followings` |
 | Tracked bio or display name changes | `WEBHOOK_PROFILE_NOTIFICATION` | `--webhook-profile` |
-| Monitoring error occurs | `WEBHOOK_ERROR_NOTIFICATION` | `--webhook-errors` |
+| Monitoring error occurs or clears | `WEBHOOK_ERROR_NOTIFICATION` | `--webhook-errors` |
 
-An event flag also enables the master switch for that run. Use `--no-webhook` to disable configured webhook delivery. Use `--no-webhook-error-notify` to disable only error webhooks.
+An event flag also enables the master switch for that run. Use `--no-webhook` to disable configured webhook delivery. Use `--no-webhook-error-notify` to disable the error webhook and the recovery webhook that follows it. Both carry the same title and text as the matching email, without the timestamp line.
 
 Examples:
 

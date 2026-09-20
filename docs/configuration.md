@@ -151,6 +151,8 @@ Last.fm Monitor can send activity alerts through Discord or the native [ntfy pub
 
 Set `WEBHOOK_ENABLED = True` in `lastfm_monitor.conf` then enable the events you want through the `WEBHOOK_*_NOTIFICATION` settings. Last.fm Monitor supports active, inactive, monitored track, every song, loop, offline entry, follower, following and error alerts. Matching command-line switches are listed under [Webhook Notifications](usage.md#webhook-notifications).
 
+`WEBHOOK_ERROR_NOTIFICATION` covers both the alert a lasting monitoring failure sends and the recovery alert that follows when it clears. `--no-webhook-error-notify` switches off the pair for one run, and `ERROR_NOTIFICATION` with `-e` / `--no-error-notify` does the same for email. See [Connection Problems](troubleshooting.md#connection-problems) for what the failure alerts report.
+
 Test delivery without starting monitoring:
 
 ```sh
