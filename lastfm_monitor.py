@@ -135,7 +135,7 @@ SONG_ON_LOOP_NOTIFICATION = False
 # Can also be enabled via the -f flag
 OFFLINE_ENTRIES_NOTIFICATION = False
 
-# Whether to send an email on errors and the recovery alert that follows
+# Whether to send an email on errors and the recovery alert that follows once the failure clears
 # Can also be disabled via the -e flag
 ERROR_NOTIFICATION = True
 
@@ -204,7 +204,7 @@ WEBHOOK_FOLLOWINGS_NOTIFICATION = False
 # Can also be enabled via the --webhook-profile flag
 WEBHOOK_PROFILE_NOTIFICATION = False
 
-# Whether to send a webhook notification on monitoring errors and the recovery alert that follows
+# Whether to send a webhook notification on monitoring errors and the recovery alert that follows once the failure clears
 # Can also be enabled via --webhook-errors or disabled via --no-webhook-error-notify
 WEBHOOK_ERROR_NOTIFICATION = True
 
@@ -10055,7 +10055,7 @@ def main():
     webhook_notify.add_argument("--webhook-followings", dest="webhook_followings", action="store_true", default=None, help="Send a webhook alert when followings change")
     webhook_notify.add_argument("--webhook-profile", dest="webhook_profile", action="store_true", default=None, help="Send a webhook alert when a tracked bio or display name changes")
     webhook_error_toggle = webhook_notify.add_mutually_exclusive_group()
-    webhook_error_toggle.add_argument("--webhook-errors", dest="webhook_errors", action="store_true", default=None, help="Send webhook alerts when monitoring has a problem")
+    webhook_error_toggle.add_argument("--webhook-errors", dest="webhook_errors", action="store_true", default=None, help="Send webhook alerts when monitoring has a problem and the recovery alert that follows")
     webhook_error_toggle.add_argument("--no-webhook-error-notify", dest="webhook_errors", action="store_false", default=None, help="Disable webhook alerts when monitoring has a problem and the recovery alert that follows")
     webhook_notify.add_argument("--send-test-webhook", dest="send_test_webhook", action="store_true", help="Send one test webhook without starting monitoring")
 
