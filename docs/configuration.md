@@ -134,6 +134,8 @@ With `-r`, a successful duration from either Spotify backend is marked `S*`. Las
 
 Email notifications need SMTP server details for the sending account. Add them to `lastfm_monitor.conf` or use the setup wizard. Setup checks the login without sending an email. To replace only the password, run `lastfm_monitor --set-smtp-password`. Password entry is hidden and preserves spaces.
 
+Every alert is sent as both HTML and plain text in one message. Mail clients that render HTML show the track, the account name and the values that changed in bold, and the music and lyrics links are clickable. Clients that do not render HTML fall back to the plain text, which lists the same addresses in full.
+
 Send one test message to verify the settings:
 
 ```sh
