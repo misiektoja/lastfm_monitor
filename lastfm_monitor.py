@@ -7075,8 +7075,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
                         # Only show timespan if user had previous activity
                         if lf_active_ts_last > 0:
-                            print(f"\n*** User got ACTIVE after being offline for {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))}{last_track_start_changed}")
-                            print(f"*** Last activity:\t\t{get_date_from_ts(lf_active_ts_last)}")
+                            print(f"\n*** User got ACTIVE after being offline for {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))} ({get_date_from_ts(lf_active_ts_last)}){last_track_start_changed}")
                         else:
                             print(f"\n*** User got ACTIVE (first track)")
                         # We signal that the currently played song is the same as previous one before user got inactive, so might be continuation of previous track
