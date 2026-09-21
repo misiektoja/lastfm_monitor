@@ -2614,11 +2614,16 @@ def recovery_alert_body(advice, retry_seconds, failed_checks=0, failing_since=0,
     return body + get_cur_ts("\n\nTimestamp: ") if timestamp else body
 
 
+# Bolds the moment an outage started, the field a reader looks for first in a failure alert
+def html_bold_failing_since(content):
+    return re.sub(r"(Failing since: )([^<]+)", r"\1<b>\2</b>", content, count=1)
+
+
 # Builds the HTML failure alert with the summary in bold, keeping the line breaks the fix and its guide link carry
 def recovery_alert_body_html(advice, retry_seconds, failed_checks=0, failing_since=0, timestamp=True):
     paragraphs = recovery_alert_paragraphs(advice, retry_seconds, failed_checks, failing_since)
     rendered = [f"<b>{html_text(paragraphs[0])}</b>"] + [html_text(paragraph) for paragraph in paragraphs[1:]]
-    return f"<html><head></head><body>{'<br><br>'.join(rendered)}{get_cur_ts('<br><br>Timestamp: ') if timestamp else ''}</body></html>"
+    return html_bold_failing_since(f"<html><head></head><body>{'<br><br>'.join(rendered)}{get_cur_ts('<br><br>Timestamp: ') if timestamp else ''}</body></html>")
 
 
 # Builds the subject of the alert that says a reported outage is over
