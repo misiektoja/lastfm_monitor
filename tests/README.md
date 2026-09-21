@@ -59,6 +59,7 @@ python -m pytest -m e2e
 | `test_entry_points.py` | The welcome screen an empty command prints, the missing-target block, the argument combinations a secret command refuses and when the screen is cleared |
 | `test_diagnostics_output.py` | The verbose and debug printers: the grammar every debug line follows, what each mode covers and what neither prints when both are off |
 | `test_delivery_tests.py` | The messages both test commands send, the doctor's delivery tests and what each does with nothing to send |
+| `test_email_html.py` | HTML notification bodies: escaping, the Discord markdown form and the plain-text match |
 | `test_documentation.py` | Documentation site structure, its internal links, the links pointing into it from the repository and the guide constants the module prints |
 | `test_install_method_commands.py` | Install detection and the commands the tool prints, including the paths each one carries |
 | `test_help_screen.py` | The argument groups, the shared one-shot help sentences and the examples block |

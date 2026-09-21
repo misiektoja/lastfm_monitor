@@ -1088,7 +1088,9 @@ class TestAMonitoringFailureAlertsBothChannels:
         fix_index = next(index for index, line in enumerate(text_lines) if line.startswith("To fix: "))
         assert text_lines[fix_index + 1].startswith("Guide: https://")
         assert html_lines[fix_index] == escape(text_lines[fix_index])
-        assert html_lines[fix_index + 1] == text_lines[fix_index + 1]
+        # The HTML body links the guide it prints, so the line carries the same address as an anchor
+        guide_url = text_lines[fix_index + 1].removeprefix("Guide: ")
+        assert html_lines[fix_index + 1] == f'Guide: <a href="{guide_url}">{guide_url}</a>'
 
     # One outage earns one alert per channel, however the failure changes, until a check succeeds again
     def test_a_changed_failure_category_does_not_earn_a_second_alert(self, monkeypatch, tmp_path, capsys):
@@ -1195,7 +1197,7 @@ class TestTheFailureAlertText:
         html = monitor.recovery_alert_body_html(*arguments, timestamp=False).removeprefix("<html><head></head><body>").removesuffix("</body></html>").split("<br><br>")
 
         assert html[0] == f"<b>{escape(plain[0])}</b>"
-        assert html[1:] == [monitor.html_text(paragraph) for paragraph in plain[1:]]
+        assert html[1:] == [monitor.html_bold_outage_fields(monitor.html_autolink_urls(monitor.html_text(paragraph))) for paragraph in plain[1:]]
 
 
 class TestTheRecoveryAlert:
