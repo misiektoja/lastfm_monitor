@@ -7139,8 +7139,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     email_song_enabled = ((TRACK_NOTIFICATION and track_matched) or SONG_NOTIFICATION) and not email_sent
                     webhook_song_enabled = ((webhook_event_enabled("track") and track_matched) or webhook_event_enabled("song")) and not webhook_sent
                     if email_song_enabled or webhook_song_enabled:
-                        timespan_str = f"\n\nSongs Played: {listened_songs}"
-                        timespan_str_html = f"<br><br>Songs Played: {listened_songs}"
+                        timespan_str = f"\n\nSongs played: {listened_songs}"
+                        timespan_str_html = f"<br><br>Songs played: {listened_songs}"
                         # Only show timespan if lf_active_ts_start is properly set (not 0) and different from current track start
                         if lf_active_ts_start > 0 and lf_track_ts_start != lf_active_ts_start:
                             timespan = calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_start))
@@ -7179,8 +7179,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     loop_email_enabled = song_on_loop == SONG_ON_LOOP_VALUE and SONG_ON_LOOP_NOTIFICATION and not email_sent
                     loop_webhook_enabled = song_on_loop == SONG_ON_LOOP_VALUE and webhook_event_enabled("loop") and not webhook_sent
                     if loop_email_enabled or loop_webhook_enabled:
-                        timespan_str = f"\n\nSongs Played: {listened_songs}"
-                        timespan_str_html = f"<br><br>Songs Played: {listened_songs}"
+                        timespan_str = f"\n\nSongs played: {listened_songs}"
+                        timespan_str_html = f"<br><br>Songs played: {listened_songs}"
                         # Only show timespan if lf_active_ts_start is properly set (not 0) and different from current track start
                         if lf_active_ts_start > 0 and lf_track_ts_start != lf_active_ts_start:
                             timespan = calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_start))
@@ -7244,13 +7244,13 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         print_recovery_error(e, context="file.unwritable")
                     if listened_songs:
                         if lf_track_ts_start == lf_active_ts_start:
-                            print(f"\nSongs Played:\t\t\t{listened_songs}")
+                            print(f"\nSongs played:\t\t\t{listened_songs}")
                         else:
                             # Only show timespan if lf_active_ts_start is properly set (not 0) and different from current track start
                             if lf_active_ts_start > 0 and lf_track_ts_start != lf_active_ts_start:
-                                print(f"\nSongs Played:\t\t\t{listened_songs} ({calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_start))})")
+                                print(f"\nSongs played:\t\t\t{listened_songs} ({calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_start))})")
                             else:
-                                print(f"\nSongs Played:\t\t\t{listened_songs}")
+                                print(f"\nSongs played:\t\t\t{listened_songs}")
 
                     print_cur_ts("\nTimestamp:\t\t\t")
                 # Track has not changed, user is online and continues playing
