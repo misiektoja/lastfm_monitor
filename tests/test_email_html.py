@@ -232,6 +232,16 @@ def test_the_timeline_covers_several_alert_types(timeline_alerts):
     assert {"active", "song", "inactive", "offline_entries"} <= {alert["type"] for alert in timeline_alerts}
 
 
+# Verifies the session song count carries the sentence-case label every other field uses
+def test_the_song_count_label_is_sentence_case(timeline_alerts):
+    counted = [alert for alert in timeline_alerts if "Songs played: " in alert["body"]]
+
+    assert counted
+    for alert in timeline_alerts:
+        assert "Songs Played" not in alert["body"]
+        assert "Songs Played" not in alert["body_html"]
+
+
 # Verifies every alert carries an HTML body next to its plain one
 def test_every_alert_has_an_html_body(timeline_alerts):
     assert [alert["subject"] for alert in timeline_alerts if not alert["body_html"]] == []
