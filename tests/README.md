@@ -45,6 +45,7 @@ python -m pytest -m e2e
 | `test_compact_commands.py` | Literal short command prefixes, real help output and dependency hints |
 | `test_release_safety.py` | Credential preservation, private error rendering, runtime timing validation and saved-state compatibility |
 | `test_partial_outage.py` | Real pylast history success followed by a now-playing outage and recovery |
+| `test_missed_alert_recovery.py` | The recovery alert sent to a channel that never received the failure alert |
 | `test_recovery_safety.py` | Real dotenv reloads, setup backups, oversized counts and provider-error privacy |
 | `test_secret_policy.py` | Shared credential priority, reload ownership and setup destination conflicts |
 | `test_smtp_error_privacy.py` | Short and escaped passwords in rejected SMTP sign-ins through commands, setup, Doctor and delivery |
