@@ -940,6 +940,10 @@ class ErrorAlertState:
     def pending(self, channel: str, enabled, now: int) -> bool:
         return bool(enabled) and not getattr(self, f"{channel}_sent") and now >= getattr(self, f"{channel}_retry_at")
 
+    # Tells whether a channel was owed the failure alert but never received it, so the recovery can tell it the whole story
+    def missed(self, channel: str, enabled) -> bool:
+        return bool(enabled) and not getattr(self, f"{channel}_sent") and getattr(self, f"{channel}_failures") > 0
+
     # Records one attempt, holding a channel that failed for a growing wait so a broken server is not dialled on every check
     def record(self, channel: str, attempted: bool, delivered: bool, now: int) -> None:
         if not attempted:
@@ -2660,15 +2664,34 @@ def recovered_alert_body_html(target, lasted, summary, timestamp=True):
     return html_email_body(f"{body}{get_cur_ts('<br><br>Timestamp: ') if timestamp else ''}")
 
 
-# Sends the recovery alert on each channel whose failure alert was delivered, so nobody hears about the end of an
-# outage they were never told about, and returns whether anything was attempted
+# Tells a channel that never received the failure alert about the whole outage, since a bare recovery would close
+# a failure it was never told about
+def missed_alert_body(target, lasted, summary, timestamp=True):
+    body = f"Monitoring failed for {target} at {get_date_from_ts(int(time.time()) - lasted)} and recovered after {display_time(lasted)}.\n\nThe failure was: {summary}\n\nThe failure alert could not be delivered here while the failure lasted."
+    return body + get_cur_ts("\n\nTimestamp: ") if timestamp else body
+
+
+# Builds the HTML body of the combined failure and recovery alert to match the plain text one
+def missed_alert_body_html(target, lasted, summary, timestamp=True):
+    body = f"Monitoring failed for <b>{escape(str(target))}</b> at <b>{escape(get_date_from_ts(int(time.time()) - lasted))}</b> and recovered after <b>{escape(display_time(lasted))}</b>.<br><br>The failure was: {html_text(summary)}<br><br>The failure alert could not be delivered here while the failure lasted."
+    return html_email_body(f"{body}{get_cur_ts('<br><br>Timestamp: ') if timestamp else ''}")
+
+
+# Sends the recovery alert on each channel whose failure alert was delivered and tells a channel that never got one
+# about the whole outage at once, returning whether anything was attempted
 def send_outage_recovery_alert(target, lasted, error_alert):
     email_enabled = bool(error_alert.email_sent and ERROR_NOTIFICATION)
     webhook_enabled = bool(error_alert.webhook_sent and webhook_event_enabled("error"))
-    if not (email_enabled or webhook_enabled):
+    # A channel whose failure alert never got through hears about the outage and its end together, rather than
+    # nothing at all, which is what a channel blocked for the length of the outage would otherwise receive
+    email_missed = error_alert.missed("email", ERROR_NOTIFICATION)
+    webhook_missed = error_alert.missed("webhook", webhook_event_enabled("error"))
+    if not (email_enabled or webhook_enabled or email_missed or webhook_missed):
         return False
     lasted = max(1, int(lasted))
-    send_notification_channels("error", recovered_alert_subject(target, lasted), recovered_alert_body(target, lasted, error_alert.summary), recovered_alert_body_html(target, lasted, error_alert.summary), email_enabled=email_enabled, webhook_enabled=webhook_enabled, webhook_body=recovered_alert_body(target, lasted, error_alert.summary, timestamp=False), webhook_body_html=recovered_alert_body_html(target, lasted, error_alert.summary, timestamp=False))
+    email_text, email_html = (missed_alert_body, missed_alert_body_html) if email_missed else (recovered_alert_body, recovered_alert_body_html)
+    webhook_text, webhook_html = (missed_alert_body, missed_alert_body_html) if webhook_missed else (recovered_alert_body, recovered_alert_body_html)
+    send_notification_channels("error", recovered_alert_subject(target, lasted), email_text(target, lasted, error_alert.summary), email_html(target, lasted, error_alert.summary), email_enabled=email_enabled or email_missed, webhook_enabled=webhook_enabled or webhook_missed, webhook_body=webhook_text(target, lasted, error_alert.summary, timestamp=False), webhook_body_html=webhook_html(target, lasted, error_alert.summary, timestamp=False))
     return True
 
 
