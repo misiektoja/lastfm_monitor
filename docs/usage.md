@@ -198,7 +198,7 @@ lastfm_monitor <lastfm_username> -e
 
 Email and webhook error alerts are sent after **2 minutes** of a continuing failure. Problems that need your action, such as a rejected API key, alert immediately. The subject reads `Last.fm Monitor error: <what went wrong> (user: <lastfm_username>)` and the alert lists the fix, a guide link, how many checks failed in a row, since when and when the next check runs. Each kind of failure alerts once per channel. Failed deliveries are retried after 5 minutes, with increasing waits up to an hour.
 
-When the failure clears, a `Last.fm Monitor recovered` alert goes to every channel that received the failure alert, naming how long the outage lasted and what it was. A later outage alerts again. `-e` / `--no-error-notify` switches off both the email failure alert and its recovery alert, and `--no-webhook-error-notify` does the same for the webhook.
+When the failure clears, a `Last.fm Monitor recovered` alert goes to every channel that received the failure alert, naming how long the outage lasted and what it was. A channel that could not receive the failure alert while the outage lasted is told about the failure and its recovery together, so a blocked channel is not left without any word of an outage. A later outage alerts again. `-e` / `--no-error-notify` switches off both the email failure alert and its recovery alert, and `--no-webhook-error-notify` does the same for the webhook.
 
 To be notified when a user's followers change:
 - set `FOLLOWERS_NOTIFICATION` to `True`
