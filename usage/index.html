@@ -1093,12 +1093,13 @@
 - or use the <code>-x</code> flag</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>lastfm_monitor<span class="w"> </span>&lt;lastfm_username&gt;<span class="w"> </span>-x
 </code></pre></div>
-<p>To disable sending an email on errors (enabled by default):
+<p>To disable sending an email on errors and the recovery alert that follows (enabled by default):
 - set <code>ERROR_NOTIFICATION</code> to <code>False</code>
-- or use the <code>-e</code> flag</p>
+- or use the <code>-e</code> / <code>--no-error-notify</code> flag</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>lastfm_monitor<span class="w"> </span>&lt;lastfm_username&gt;<span class="w"> </span>-e
 </code></pre></div>
-<p>Email and webhook error alerts are sent after <strong>2 minutes</strong> of a continuing failure. Problems that need your action, such as a rejected API key, alert immediately. Each kind of failure alerts once per channel. Failed deliveries are retried after 5 minutes, with increasing waits up to an hour. Alerts can fire again after monitoring recovers.</p>
+<p>Email and webhook error alerts are sent after <strong>2 minutes</strong> of a continuing failure. Problems that need your action, such as a rejected API key, alert immediately. The subject reads <code>Last.fm Monitor error: &lt;what went wrong&gt; (user: &lt;lastfm_username&gt;)</code> and the alert lists the fix, a guide link, how many checks failed in a row, since when and when the next check runs. Each kind of failure alerts once per channel. Failed deliveries are retried after 5 minutes, with increasing waits up to an hour.</p>
+<p>When the failure clears, a <code>Last.fm Monitor recovered</code> alert goes to every channel that received the failure alert, naming how long the outage lasted and what it was. A channel that could not receive the failure alert while the outage lasted is told about the failure and its recovery together, so a blocked channel is not left without any word of an outage. A later outage alerts again. <code>-e</code> / <code>--no-error-notify</code> switches off both the email failure alert and its recovery alert, and <code>--no-webhook-error-notify</code> does the same for the webhook.</p>
 <p>To be notified when a user's followers change:
 - set <code>FOLLOWERS_NOTIFICATION</code> to <code>True</code>
 - or use the <code>--notify-followers</code> flag</p>
@@ -1179,13 +1180,13 @@
 <td><code>--webhook-profile</code></td>
 </tr>
 <tr>
-<td>Monitoring error occurs</td>
+<td>Monitoring error occurs or clears</td>
 <td><code>WEBHOOK_ERROR_NOTIFICATION</code></td>
 <td><code>--webhook-errors</code></td>
 </tr>
 </tbody>
 </table>
-<p>An event flag also enables the master switch for that run. Use <code>--no-webhook</code> to disable configured webhook delivery. Use <code>--no-webhook-error-notify</code> to disable only error webhooks.</p>
+<p>An event flag also enables the master switch for that run. Use <code>--no-webhook</code> to disable configured webhook delivery. Use <code>--no-webhook-error-notify</code> to disable the error webhook and the recovery webhook that follows it. Both carry the same title and text as the matching email, without the timestamp line.</p>
 <p>Examples:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>lastfm_monitor<span class="w"> </span>&lt;lastfm_username&gt;<span class="w"> </span>--webhook-active<span class="w"> </span>--webhook-inactive
 <a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>lastfm_monitor<span class="w"> </span>&lt;lastfm_username&gt;<span class="w"> </span>--webhook-song-changes<span class="w"> </span>--webhook-loop
@@ -1290,6 +1291,7 @@
 <p>Friend and profile tracking checks every <strong>90 minutes</strong> by default (<code>FRIENDS_CHECK_INTERVAL = 5400</code>). Set <code>FRIENDS_CHECK_INTERVAL</code> or <code>--friends-check-interval</code> in seconds to change it. Existing saved values still apply. This timer covers followings, followers, the About Me bio and the display name. It is independent from the music polling intervals.</p>
 <p>To avoid false notifications caused by transient Last.fm responses, friend and profile changes are only confirmed after a number of consecutive checks (default: 3). You can configure this via the <code>FRIENDS_CHANGE_COUNTER</code> option or <code>--friends-change-counter</code> flag. This setting also controls the threshold for suppressing repeated error messages.</p>
 <p>You can also configure the retry timeout used when confirming transient changes or errors via <code>FRIENDS_RETRY_INTERVAL</code> configuration option or <code>--friends-retry-interval</code> flag.</p>
+<p>When the check keeps failing, for example because Last.fm blocks or breaks the pages this feature reads, the retry timeout doubles after each failed attempt until it reaches <code>FRIENDS_CHECK_INTERVAL</code>. A short outage is still retried quickly, while an outage lasting hours settles at the normal check interval instead of retrying every <code>FRIENDS_RETRY_INTERVAL</code> seconds. The failure is reported once it reaches the <code>FRIENDS_CHANGE_COUNTER</code> threshold and then at most once an hour until it clears.</p>
 <p><a id="liveness-reminder"></a></p>
 <h3 id="liveness-reminder">Liveness Reminder<a class="headerlink" href="#liveness-reminder" title="Permanent link">&para;</a></h3>
 <p>While nothing changes, the tool prints one reminder that it is still running:</p>
