@@ -41,12 +41,22 @@ def test_config_block_contains_complete_webhook_settings():
     assert "NTFY_ACCESS_TOKEN" in monitor.SECRET_KEYS
 
 
+# Gives both channels a destination, since the rollup rows report a channel with none as off whatever its alert types are
+def configure_channel_destinations(monkeypatch):
+    monkeypatch.setattr(monitor, "SMTP_HOST", "smtp.example.com")
+    monkeypatch.setattr(monitor, "SMTP_PORT", 587)
+    monkeypatch.setattr(monitor, "RECEIVER_EMAIL", "michal.k@example.com")
+    monkeypatch.setattr(monitor, "WEBHOOK_PROVIDER", "discord")
+    monkeypatch.setattr(monitor, "WEBHOOK_URL", "https://discord.com/api/webhooks/123/private-token")
+
+
 # Verifies startup summaries use short labels and unstarred bounded continuation lines
 def test_startup_notification_summaries_use_compact_rollups(monkeypatch):
     email_settings = {"ACTIVE_NOTIFICATION": True, "INACTIVE_NOTIFICATION": True, "TRACK_NOTIFICATION": True, "SONG_NOTIFICATION": True, "SONG_ON_LOOP_NOTIFICATION": True, "OFFLINE_ENTRIES_NOTIFICATION": True, "ERROR_NOTIFICATION": True, "FOLLOWERS_NOTIFICATION": True, "FOLLOWINGS_NOTIFICATION": True, "PROFILE_NOTIFICATION": True}
     webhook_settings = {"WEBHOOK_ENABLED": True, "WEBHOOK_ACTIVE_NOTIFICATION": True, "WEBHOOK_INACTIVE_NOTIFICATION": True, "WEBHOOK_TRACK_NOTIFICATION": True, "WEBHOOK_SONG_NOTIFICATION": True, "WEBHOOK_SONG_ON_LOOP_NOTIFICATION": True, "WEBHOOK_OFFLINE_ENTRIES_NOTIFICATION": True, "WEBHOOK_ERROR_NOTIFICATION": True, "WEBHOOK_FOLLOWERS_NOTIFICATION": True, "WEBHOOK_FOLLOWINGS_NOTIFICATION": True, "WEBHOOK_PROFILE_NOTIFICATION": True}
     for setting, value in {**email_settings, **webhook_settings}.items():
         monkeypatch.setattr(monitor, setting, value)
+    configure_channel_destinations(monkeypatch)
     expected_email = "* Notifications (email):        On (active, inactive, tracked, songs, loops, offline, errors,\n                                followers, followings, profile)\n"
     expected_webhook = "* Notifications (webhook):      On (active, inactive, tracked, songs, loops, offline, errors,\n                                followers, followings, profile)\n"
     rows = {row.label: row for row in monitor.build_startup_summary("someuser")}
@@ -61,7 +71,7 @@ def test_startup_webhook_summary_respects_master_switch(monkeypatch):
     monkeypatch.setattr(monitor, "WEBHOOK_ENABLED", False)
     monkeypatch.setattr(monitor, "WEBHOOK_ACTIVE_NOTIFICATION", True)
     monkeypatch.setattr(monitor, "WEBHOOK_ERROR_NOTIFICATION", True)
-    assert monitor._startup_notification_state(monitor._startup_webhook_notification_categories()) == "Off"
+    assert monitor._startup_notification_state(monitor._startup_webhook_notification_categories(), monitor.webhook_channel_configured()) == "Off"
 
 
 # Verifies URL validation and provider detection reject unsafe destinations

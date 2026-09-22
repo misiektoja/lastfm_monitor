@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.7
+v2.8
 
 Tool implementing real-time tracking of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -19,7 +19,7 @@ curl_cffi (optional, only for friends and profile tracking)
 colorama (optional, only for coloured output in the classic Windows Command Prompt)
 """
 
-VERSION = "2.7"
+VERSION = "2.8"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -135,7 +135,7 @@ SONG_ON_LOOP_NOTIFICATION = False
 # Can also be enabled via the -f flag
 OFFLINE_ENTRIES_NOTIFICATION = False
 
-# Whether to send an email on errors
+# Whether to send an email on errors and the recovery alert that follows once the failure clears
 # Can also be disabled via the -e flag
 ERROR_NOTIFICATION = True
 
@@ -204,7 +204,7 @@ WEBHOOK_FOLLOWINGS_NOTIFICATION = False
 # Can also be enabled via the --webhook-profile flag
 WEBHOOK_PROFILE_NOTIFICATION = False
 
-# Whether to send a webhook notification on monitoring errors
+# Whether to send a webhook notification on monitoring errors and the recovery alert that follows once the failure clears
 # Can also be enabled via --webhook-errors or disabled via --no-webhook-error-notify
 WEBHOOK_ERROR_NOTIFICATION = True
 
@@ -572,6 +572,7 @@ FRIENDS_CHANGE_COUNTER = 3
 # Timeout used when confirming transient changes; in seconds
 # If this is set higher than FRIENDS_CHECK_INTERVAL, it effectively throttles the checks
 # during the confirmation phase
+# After a failed check it is doubled on every further failure, up to FRIENDS_CHECK_INTERVAL
 # Can also be set using the --friends-retry-interval flag
 FRIENDS_RETRY_INTERVAL = 90
 """
@@ -738,7 +739,10 @@ TERMINAL_GUIDE_URL = f"{DOCS_BASE_URL}/usage/#terminal-output"
 SPOTIFY_APP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#optional-spotify-oauth-app-setup"
 DOCTOR_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#doctor-preflight"
 DIAGNOSTICS_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#verbose-and-debug-output"
+CONNECTION_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#connection-problems"
+DESCRIPTOR_LIMIT_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#too-many-open-files"
 INTERVALS_GUIDE_URL = f"{DOCS_BASE_URL}/usage/#check-intervals"
+WEBSITE_TRACKING_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#lastfm-website-tracking"
 
 # A preflight check waits on the user, so it uses a shorter timeout than a delivery in the monitoring loop
 DOCTOR_SMTP_TIMEOUT = 5
@@ -911,9 +915,10 @@ from email.utils import parsedate_to_datetime
 import pyotp
 
 
-# Tracks the error alert per channel: what was delivered, and how long a channel that failed waits before the next attempt
+# Tracks the error alert per channel: what was delivered, how long a channel that failed waits before the next
+# attempt and which failure the outage last reported, so the recovery alert can name it
 class ErrorAlertState:
-    # Starts with nothing delivered and no channel on hold
+    # Starts with nothing delivered, no channel on hold and no failure remembered
     def __init__(self) -> None:
         self.email_sent = False
         self.webhook_sent = False
@@ -921,14 +926,23 @@ class ErrorAlertState:
         self.webhook_failures = 0
         self.email_retry_at = 0
         self.webhook_retry_at = 0
+        self.summary = ""
 
-    # Forgets the delivered alert and any hold, so the next failure earns each channel a new one
+    # Forgets the delivered alert, any hold and the remembered failure, so the next failure earns each channel a new one
     def reset(self) -> None:
         self.__init__()
+
+    # Remembers what the outage last failed with, since the recovery alert is built after the failure is gone
+    def remember(self, advice) -> None:
+        self.summary = advice.summary
 
     # Tells whether a channel still owes the alert and its wait after a failed attempt, if any, has passed
     def pending(self, channel: str, enabled, now: int) -> bool:
         return bool(enabled) and not getattr(self, f"{channel}_sent") and now >= getattr(self, f"{channel}_retry_at")
+
+    # Tells whether a channel was owed the failure alert but never received it, so the recovery can tell it the whole story
+    def missed(self, channel: str, enabled) -> bool:
+        return bool(enabled) and not getattr(self, f"{channel}_sent") and getattr(self, f"{channel}_failures") > 0
 
     # Records one attempt, holding a channel that failed for a growing wait so a broken server is not dialled on every check
     def record(self, channel: str, attempted: bool, delivered: bool, now: int) -> None:
@@ -1158,10 +1172,14 @@ _ID_FIELD_RE = re.compile(r"(\b[a-z][a-z_]*_id)(=)([\w.:-]+)")
 # every other quoted value this tool prints is a path, a package or a menu answer, so it stays plain
 _QUOTED_USERNAME_CONTEXT_RE = re.compile(r"\buser\s+$|\blistened by\s+$|\btracks of\s+$", re.IGNORECASE)
 _DURATION_RE = re.compile(r"~?\b[0-9]{1,20}[ \t]{1,20}(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)\b", re.IGNORECASE)
-_LONG_DATE_RE = re.compile(r"\b(?:\w{3}\s+)?\d{1,2}\s+\w{3}(?:\s+\d{2,4})?[\s,]*\d{2}:\d{2}(:\d{2})?(\s*[AP]M)?\b", re.IGNORECASE)
+# The weekday in front of a date, taken from the abbreviations the running locale prints. A date is separated
+# from its weekday by one space, so the wide gap of a padded listing column cannot pull the word before it,
+# such as the last word of a line, into the date
+_WEEKDAY_ABBR_PATTERN = "|".join(re.escape(day_abbr) for day_abbr in calendar.day_abbr)
+_LONG_DATE_RE = re.compile(r"\b(?:(?:" + _WEEKDAY_ABBR_PATTERN + r")[\t ])?\d{1,2}\s+\w{3}(?:\s+\d{2,4})?[\s,]*\d{2}:\d{2}(:\d{2})?(\s*[AP]M)?\b", re.IGNORECASE)
 _TIME_ONLY_RE = re.compile(r"(?<![\w:])(~?(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?:\s*[AP]M)?)(?![\w:])", re.IGNORECASE)
-_SHORT_RANGE_DATE_RE = re.compile(r"\(\w{3}\s+\d{1,2}\s+\w{3}\s+\d{2}:\d{2}(\s*[AP]M)?\s*-\s*\d{2}:\d{2}(\s*[AP]M)?\)", re.IGNORECASE)
-_DATE_RANGE_RE = re.compile(r"\b\w{3}\s+\d{1,2}\s+\w{3}\s+\d{2}:\d{2}(\s*[AP]M)?\s*-\s*\d{2}:\d{2}(\s*[AP]M)?\b", re.IGNORECASE)
+_SHORT_RANGE_DATE_RE = re.compile(r"\((?:" + _WEEKDAY_ABBR_PATTERN + r")[\t ]\d{1,2}\s+\w{3}\s+\d{2}:\d{2}(\s*[AP]M)?\s*-\s*\d{2}:\d{2}(\s*[AP]M)?\)", re.IGNORECASE)
+_DATE_RANGE_RE = re.compile(r"\b(?:" + _WEEKDAY_ABBR_PATTERN + r")[\t ]\d{1,2}\s+\w{3}\s+\d{2}:\d{2}(\s*[AP]M)?\s*-\s*\d{2}:\d{2}(\s*[AP]M)?\b", re.IGNORECASE)
 _HOUR_RANGE_RE = re.compile(r"\b\d{2}:\d{2}(\s*[AP]M)?\s*-\s*\d{2}:\d{2}(\s*[AP]M)?\b", re.IGNORECASE)
 # Sentence punctuation, a closing bracket or a closing quote right after a link is not part of it
 _URL_RE = re.compile(r"(https?://[^\s\]]+?)(?=[.,;:!?'\")>]*(?:[\s\]]|$))")
@@ -1341,6 +1359,8 @@ def _colorize_count_change(match):
 # Applies the colour rules to a single output line
 def _colorize_line(line):
     lowered = line.lower()
+    # Read before any highlight is inserted, since the label column has to be measured on the plain text
+    is_settings_row = is_startup_summary_row(line)
 
     # Notification summary rows carry their own On/Off state word
     notification_match = _NOTIFICATION_SUMMARY_STATE_RE.match(line)
@@ -1424,6 +1444,10 @@ def _colorize_line(line):
     line = _sub_outside_color(_ACTIVE_WORD_RE, lambda mo: colorize("status_active", mo.group(0)), line)
     line = _sub_outside_color(_INACTIVE_WORD_RE, lambda mo: colorize("status_inactive", mo.group(0)), line)
     line = _sub_outside_color(_OFFLINE_WORD_RE, lambda mo: colorize("status_offline", mo.group(0)), line)
+
+    # A summary row reports a setting, so a value that happens to read like a log keyword must not paint the whole row
+    if is_settings_row:
+        return line
 
     # Whole-line highlighting, applied last so the colours added above survive the nesting logic
     is_debug_line = bool(_DEBUG_LINE_RE.match(lowered))
@@ -2209,7 +2233,7 @@ RECOVERY_CODES = frozenset({
     "secret.missing", "secret.entry",
     "auth.api_key_invalid",
     "network.unavailable", "network.timeout",
-    "lastfm.rate_limited", "lastfm.unavailable", "lastfm.challenge",
+    "lastfm.rate_limited", "lastfm.unavailable", "lastfm.challenge", "lastfm.website_error",
     "target.missing", "target.invalid", "target.not_found", "target.not_visible",
     "smtp.invalid", "smtp.authentication", "smtp.connection",
     "webhook.invalid", "webhook.rejected", "webhook.rate_limited", "webhook.connection",
@@ -2251,6 +2275,21 @@ def html_text(text):
     return escape(text).replace("\n", "<br>")
 
 
+# Returns one value escaped for use inside an HTML attribute
+def escape_html_attr(value):
+    return escape(str(value or ""), quote=True)
+
+
+# Wraps one rendered fragment in the document every HTML alert body shares
+def html_email_body(content):
+    return f"<html><head></head><body>{content}</body></html>"
+
+
+# Turns a bare URL inside already escaped HTML text into a link, so an alert that prints a guide link is clickable
+def html_autolink_urls(content):
+    return re.sub(r"(?<![\"'=])(https?://[^\s<>\"']+[^\s<>\"'.,;:!?)\]])", r'<a href="\1">\1</a>', str(content))
+
+
 # Returns the advice an optional library that is missing carries, naming what the run loses and how to install it
 def missing_dependency_advice(package, effect, alternative=""):
     return make_recovery_advice("dependency.missing", f"{effect} because the optional '{package}' library is missing", recovery_fix_with_guide(f"Install it with: {install_dependency_command(package)}" + (f". {alternative}" if alternative else ""), INSTALLATION_GUIDE_URL), False)
@@ -2287,6 +2326,12 @@ def recovery_lastfm_status(error):
     return None
 
 
+# Returns the HTTP status named in an error message, since the scraped website pages report their status as text rather than on an exception
+def recovery_text_http_status(message):
+    match = re.search(r"\bhttp (?:code |status )?(\d{3})\b", message)
+    return int(match.group(1)) if match else None
+
+
 # Yields the exception and each cause or context up to max_depth, to walk an exception chain
 def iter_exc_chain(error, max_depth=8):
     current = error
@@ -2295,6 +2340,24 @@ def iter_exc_chain(error, max_depth=8):
             return
         yield current
         current = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
+
+
+# Names the transport failure behind an exception chain, since a timeout raised with no message leaves the text rules nothing to read
+def network_failure_code(error):
+    timed_out = False
+    unreachable = False
+    for current in iter_exc_chain(error):
+        name = type(current).__name__
+        # A TLS failure has its own advice, so a chain that names one is left to the rules that recognize it
+        if "SSL" in name or "Certificate" in name:
+            return ""
+        if isinstance(current, TimeoutError) or "Timeout" in name:
+            timed_out = True
+        elif isinstance(current, ConnectionError) or name in ("gaierror", "herror") or any(term in name for term in ("Connect", "ProxyError", "NameResolution", "Unreachable")):
+            unreachable = True
+    if timed_out:
+        return "network.timeout"
+    return "network.unavailable" if unreachable else ""
 
 
 # Reports whether this process hit the local file descriptor limit rather than a remote failure
@@ -2325,13 +2388,14 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
     safe_detail = sanitize_error_text(detail or error, extra_secrets=extra_secrets) if (detail or error) else ""
     lastfm_status = recovery_lastfm_status(error)
     http_status = recovery_http_status(error)
+    text_status = recovery_text_http_status(message)
 
     def advice(code, summary, fix, retryable, guide_url=None):
         return make_recovery_advice(code, summary, recovery_fix_with_guide(fix, guide_url) if guide_url else fix, retryable, safe_detail)
 
     # Checked ahead of every context, since a local descriptor limit is not a failure of whatever call hit it
     if error is not None and is_too_many_open_files(error):
-        return advice("resource.exhausted", "This process ran out of file descriptors, which is a local limit and not a Last.fm problem", "Raise the file descriptor limit, for example with 'ulimit -n 4096', or set LimitNOFILE= if you run under systemd, then restart the tool", False, DIAGNOSTICS_GUIDE_URL)
+        return advice("resource.exhausted", "This process ran out of file descriptors, which is a local limit and not a Last.fm problem", "Raise the file descriptor limit, for example with 'ulimit -n 4096', or set LimitNOFILE= if you run under systemd, then restart the tool", False, DESCRIPTOR_LIMIT_GUIDE_URL)
 
     if context == "config":
         if "does not exist" in message or "no such file" in message:
@@ -2394,12 +2458,12 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
         return advice("file.exists", safe_detail or "The destination file already exists", f"Re-run with --force to replace it after a timestamped backup, or write to a different path with '{render_command(['--generate-config', '<new-file>'], include_paths=False)}'", False, CONFIG_GUIDE_URL)
 
     if context == "file.unwritable":
-        return advice("file.unwritable", safe_detail or "A file the tool keeps could not be written", "Check that the directory exists and is writable, or choose another path", False, DIAGNOSTICS_GUIDE_URL)
+        return advice("file.unwritable", safe_detail or "A file the tool keeps could not be written", "Check that the directory exists and is writable, or choose another path", False, CONFIG_GUIDE_URL)
 
     if context == "file":
         if any(term in message for term in ("cannot load", "cannot be opened", "unreadable", "not valid utf-8", "no such file", "cannot be read")):
-            return advice("file.unreadable", safe_detail or "A file the tool keeps could not be read", "Check the path and its permissions, or delete the file so it is recreated", False, DIAGNOSTICS_GUIDE_URL)
-        return advice("file.unwritable", safe_detail or "A file the tool keeps could not be written", "Check that the directory exists and is writable, or choose another path", False, DIAGNOSTICS_GUIDE_URL)
+            return advice("file.unreadable", safe_detail or "A file the tool keeps could not be read", "Check the path and its permissions, or delete the file so it is recreated", False, CONFIG_GUIDE_URL)
+        return advice("file.unwritable", safe_detail or "A file the tool keeps could not be written", "Check that the directory exists and is writable, or choose another path", False, CONFIG_GUIDE_URL)
 
     # Runtime, which is the monitoring loop, the listing mode and every Last.fm call either of them makes.
     # The pylast status is checked first, because Last.fm answers HTTP 200 with a numeric error code in the body.
@@ -2412,11 +2476,14 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
     if lastfm_status in (6, 7):
         return advice("target.not_found", safe_detail or "Last.fm has no user with that name", "Check the username, since a deleted or renamed account cannot be monitored", False, USAGE_GUIDE_URL)
     if lastfm_status in (8, 11, 16) or (lastfm_status is not None and lastfm_status >= 500):
-        return advice("lastfm.unavailable", "The Last.fm API is temporarily unavailable", "This is usually a Last.fm outage. The tool will keep retrying", True, DIAGNOSTICS_GUIDE_URL)
+        return advice("lastfm.unavailable", "Last.fm is temporarily unavailable", "Usually nothing to do, the tool retries on its own. If it continues, wait for Last.fm to recover", True, CONNECTION_GUIDE_URL)
 
     if "last.fm returned a browser verification page" in message:
-        return advice("lastfm.challenge", "Last.fm is asking for browser verification", "The tool will keep retrying. If this persists, update curl_cffi and check the Last.fm page in a browser", True, f"{DOCS_BASE_URL}/troubleshooting/#lastfm-website-tracking")
-    if http_status == 429 or "http code 429" in message or "429 client" in message or "rate limit" in message or "too many requests" in message:
+        return advice("lastfm.challenge", "Last.fm is asking for browser verification", "The tool will keep retrying. If this persists, update curl_cffi and check the Last.fm page in a browser", True, WEBSITE_TRACKING_GUIDE_URL)
+    # Last.fm answers the scraped pages with statuses above the HTTP range, which no standard rule below would recognise
+    if text_status is not None and text_status >= 600:
+        return advice("lastfm.website_error", f"Last.fm answered the website request with a nonstandard HTTP {text_status}", "Only friend and profile tracking reads those pages, so music monitoring is unaffected. The tool will keep retrying with a growing wait. If this lasts, update curl_cffi and open the Last.fm page in a browser", True, WEBSITE_TRACKING_GUIDE_URL)
+    if http_status == 429 or text_status == 429 or "429 client" in message or "rate limit" in message or "too many requests" in message:
         return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. Increase the check intervals if this repeats", True, INTERVALS_GUIDE_URL)
     if "invalid api key" in message or "api key suspended" in message or "invalid method signature" in message:
         return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", f"Save a working pair with '{render_command(['--set-lastfm-credentials'])}'", False, LASTFM_API_GUIDE_URL)
@@ -2424,12 +2491,16 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
         return advice("target.not_visible", "The monitored user hides their recent listening information", "Ask the user to turn off 'Hide recent listening information' in their Last.fm privacy settings", False, PRIVACY_GUIDE_URL)
     if "user not found" in message or "no user with that name" in message or http_status == 404:
         return advice("target.not_found", safe_detail or "Last.fm has no user with that name", "Check the username, since a deleted or renamed account cannot be monitored", False, USAGE_GUIDE_URL)
-    if (http_status is not None and http_status >= 500) or re.search(r"http code 5\d\d", message) or "temporarily unavailable" in message or "service unavailable" in message or "bad gateway" in message:
-        return advice("lastfm.unavailable", "The Last.fm API is temporarily unavailable", "This is usually a Last.fm outage. The tool will keep retrying", True, DIAGNOSTICS_GUIDE_URL)
+    if (http_status is not None and http_status >= 500) or (text_status is not None and text_status >= 500) or "temporarily unavailable" in message or "service unavailable" in message or "bad gateway" in message:
+        return advice("lastfm.unavailable", "Last.fm is temporarily unavailable", "Usually nothing to do, the tool retries on its own. If it continues, wait for Last.fm to recover", True, CONNECTION_GUIDE_URL)
+    # Read before the text rules, since a transport error can arrive with an empty message
+    transport_code = network_failure_code(error)
+    if transport_code:
+        return advice(transport_code, "Last.fm did not answer in time" if transport_code == "network.timeout" else "Last.fm could not be reached", "Usually nothing to do, the tool retries on its own. If it continues, check network access, DNS, firewall and proxy settings", True, CONNECTION_GUIDE_URL)
     if "timed out" in message or "timeout" in message:
-        return advice("network.timeout", "The Last.fm request timed out", "Check connectivity. The tool will keep retrying", True, DIAGNOSTICS_GUIDE_URL)
+        return advice("network.timeout", "Last.fm did not answer in time", "Usually nothing to do, the tool retries on its own. If it continues, check network access, DNS, firewall and proxy settings", True, CONNECTION_GUIDE_URL)
     if any(term in message for term in ("connection", "name resolution", "failed to resolve", "network is unreachable", "no connectivity", "family not supported", "aborted")):
-        return advice("network.unavailable", "Last.fm could not be reached", "Check connectivity, DNS and any proxy. The tool will keep retrying", True, DIAGNOSTICS_GUIDE_URL)
+        return advice("network.unavailable", "Last.fm could not be reached", "Usually nothing to do, the tool retries on its own. If it continues, check network access, DNS, firewall and proxy settings", True, CONNECTION_GUIDE_URL)
     if "invalid" in message and "username" in message:
         return advice("target.invalid", safe_detail or "That is not a usable Last.fm username", f"Pass the {LASTFM_TARGET_FORMS}", False, USAGE_GUIDE_URL)
     return advice("unknown", safe_detail or "The request could not be completed", unknown_failure_fix(), True, DIAGNOSTICS_GUIDE_URL)
@@ -2515,10 +2586,12 @@ def print_liveness_banner(message):
 
 
 # Reminds about a lasting failure once an hour, so a broken run still says it is alive without repeating itself
-def print_outage_liveness(target, advice, since, failures=0):
+def print_outage_liveness(target, advice, since, failures=0, close=True):
     count = f", {failures} failed {'check' if failures == 1 else 'checks'}" if failures else ""
     print(f"* Monitoring degraded for {target}. {advice.summary} since {get_date_from_ts(since)}{count}")
-    print_cur_ts("Liveness check, timestamp:\t")
+    # A caller with an alert still to deliver closes the report itself, so the delivery lines stay inside it
+    if close:
+        print_cur_ts("Liveness check, timestamp:\t")
 
 
 # Notes that a reported outage now fails differently, in one line rather than a second full report
@@ -2527,9 +2600,99 @@ def print_outage_change(target, advice):
 
 
 # Reports that a failure cleared, since a throttled failure no longer stops printing when it is over
-def print_outage_recovery(target, lasted):
+def print_outage_recovery(target, lasted, close=True):
     print(f"* Monitoring recovered for {target} after {display_time(max(1, lasted))}")
-    print_cur_ts("Timestamp:\t\t\t")
+    # A caller with a recovery alert still to deliver closes the report itself, so the delivery lines stay inside it
+    if close:
+        print_cur_ts("Timestamp:\t\t\t")
+
+
+# Builds the subject every failure alert shares, so an inbox fed by several monitors sorts them by tool
+def recovery_alert_subject(advice, target):
+    return f"Last.fm Monitor error: {advice.summary} (user: {target})"
+
+
+# Lists the paragraphs of a failure alert in order, counting the failed checks only once there is more than one
+# to count and adding the technical detail only in debug mode and only when it says more than the summary
+def recovery_alert_paragraphs(advice, retry_seconds, failed_checks=0, failing_since=0):
+    paragraphs = [advice.summary, f"To fix: {advice.fix}"]
+    retry_lines = []
+    if failed_checks > 1:
+        retry_lines.append(f"Failed checks in a row: {failed_checks}")
+        retry_lines.append(f"Failing since: {get_date_from_ts(int(failing_since))}")
+    retry_lines.append(f"Next retry in: {display_time(retry_seconds)}")
+    paragraphs.append("\n".join(retry_lines))
+    if DEBUG_MODE and advice.detail and advice.detail != advice.summary:
+        paragraphs.append(f"Technical detail: {advice.detail}")
+    return paragraphs
+
+
+# Builds the plain text failure alert, with the timestamp the email carries and the webhook leaves out
+def recovery_alert_body(advice, retry_seconds, failed_checks=0, failing_since=0, timestamp=True):
+    body = "\n\n".join(recovery_alert_paragraphs(advice, retry_seconds, failed_checks, failing_since))
+    return body + get_cur_ts("\n\nTimestamp: ") if timestamp else body
+
+
+# Bolds the values a reader scans a failure alert for: how often it has failed and since when
+def html_bold_outage_fields(content):
+    for label in ("Failed checks in a row: ", "Failing since: "):
+        content = re.sub(f"({re.escape(label)})([^<]+)", r"\1<b>\2</b>", content, count=1)
+    return content
+
+
+# Builds the HTML failure alert with the summary in bold, keeping the line breaks the fix and its guide link carry
+def recovery_alert_body_html(advice, retry_seconds, failed_checks=0, failing_since=0, timestamp=True):
+    paragraphs = recovery_alert_paragraphs(advice, retry_seconds, failed_checks, failing_since)
+    rendered = [f"<b>{html_text(paragraphs[0])}</b>"] + [html_autolink_urls(html_text(paragraph)) for paragraph in paragraphs[1:]]
+    return html_bold_outage_fields(html_email_body(f"{'<br><br>'.join(rendered)}{get_cur_ts('<br><br>Timestamp: ') if timestamp else ''}"))
+
+
+# Builds the subject of the alert that says a reported outage is over
+def recovered_alert_subject(target, lasted):
+    return f"Last.fm Monitor recovered: monitoring {target} resumed after {display_time(lasted)}"
+
+
+# Builds the plain text recovery alert naming the failure it closes, with the timestamp only the email carries
+def recovered_alert_body(target, lasted, summary, timestamp=True):
+    body = f"Monitoring recovered for {target} after {display_time(lasted)}.\n\nThe failure was: {summary}"
+    return body + get_cur_ts("\n\nTimestamp: ") if timestamp else body
+
+
+# Builds the HTML recovery alert to match the plain text one
+def recovered_alert_body_html(target, lasted, summary, timestamp=True):
+    body = f"Monitoring recovered for <b>{escape(str(target))}</b> after <b>{escape(display_time(lasted))}</b>.<br><br>The failure was: {html_text(summary)}"
+    return html_email_body(f"{body}{get_cur_ts('<br><br>Timestamp: ') if timestamp else ''}")
+
+
+# Tells a channel that never received the failure alert about the whole outage, since a bare recovery would close
+# a failure it was never told about
+def missed_alert_body(target, lasted, summary, timestamp=True):
+    body = f"Monitoring failed for {target} at {get_date_from_ts(int(time.time()) - lasted)} and recovered after {display_time(lasted)}.\n\nThe failure was: {summary}\n\nThe failure alert could not be delivered here while the failure lasted."
+    return body + get_cur_ts("\n\nTimestamp: ") if timestamp else body
+
+
+# Builds the HTML body of the combined failure and recovery alert to match the plain text one
+def missed_alert_body_html(target, lasted, summary, timestamp=True):
+    body = f"Monitoring failed for <b>{escape(str(target))}</b> at <b>{escape(get_date_from_ts(int(time.time()) - lasted))}</b> and recovered after <b>{escape(display_time(lasted))}</b>.<br><br>The failure was: {html_text(summary)}<br><br>The failure alert could not be delivered here while the failure lasted."
+    return html_email_body(f"{body}{get_cur_ts('<br><br>Timestamp: ') if timestamp else ''}")
+
+
+# Sends the recovery alert on each channel whose failure alert was delivered and tells a channel that never got one
+# about the whole outage at once, returning whether anything was attempted
+def send_outage_recovery_alert(target, lasted, error_alert):
+    email_enabled = bool(error_alert.email_sent and ERROR_NOTIFICATION)
+    webhook_enabled = bool(error_alert.webhook_sent and webhook_event_enabled("error"))
+    # A channel whose failure alert never got through hears about the outage and its end together, rather than
+    # nothing at all, which is what a channel blocked for the length of the outage would otherwise receive
+    email_missed = error_alert.missed("email", ERROR_NOTIFICATION)
+    webhook_missed = error_alert.missed("webhook", webhook_event_enabled("error"))
+    if not (email_enabled or webhook_enabled or email_missed or webhook_missed):
+        return False
+    lasted = max(1, int(lasted))
+    email_text, email_html = (missed_alert_body, missed_alert_body_html) if email_missed else (recovered_alert_body, recovered_alert_body_html)
+    webhook_text, webhook_html = (missed_alert_body, missed_alert_body_html) if webhook_missed else (recovered_alert_body, recovered_alert_body_html)
+    send_notification_channels("error", recovered_alert_subject(target, lasted), email_text(target, lasted, error_alert.summary), email_html(target, lasted, error_alert.summary), email_enabled=email_enabled or email_missed, webhook_enabled=webhook_enabled or webhook_missed, webhook_body=webhook_text(target, lasted, error_alert.summary, timestamp=False), webhook_body_html=webhook_html(target, lasted, error_alert.summary, timestamp=False))
+    return True
 
 
 # Tracks the last uninterrupted recovery category so a long outage cannot repeat the same hint every cycle
@@ -2657,9 +2820,11 @@ def _startup_webhook_notification_categories() -> List[str]:
     return _selected_webhook_notification_categories() if WEBHOOK_ENABLED else []
 
 
-# Rolls one channel's enabled alerts into the state its summary row reports
-def _startup_notification_state(categories: List[str]) -> str:
-    return "On (" + ", ".join(categories) + ")" if categories else "Off"
+# Rolls one channel's enabled alerts into the state its summary row reports, which is off while the channel has no destination
+def _startup_notification_state(categories: List[str], configured: bool) -> str:
+    if not categories:
+        return "Off"
+    return "On (" + ", ".join(categories) + ")" if configured else "Off (not configured)"
 
 
 # Returns whether one configured webhook alert is enabled independently of email settings
@@ -3035,7 +3200,7 @@ def send_webhook(title: str, description: str, notification_type: str = "song", 
 
 
 # Sends one alert through the enabled email and webhook channels
-def send_notification_channels(notification_type: str, subject: str, body: str, body_html: str = "", email_enabled: bool = False, webhook_enabled: Optional[bool] = None, subject_short: str = "", body_short: str = "") -> Tuple[bool, bool]:
+def send_notification_channels(notification_type: str, subject: str, body: str, body_html: str = "", email_enabled: bool = False, webhook_enabled: Optional[bool] = None, subject_short: str = "", body_short: str = "", webhook_body: str = "", webhook_body_html: str = "") -> Tuple[bool, bool]:
     email_attempted = bool(email_enabled)
     webhook_attempted = webhook_event_enabled(notification_type) if webhook_enabled is None else bool(webhook_enabled)
     email_delivered = False
@@ -3048,8 +3213,10 @@ def send_notification_channels(notification_type: str, subject: str, body: str, 
         print(f"Sending webhook notification via {webhook_provider_display_name()}")
         use_short_content = NTFY_SHORT is True and normalized_webhook_provider() == "ntfy"
         webhook_subject = (subject_short or subject) if use_short_content else subject
-        webhook_body = (body_short or body) if use_short_content else body
-        webhook_delivered = send_webhook(webhook_subject, webhook_body, notification_type, force=True, discord_description=html_body_to_discord_markdown(body_html)) == 0
+        # An alert may hand the webhook its own body, such as one without the timestamp line only the email needs
+        webhook_text = (body_short or body) if use_short_content else (webhook_body or body)
+        discord_source = webhook_body_html if webhook_body else body_html
+        webhook_delivered = send_webhook(webhook_subject, webhook_text, notification_type, force=True, discord_description=html_body_to_discord_markdown(discord_source)) == 0
         debug_print("Notification dispatch", type=notification_type, channel="webhook", outcome="OK" if webhook_delivered else "failed")
     # Delivery rather than the attempt, so a channel that failed is tried again while one that arrived is not sent twice
     return email_delivered, webhook_delivered
@@ -4159,6 +4326,13 @@ def save_profile_state(username, profile):
 # Returns whether at least one friend or profile field is enabled for the shared timer
 def friends_check_enabled():
     return TRACK_FOLLOWINGS or TRACK_FOLLOWERS or TRACK_BIO or TRACK_DISPLAY_NAME
+
+
+# Returns how long to wait after consecutive failed friend and profile checks, doubling the retry interval up to the regular check cadence so a lasting Last.fm outage is not polled at the confirmation pace
+def friends_error_retry_seconds(error_streak):
+    ceiling = max(FRIENDS_CHECK_INTERVAL, FRIENDS_RETRY_INTERVAL)
+    # The shift is bounded because the streak grows for as long as the outage lasts
+    return min(FRIENDS_RETRY_INTERVAL * (2 ** min(max(error_streak - 1, 0), 16)), ceiling)
 
 
 # Persists the exact states produced by one successful shared timer check
@@ -6022,11 +6196,14 @@ def decode(password: str) -> str:
         raise ValueError("decrypted bytes are not valid UTF-8") from exc
 
 
-# Clears error delivery state only after the required requests for a monitoring check succeed
+# Clears error delivery state only after the required requests for a monitoring check succeed, telling every
+# channel that heard about the outage that it is over
 def complete_monitor_check(username, outage, error_alert, recovery_hint_tracker):
     outage_lasted = outage.recovered()
     if outage_lasted is not None:
-        print_outage_recovery(username, outage_lasted)
+        print_outage_recovery(username, outage_lasted, close=False)
+        send_outage_recovery_alert(username, outage_lasted, error_alert)
+        print_cur_ts("Timestamp:\t\t\t")
     error_alert.reset()
     recovery_hint_tracker.reset()
 
@@ -6181,8 +6358,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             m_subject = f"Last.fm user {username} is active: '{artist} - {track}'"
             lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
             lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, artist, track)
-            lyrics_section_text = f"\n{lyrics_urls_text}\n\n" if lyrics_urls_text else "\n\n"
-            lyrics_section_html = f"<br>{lyrics_urls_html}<br><br>" if lyrics_urls_html else "<br><br>"
+            lyrics_section_text = f"\n\n{lyrics_urls_text}\n\n" if lyrics_urls_text else "\n\n"
+            lyrics_section_html = f"<br><br>{lyrics_urls_html}<br><br>" if lyrics_urls_html else "<br><br>"
             # Determine URLs for "Track:" and secondary URL field based on configuration
             if USE_LASTFM_URL_IN_LAST_PLAYED:
                 track_url = lastfm_url
@@ -6194,14 +6371,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 secondary_url_label = "Last.fm URL"
             music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url)
             music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, artist, track, secondary_url, secondary_url_label)
-            music_section_text = f"\n\n{music_urls_text}\n" if music_urls_text else "\n"
+            music_section_text = f"\n\n{music_urls_text}" if music_urls_text else ""
             music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else ""
-            # When both music and lyrics are empty, use single <br><br> instead of <br> + <br><br>
-            if not music_urls_html and not lyrics_urls_html:
-                music_section_html = "<br><br>"
-                lyrics_section_html = ""
-            elif not music_urls_html:
-                music_section_html = "<br>"
             album_line = f"Album: {album}" if album else ""
             m_body = f"Track: {artist} - {track}{duration_m_body}\n{album_line}{music_section_text}{lyrics_section_text}Last activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
             album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
@@ -6345,8 +6516,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             m_subject = f"Last.fm user {username} is active: '{artist} - {track}'"
             lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
             lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, artist, track)
-            lyrics_section_text = f"\n{lyrics_urls_text}\n\n" if lyrics_urls_text else "\n\n"
-            lyrics_section_html = f"<br>{lyrics_urls_html}<br><br>" if lyrics_urls_html else "<br><br>"
+            lyrics_section_text = f"\n\n{lyrics_urls_text}\n\n" if lyrics_urls_text else "\n\n"
+            lyrics_section_html = f"<br><br>{lyrics_urls_html}<br><br>" if lyrics_urls_html else "<br><br>"
             # Determine URLs for "Track:" and secondary URL field based on configuration
             if USE_LASTFM_URL_IN_LAST_PLAYED:
                 track_url = lastfm_url
@@ -6358,14 +6529,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 secondary_url_label = "Last.fm URL"
             music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url)
             music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, artist, track, secondary_url, secondary_url_label)
-            music_section_text = f"\n\n{music_urls_text}\n" if music_urls_text else "\n"
+            music_section_text = f"\n\n{music_urls_text}" if music_urls_text else ""
             music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else ""
-            # When both music and lyrics are empty, use single <br><br> instead of <br> + <br><br>
-            if not music_urls_html and not lyrics_urls_html:
-                music_section_html = "<br><br>"
-                lyrics_section_html = ""
-            elif not music_urls_html:
-                music_section_html = "<br>"
             album_line = f"Album: {album}" if album else ""
             m_body = f"Track: {artist} - {track}{duration_m_body}\n{album_line}{music_section_text}{lyrics_section_text}Last activity: {get_date_from_ts(lf_active_ts_last)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
             album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
@@ -6503,6 +6668,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
     friends_pending_changes = None
     friends_streak = 0
     friends_failure_announced = False
+    friends_error_alert_ts = 0
     # A blip of one check is confirmed by the next before it is printed, since the checks here are seconds apart
     outage = OutageReporter(confirm_checks=1 if VERBOSE_MODE else 2)
     recovery_hint_tracker = RecoveryHintTracker()
@@ -6540,7 +6706,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         changes, current_states = check_friends_changes(username, TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME, save_state=False, raise_on_error=True)
 
                         # Reset error streak on any successful check
-                        if friends_streak < 0:
+                        recovered_from_errors = friends_streak < 0
+                        if recovered_from_errors:
                             failed_checks = abs(friends_streak)
                             debug_print("Friends/profile check", outcome="OK", failures=failed_checks)
                             # A recovery is only news if the failure was, so an outage nobody saw clears in silence
@@ -6548,6 +6715,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                                 print(f"* Friends/profile check is available again after {failed_checks} failed check{'' if failed_checks == 1 else 's'}, so friend and profile change alerts can fire again")
                                 print_cur_ts("Timestamp:\t\t\t")
                             friends_streak = 0
+                            friends_error_alert_ts = 0
 
                         if changes:
                             if changes == friends_pending_changes:
@@ -6593,7 +6761,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
                             friends_streak = 0
                             friends_pending_changes = None
-                            if not is_retry:
+                            # A check that ended an outage is a full read of the current state, so it restarts the regular
+                            # cadence instead of leaving a stale timestamp that makes the next iteration check again at once
+                            if not is_retry or recovered_from_errors:
                                 friends_check_last_ts = current_ts
                                 # Refresh baseline timestamps with the exact data fetched by this check
                                 save_friends_check_states(username, current_states)
@@ -6601,6 +6771,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         if friends_streak == 0:
                             # Start measuring error streak (negative values)
                             friends_streak = -1
+                            friends_error_alert_ts = 0
                             # Nothing else is printed until the streak reaches its alert threshold, which reads as a check that stopped running
                             friends_failure_announced = verbose_degraded_feature("Friends/profile check", "friend and profile change alerts", e)
                         elif friends_streak < 0:
@@ -6620,15 +6791,17 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         else:
                             # Error streak logic (negative streak)
                             current_error_streak = abs(friends_streak)
-
-                            # Throttling: Alert on threshold, then every 10 attempts
-                            if current_error_streak == FRIENDS_CHANGE_COUNTER or (current_error_streak > FRIENDS_CHANGE_COUNTER and (current_error_streak - FRIENDS_CHANGE_COUNTER) % 10 == 0):
-                                friends_failure_announced = True
-                                print_recovery_error(e, detail=f"Cannot confirm the friend and profile state (attempt {current_error_streak}): {e}")
-                                print_cur_ts("Timestamp:\t\t\t")
-
-                            retry_interval = FRIENDS_RETRY_INTERVAL
+                            retry_interval = friends_error_retry_seconds(current_error_streak)
                             friends_next_check_ts = current_ts + retry_interval
+
+                            # The first report waits for the confirmation threshold, then a lasting outage reminds on a clock
+                            # rather than on every Nth attempt, whose spacing changes with the backoff
+                            reminder_due = friends_error_alert_ts == 0 or (current_ts - friends_error_alert_ts) >= OUTAGE_REMINDER_SECONDS
+                            if current_error_streak >= FRIENDS_CHANGE_COUNTER and reminder_due:
+                                friends_failure_announced = True
+                                friends_error_alert_ts = current_ts
+                                print_recovery_error(e, detail=f"Cannot confirm the friend and profile state (attempt {current_error_streak}): {e}", retry_note=f"next check in {display_time(retry_interval)}")
+                                print_cur_ts("Timestamp:\t\t\t")
 
             debug_print("Now playing and recent tracks fetch", user=username)
             recent_tracks = lastfm_get_recent_tracks(username, network, 1)
@@ -6663,6 +6836,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     duplicate_entries = False
                     i = 0
                     added_entries_list = ""
+                    added_entries_list_html = ""
+                    added_entries_list_mbody = ""
+                    added_entries_list_mbody_html = ""
                     try:
                         recent_tracks_while_offline = lastfm_get_recent_tracks(username, network, 100)
                         for previous, t, _nxt in previous_and_next(reversed(recent_tracks_while_offline)):
@@ -6671,6 +6847,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                                     continue
                                 print(f'{datetime.fromtimestamp(int(t.timestamp)).strftime("%d %b %Y, %H:%M:%S")}\t{calendar.day_abbr[(datetime.fromtimestamp(int(t.timestamp))).weekday()]}\t{t.track}')
                                 added_entries_list += f'{datetime.fromtimestamp(int(t.timestamp)).strftime("%d %b %Y, %H:%M:%S")}, {calendar.day_abbr[(datetime.fromtimestamp(int(t.timestamp))).weekday()]}: {t.track}\n'
+                                added_entries_list_html += f'{html_text(datetime.fromtimestamp(int(t.timestamp)).strftime("%d %b %Y, %H:%M:%S"))}, {html_text(calendar.day_abbr[(datetime.fromtimestamp(int(t.timestamp))).weekday()])}: <b>{html_text(str(t.track))}</b><br>'
                                 i += 1
                                 if previous:
                                     if previous.timestamp == t.timestamp:
@@ -6684,9 +6861,11 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     if i > 0 and (OFFLINE_ENTRIES_NOTIFICATION or webhook_event_enabled("offline_entries")):
                         if added_entries_list:
                             added_entries_list_mbody = f"\n\n{added_entries_list}"
+                            added_entries_list_mbody_html = f"<br><br>{added_entries_list_html}"
                         m_subject = f"Last.fm user {username}: new entries showed up while user was offline"
                         m_body = f"New last.fm entries showed up while user was offline!{added_entries_list_mbody}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                        send_notification_channels("offline_entries", m_subject, m_body, email_enabled=OFFLINE_ENTRIES_NOTIFICATION, subject_short=f"{username}: {i} new offline scrobbles", body_short=added_entries_list.strip())
+                        m_body_html = html_email_body(f"New last.fm entries showed up while user was offline!{added_entries_list_mbody_html}{get_cur_ts('<br>Timestamp: ')}")
+                        send_notification_channels("offline_entries", m_subject, m_body, m_body_html, email_enabled=OFFLINE_ENTRIES_NOTIFICATION, subject_short=f"{username}: {i} new offline scrobbles", body_short=added_entries_list.strip())
 
                     print_cur_ts("\nTimestamp:\t\t\t")
                     alive_since = int(time.time())
@@ -6919,8 +7098,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
 
                         # Only show timespan if user had previous activity
                         if lf_active_ts_last > 0:
-                            print(f"\n*** User got ACTIVE after being offline for {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))}{last_track_start_changed}")
-                            print(f"*** Last activity:\t\t{get_date_from_ts(lf_active_ts_last)}")
+                            print(f"\n*** User got ACTIVE after being offline for {calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_last))} ({get_date_from_ts(lf_active_ts_last)}){last_track_start_changed}")
                         else:
                             print(f"\n*** User got ACTIVE (first track)")
                         # We signal that the currently played song is the same as previous one before user got inactive, so might be continuation of previous track
@@ -6949,8 +7127,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             last_activity_html = ""
                         lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
                         lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, artist, track)
-                        lyrics_section_text = f"\n{lyrics_urls_text}" if lyrics_urls_text else ""
-                        lyrics_section_html = f"<br>{lyrics_urls_html}" if lyrics_urls_html else ""
+                        lyrics_section_text = f"\n\n{lyrics_urls_text}" if lyrics_urls_text else ""
+                        lyrics_section_html = f"<br><br>{lyrics_urls_html}" if lyrics_urls_html else ""
                         # Determine URLs for "Track:" and secondary URL field based on configuration
                         if USE_LASTFM_URL_IN_LAST_PLAYED:
                             track_url = lastfm_url
@@ -6962,14 +7140,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             secondary_url_label = "Last.fm URL"
                         music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url)
                         music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, artist, track, secondary_url, secondary_url_label)
-                        music_section_text = f"\n\n{music_urls_text}\n" if music_urls_text else "\n"
+                        music_section_text = f"\n\n{music_urls_text}" if music_urls_text else ""
                         music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else ""
-                        # When both music and lyrics are empty, don't add <br><br> here because there's a hardcoded <br><br> after played_for_m_body_html
-                        if not music_urls_html and not lyrics_urls_html:
-                            music_section_html = ""
-                            lyrics_section_html = ""
-                        elif not music_urls_html:
-                            music_section_html = "<br>"
                         album_line = f"Album: {album}" if album else ""
                         album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
                         album_html_line = f"<br>Album: {album_html}" if album else ""
@@ -6977,20 +7149,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             m_body = f"Track: {artist} - {track}{duration_m_body}\n{album_line}{music_section_text}{lyrics_section_text}{played_for_m_body}\n\nFriend got active after being offline for {offline_timespan}{last_track_start_changed}{private_mode}{last_activity_text}{get_cur_ts(nl_ch + 'Timestamp: ')}"
                             m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}{album_html_line}{music_section_html}{lyrics_section_html}{played_for_m_body_html}<br><br>Friend got active after being offline for <b>{offline_timespan}</b>{last_track_start_changed_html}{private_mode_html}{last_activity_html}{get_cur_ts('<br>Timestamp: ')}</body></html>"
                         else:
-                            lyrics_section_text_fresh = f"\n{lyrics_urls_text}\n" if lyrics_urls_text else "\n"
-                            lyrics_section_html_fresh = f"<br>{lyrics_urls_html}<br>" if lyrics_urls_html else "<br>"
-                            # When both music and lyrics are empty, check if played_for_m_body_html is empty
-                            # If it's empty, we need <br><br> before timestamp; if not, it already starts with <br><br>
-                            if not music_urls_html and not lyrics_urls_html:
-                                if not played_for_m_body_html:
-                                    music_section_html = "<br><br>"
-                                else:
-                                    music_section_html = ""
-                                lyrics_section_html_fresh = ""
-                            elif not music_urls_html:
-                                music_section_html = "<br>"
-                            m_body = f"Track: {artist} - {track}{duration_m_body}\n{album_line}{music_section_text}{lyrics_section_text_fresh}{played_for_m_body}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}{album_html_line}{music_section_html}{lyrics_section_html_fresh}{played_for_m_body_html}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                            m_body = f"Track: {artist} - {track}{duration_m_body}\n{album_line}{music_section_text}{lyrics_section_text}{played_for_m_body}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                            m_body_html = f"<html><head></head><body>Track: <b><a href=\"{track_url}\">{escape(artist)} - {escape(track)}</a></b>{duration_m_body_html}{album_html_line}{music_section_html}{lyrics_section_html}{played_for_m_body_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
 
                         if ACTIVE_NOTIFICATION or webhook_event_enabled("active"):
                             email_delivered, webhook_delivered = send_notification_channels("active", m_subject, m_body, m_body_html, email_enabled=ACTIVE_NOTIFICATION, subject_short=f"{username} is active", body_short="\n".join(value for value in (track, artist, album) if value))
@@ -7001,8 +7161,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     email_song_enabled = ((TRACK_NOTIFICATION and track_matched) or SONG_NOTIFICATION) and not email_sent
                     webhook_song_enabled = ((webhook_event_enabled("track") and track_matched) or webhook_event_enabled("song")) and not webhook_sent
                     if email_song_enabled or webhook_song_enabled:
-                        timespan_str = f"\n\nSongs Played: {listened_songs}"
-                        timespan_str_html = f"<br><br>Songs Played: {listened_songs}"
+                        timespan_str = f"\n\nSongs played: {listened_songs}"
+                        timespan_str_html = f"<br><br>Songs played: {listened_songs}"
                         # Only show timespan if lf_active_ts_start is properly set (not 0) and different from current track start
                         if lf_active_ts_start > 0 and lf_track_ts_start != lf_active_ts_start:
                             timespan = calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_start))
@@ -7022,16 +7182,10 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             secondary_url_label = "Last.fm URL"
                         music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url)
                         music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, artist, track, secondary_url, secondary_url_label)
-                        music_section_text = f"\n\n{music_urls_text}\n" if music_urls_text else "\n"
+                        music_section_text = f"\n\n{music_urls_text}" if music_urls_text else ""
                         music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else ""
-                        lyrics_section_text = f"\n{lyrics_urls_text}" if lyrics_urls_text else ""
-                        lyrics_section_html = f"<br>{lyrics_urls_html}" if lyrics_urls_html else ""
-                        # When both music and lyrics are empty, don't add <br><br> here because there's a hardcoded <br><br> in get_cur_ts
-                        if not music_urls_html and not lyrics_urls_html:
-                            music_section_html = ""
-                            lyrics_section_html = ""
-                        elif not music_urls_html:
-                            music_section_html = "<br>"
+                        lyrics_section_text = f"\n\n{lyrics_urls_text}" if lyrics_urls_text else ""
+                        lyrics_section_html = f"<br><br>{lyrics_urls_html}" if lyrics_urls_html else ""
                         album_line = f"Album: {album}" if album else ""
                         album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
                         album_html_line = f"<br>Album: {album_html}" if album else ""
@@ -7047,8 +7201,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                     loop_email_enabled = song_on_loop == SONG_ON_LOOP_VALUE and SONG_ON_LOOP_NOTIFICATION and not email_sent
                     loop_webhook_enabled = song_on_loop == SONG_ON_LOOP_VALUE and webhook_event_enabled("loop") and not webhook_sent
                     if loop_email_enabled or loop_webhook_enabled:
-                        timespan_str = f"\n\nSongs Played: {listened_songs}"
-                        timespan_str_html = f"<br><br>Songs Played: {listened_songs}"
+                        timespan_str = f"\n\nSongs played: {listened_songs}"
+                        timespan_str_html = f"<br><br>Songs played: {listened_songs}"
                         # Only show timespan if lf_active_ts_start is properly set (not 0) and different from current track start
                         if lf_active_ts_start > 0 and lf_track_ts_start != lf_active_ts_start:
                             timespan = calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_start))
@@ -7068,16 +7222,10 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             secondary_url_label = "Last.fm URL"
                         music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url)
                         music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, artist, track, secondary_url, secondary_url_label)
-                        music_section_text = f"\n\n{music_urls_text}\n" if music_urls_text else "\n"
+                        music_section_text = f"\n\n{music_urls_text}" if music_urls_text else ""
                         music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else ""
-                        lyrics_section_text = f"\n{lyrics_urls_text}" if lyrics_urls_text else ""
-                        lyrics_section_html = f"<br>{lyrics_urls_html}" if lyrics_urls_html else ""
-                        # When both music and lyrics are empty, don't add <br><br> here because there's a hardcoded <br><br> before "User plays song on LOOP"
-                        if not music_urls_html and not lyrics_urls_html:
-                            music_section_html = ""
-                            lyrics_section_html = ""
-                        elif not music_urls_html:
-                            music_section_html = "<br>"
+                        lyrics_section_text = f"\n\n{lyrics_urls_text}" if lyrics_urls_text else ""
+                        lyrics_section_html = f"<br><br>{lyrics_urls_html}" if lyrics_urls_html else ""
                         album_line = f"Album: {album}" if album else ""
                         album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
                         album_html_line = f"<br>Album: {album_html}" if album else ""
@@ -7118,13 +7266,13 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         print_recovery_error(e, context="file.unwritable")
                     if listened_songs:
                         if lf_track_ts_start == lf_active_ts_start:
-                            print(f"\nSongs Played:\t\t\t{listened_songs}")
+                            print(f"\nSongs played:\t\t\t{listened_songs}")
                         else:
                             # Only show timespan if lf_active_ts_start is properly set (not 0) and different from current track start
                             if lf_active_ts_start > 0 and lf_track_ts_start != lf_active_ts_start:
-                                print(f"\nSongs Played:\t\t\t{listened_songs} ({calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_start))})")
+                                print(f"\nSongs played:\t\t\t{listened_songs} ({calculate_timespan(int(lf_track_ts_start), int(lf_active_ts_start))})")
                             else:
-                                print(f"\nSongs Played:\t\t\t{listened_songs}")
+                                print(f"\nSongs played:\t\t\t{listened_songs}")
 
                     print_cur_ts("\nTimestamp:\t\t\t")
                 # Track has not changed, user is online and continues playing
@@ -7296,8 +7444,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                         spotify_search_url, apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, lastfm_url, lastfm_album_url = get_spotify_apple_genius_search_urls(str(artist), str(track), album, network)
                         lyrics_urls_text = format_lyrics_urls_email_text(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url)
                         lyrics_urls_html = format_lyrics_urls_email_html(genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, artist, track)
-                        lyrics_section_text = f"\n{lyrics_urls_text}\n\n" if lyrics_urls_text else "\n\n"
-                        lyrics_section_html = f"<br>{lyrics_urls_html}<br><br>" if lyrics_urls_html else "<br><br>"
+                        lyrics_section_text = f"\n\n{lyrics_urls_text}\n\n" if lyrics_urls_text else "\n\n"
+                        lyrics_section_html = f"<br><br>{lyrics_urls_html}<br><br>" if lyrics_urls_html else "<br><br>"
                         # Determine URLs for "Last played:" and secondary URL field based on configuration
                         if USE_LASTFM_URL_IN_LAST_PLAYED:
                             last_played_url = lastfm_url
@@ -7309,14 +7457,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                             secondary_url_label = "Last.fm URL"
                         music_urls_text = format_music_urls_email_text(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url)
                         music_urls_html = format_music_urls_email_html(spotify_search_url, lastfm_url, lastfm_album_url, apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, artist, track, secondary_url, secondary_url_label)
-                        music_section_text = f"\n\n{music_urls_text}\n" if music_urls_text else "\n"
+                        music_section_text = f"\n\n{music_urls_text}" if music_urls_text else ""
                         music_section_html = f"<br><br>{music_urls_html}" if music_urls_html else ""
-                        # When both music and lyrics are empty, use single <br><br> instead of <br> + <br><br>
-                        if not music_urls_html and not lyrics_urls_html:
-                            music_section_html = "<br><br>"
-                            lyrics_section_html = ""
-                        elif not music_urls_html:
-                            music_section_html = "<br>"
                         album_line = f"Album: {album}" if album else ""
                         album_html = f'<a href="{lastfm_album_url}">{escape(album)}</a>' if (ENABLE_LASTFM_ALBUM_URL and lastfm_album_url) else escape(album)
                         album_html_line = f"<br>Album: {album_html}" if album else ""
@@ -7370,7 +7512,7 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                 print_outage_change(username, advice)
                 reported = True
             elif outage_outcome == "reminder":
-                print_outage_liveness(username, advice, outage.since, outage.failures)
+                print_outage_liveness(username, advice, outage.since, outage.failures, close=False)
                 alive_since = int(time.time())
 
             # Attempted on every failing check rather than only on the report, so a channel that failed is tried again
@@ -7379,20 +7521,24 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             now = int(time.time())
             error_email_enabled = alert_due and error_alert.pending("email", ERROR_NOTIFICATION, now)
             error_webhook_enabled = alert_due and error_alert.pending("webhook", webhook_event_enabled("error"), now)
+            error_alert.remember(advice)
             if error_email_enabled or error_webhook_enabled:
-                if advice.code == "auth.api_key_invalid":
-                    m_subject = f"Last.fm API key error! (user: {username})"
-                else:
-                    m_subject = f"Last.fm monitoring error (user: {username})"
-                m_body = f"{advice.summary}{nl_ch}{nl_ch}To fix: {advice.fix}{nl_ch}{nl_ch}Last.fm Monitor will retry in {display_time(sleep_interval)}.{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                m_body_html = f"<html><head></head><body>{html_text(advice.summary)}<br><br>To fix: {html_text(advice.fix)}<br><br>Last.fm Monitor will retry in {escape(display_time(sleep_interval))}.{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
-                email_delivered, webhook_delivered = send_notification_channels("error", m_subject, m_body, m_body_html, email_enabled=error_email_enabled, webhook_enabled=error_webhook_enabled)
+                m_subject = recovery_alert_subject(advice, username)
+                m_body = recovery_alert_body(advice, sleep_interval, outage.failures, outage.since)
+                m_body_html = recovery_alert_body_html(advice, sleep_interval, outage.failures, outage.since)
+                webhook_body = recovery_alert_body(advice, sleep_interval, outage.failures, outage.since, timestamp=False)
+                webhook_body_html = recovery_alert_body_html(advice, sleep_interval, outage.failures, outage.since, timestamp=False)
+                email_delivered, webhook_delivered = send_notification_channels("error", m_subject, m_body, m_body_html, email_enabled=error_email_enabled, webhook_enabled=error_webhook_enabled, webhook_body=webhook_body, webhook_body_html=webhook_body_html)
                 error_alert.record("email", error_email_enabled, email_delivered, now)
                 error_alert.record("webhook", error_webhook_enabled, webhook_delivered, now)
                 reported = True
 
-            # One trailer for whatever this check printed, since a retry can be the only thing on the screen
-            if reported:
+            # One trailer for whatever this check printed, since a retry can be the only thing on the screen.
+            # The reminder closes last so the delivery lines it carries stay inside the report rather than
+            # landing under the separator that ended it
+            if outage_outcome == "reminder":
+                print_cur_ts("Liveness check, timestamp:\t")
+            elif reported:
                 print_cur_ts("Timestamp:\t\t\t")
 
         if lf_user_online:
@@ -7760,7 +7906,7 @@ def doctor_check_configuration(config_path=None, env_path=None, target_value=Non
         checks.append(make_doctor_check("Configuration", "PASS", "No configuration file selected", "Using built-in defaults and command-line overrides"))
     if env_path and str(env_path) in DOTENV_STARTUP_ERRORS:
         detail, fix = DOTENV_STARTUP_ERRORS[str(env_path)]
-        advice = make_recovery_advice("file.unreadable", detail, recovery_fix_with_guide(f"{fix}, then run Doctor again", CONFIG_GUIDE_URL), False)
+        advice = make_recovery_advice("file.unreadable", detail, recovery_fix_with_guide(f"{fix}, then run Doctor again", SECRETS_GUIDE_URL), False)
         checks.append(make_doctor_check("Configuration", "FAIL", "Dotenv file could not be loaded", detail, advice))
     elif env_path and os.path.isfile(str(env_path)):
         checks.append(make_doctor_check("Configuration", "PASS", "Dotenv file loaded", f"Path: {env_path}"))
@@ -8079,11 +8225,23 @@ def full_startup_summary_enabled():
 # Rows that detail the channel named right above them, indented so the block reads as one setting with its details
 STARTUP_SUMMARY_NESTED_LABELS = ("Email transport", "Email recipient", "Email images", "Webhook provider", "ntfy images")
 
+# The column every summary value starts in, which also lets the colouriser recognize a summary row
+STARTUP_SUMMARY_VALUE_COLUMN = 32
+
+# Matches a summary row by that padded label column, since no log line puts a value there
+_STARTUP_SUMMARY_ROW_RE = re.compile(r"^\*(?: {1,3})[^:\s][^:]*: {2,}(?=\S)")
+
+
+# Returns whether a line is a startup summary row rather than ordinary output
+def is_startup_summary_row(line):
+    match = _STARTUP_SUMMARY_ROW_RE.match(line)
+    return bool(match) and match.end() == STARTUP_SUMMARY_VALUE_COLUMN
+
 
 # Formats one summary row with an aligned value column, wrapping only the rollups that grow long
 def format_startup_summary_row(row):
     indent = "  " if row.label in STARTUP_SUMMARY_NESTED_LABELS else ""
-    prefix = f"* {indent}{(row.label + ':'):<{30 - len(indent)}}"
+    prefix = f"* {indent}{(row.label + ':'):<{STARTUP_SUMMARY_VALUE_COLUMN - 2 - len(indent)}}"
     if row.label in ("Notifications (email)", "Notifications (webhook)"):
         return textwrap.fill(str(row.value), width=100, initial_indent=prefix, subsequent_indent=" " * len(prefix), break_long_words=False, break_on_hyphens=False) + "\n"
     return f"{prefix}{row.value}\n"
@@ -8126,16 +8284,31 @@ def mask_email_address(address):
     return f"{masked}@{domain}"
 
 
+# Returns whether a mail server is set rather than left empty or still holding the placeholder the sample configuration ships
+def smtp_server_configured() -> bool:
+    return doctor_value_is_set(SMTP_HOST) and bool(SMTP_PORT)
+
+
+# Returns whether an email alert has both a server to send through and an address to reach
+def email_channel_configured() -> bool:
+    return smtp_server_configured() and doctor_value_is_set(RECEIVER_EMAIL)
+
+
+# Returns whether a webhook alert has a destination to post to
+def webhook_channel_configured() -> bool:
+    return bool(normalized_webhook_provider()) and doctor_value_is_set(WEBHOOK_URL)
+
+
 # Names the mail server this run would use, leaving out the account that signs in to it
 def startup_email_transport():
-    if not SMTP_HOST or not SMTP_PORT:
+    if not smtp_server_configured():
         return "Not configured"
     return f"{SMTP_HOST}:{SMTP_PORT} ({'STARTTLS' if SMTP_SSL else 'TLS off'})"
 
 
 # Names the configured webhook service and whether the channel is switched on, which are two separate settings
 def startup_webhook_provider():
-    if not normalized_webhook_provider() or not str(WEBHOOK_URL or "").strip():
+    if not webhook_channel_configured():
         return "Not configured"
     return f"{webhook_provider_display_name()} ({'enabled' if WEBHOOK_ENABLED else 'disabled'})"
 
@@ -8149,10 +8322,10 @@ def build_startup_summary(target=None, config_path=None, env_path=None, log_path
         StartupSummaryRow("Target", str(target) if target else "None", concise=True),
         StartupSummaryRow("Polling intervals", f"[offline: {display_time(LASTFM_CHECK_INTERVAL)}] [active: {display_time(LASTFM_ACTIVE_CHECK_INTERVAL)}]", concise=True),
         StartupSummaryRow("Inactivity timer", display_time(LASTFM_INACTIVITY_CHECK), concise=True),
-        StartupSummaryRow("Notifications (email)", _startup_notification_state(_startup_email_notification_categories()), concise=True),
+        StartupSummaryRow("Notifications (email)", _startup_notification_state(_startup_email_notification_categories(), email_channel_configured()), concise=True),
         StartupSummaryRow("Email transport", startup_email_transport()),
-        StartupSummaryRow("Email recipient", mask_email_address(RECEIVER_EMAIL) if RECEIVER_EMAIL else "Not configured"),
-        StartupSummaryRow("Notifications (webhook)", _startup_notification_state(_startup_webhook_notification_categories()), concise=True),
+        StartupSummaryRow("Email recipient", mask_email_address(RECEIVER_EMAIL) if doctor_value_is_set(RECEIVER_EMAIL) else "Not configured"),
+        StartupSummaryRow("Notifications (webhook)", _startup_notification_state(_startup_webhook_notification_categories(), webhook_channel_configured()), concise=True),
         StartupSummaryRow("Webhook provider", startup_webhook_provider()),
         StartupSummaryRow("Delivery confirmations", str(DELIVERY_CONFIRMATIONS)),
         StartupSummaryRow("Output", str(log_path) if logging_enabled else "Terminal only (logging disabled)", concise=True, full=False),
@@ -9881,7 +10054,7 @@ def main():
         action="store_false",
         dest="notify_errors",
         default=None,
-        help="Disable email on errors (e.g. invalid API key)"
+        help="Disable email on errors and the recovery alert that follows"
     )
     notify.add_argument(
         "--send-test-email",
@@ -9906,8 +10079,8 @@ def main():
     webhook_notify.add_argument("--webhook-followings", dest="webhook_followings", action="store_true", default=None, help="Send a webhook alert when followings change")
     webhook_notify.add_argument("--webhook-profile", dest="webhook_profile", action="store_true", default=None, help="Send a webhook alert when a tracked bio or display name changes")
     webhook_error_toggle = webhook_notify.add_mutually_exclusive_group()
-    webhook_error_toggle.add_argument("--webhook-errors", dest="webhook_errors", action="store_true", default=None, help="Send webhook alerts when monitoring has a problem")
-    webhook_error_toggle.add_argument("--no-webhook-error-notify", dest="webhook_errors", action="store_false", default=None, help="Disable webhook alerts when monitoring has a problem")
+    webhook_error_toggle.add_argument("--webhook-errors", dest="webhook_errors", action="store_true", default=None, help="Send webhook alerts when monitoring has a problem and the recovery alert that follows")
+    webhook_error_toggle.add_argument("--no-webhook-error-notify", dest="webhook_errors", action="store_false", default=None, help="Disable webhook alerts when monitoring has a problem and the recovery alert that follows")
     webhook_notify.add_argument("--send-test-webhook", dest="send_test_webhook", action="store_true", help="Send one test webhook without starting monitoring")
 
     # Intervals & Timers
@@ -10200,7 +10373,7 @@ def main():
             detail, fix = dotenv_load_problem(env_path, exc)
             DOTENV_STARTUP_ERRORS[str(env_path)] = (detail, fix)
             if not args.doctor:
-                print_recovery_advice(make_recovery_advice("file.unreadable", detail, recovery_fix_with_guide(fix, CONFIG_GUIDE_URL), False))
+                print_recovery_advice(make_recovery_advice("file.unreadable", detail, recovery_fix_with_guide(fix, SECRETS_GUIDE_URL), False))
                 if not command_reports_configuration(args):
                     sys.exit(1)
 

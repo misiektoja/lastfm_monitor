@@ -45,13 +45,15 @@ Every failure is reported in the same three-part shape: what went wrong, a `To f
 | --- | --- | --- |
 | Last.fm error 17, `Login: User required to be logged in` | The monitored user hides recent listening information | [User Privacy Settings](setup-and-first-run.md#user-privacy-settings) |
 | `Last.fm rejected the configured API key or shared secret` | The credentials are missing, wrong or suspended | Run `lastfm_monitor --set-lastfm-credentials` |
-| `The Last.fm API is temporarily unavailable` | A Last.fm outage or a rate limit | Nothing to do, the tool keeps retrying |
+| `Last.fm is rate limiting requests` | Too many requests in a short time | Nothing to do, the tool waits and retries |
 | Track durations are missing | The optional Spotify credentials are not saved | [Spotify Metadata Backends](configuration.md#spotify-metadata-backends) |
 | The run stops naming a file and a line number | A configuration line is not a plain `SETTING = value` assignment | [Configuration File](configuration.md#configuration-file) |
 | Emails never arrive | Incomplete SMTP settings | [SMTP Settings](configuration.md#smtp-settings) then run `lastfm_monitor --send-test-email` |
 | Webhook alerts never arrive | Provider mismatch or a stale destination | [Webhook Settings](configuration.md#webhook-settings) then run `lastfm_monitor --send-test-webhook` |
 | `lastfm_monitor` is not found after installation | The shell has not picked up the new command | [Installation and Command Problems](#installation-and-command-problems) |
 | Escape sequences such as `[36m` printed as text or no colour at all | The terminal cannot display ANSI colour or colour was switched off | [Terminal Colours Look Wrong](#terminal-colours-look-wrong) |
+| `Last.fm did not answer in time`, `Last.fm could not be reached` or `Last.fm is temporarily unavailable` | A network problem between this machine and Last.fm or a Last.fm outage | [Connection Problems](#connection-problems) |
+| `This process ran out of file descriptors` | The operating system limit on open files was reached | [Too Many Open Files](#too-many-open-files) |
 
 A continuing outage produces a `* Monitoring degraded` reminder once an hour, even when the [liveness reminder](usage.md#liveness-reminder) is switched off. `* Monitoring recovered` marks recovery. Use `--verbose` to see the first failed check.
 
@@ -64,7 +66,27 @@ Follower, following and profile checks use `curl_cffi` with Chrome impersonation
 
 If browser verification persists, [update the installation and its dependencies](installation.md#upgrading) and check the same Last.fm profile in a browser. Opening it there does not share browser cookies with the monitor. Keep the saved tracking files. Changing API credentials does not fix a website challenge.
 
-Temporary website errors, including HTTP 600, also use bounded retries. Use `--debug` to see the HTTP status and retry attempts. The normal friend and profile check interval defaults to 90 minutes. Explicit saved intervals still apply.
+Temporary website errors, including HTTP 600, also use bounded retries. Last.fm answers these pages with statuses outside the standard range, so a lasting failure is reported as `Last.fm answered the website request with a nonstandard HTTP 600`. Use `--debug` to see the HTTP status and retry attempts. The normal friend and profile check interval defaults to 90 minutes. Explicit saved intervals still apply.
+
+When the errors keep coming, the wait between checks doubles after each failed attempt until it reaches `FRIENDS_CHECK_INTERVAL`, so an outage lasting hours is not requested at the `FRIENDS_RETRY_INTERVAL` pace. The failure is reported once, then at most once an hour, and a recovery line is printed when the checks work again. Music monitoring is unaffected, since it uses the Last.fm API rather than the website.
+
+<a id="connection-problems"></a>
+## Connection Problems
+
+`Last.fm did not answer in time` and `Last.fm could not be reached` mean a check got no answer from Last.fm. `Last.fm is temporarily unavailable` means Last.fm answered with a server error. The report names the interval after which the check is retried, so a short outage needs no action. A failure that lasts produces the hourly `Monitoring degraded` reminder and `Monitoring recovered` when it clears.
+
+If the failure continues, check the internet connection, DNS and any firewall or proxy between this machine and Last.fm. A rejected server certificate also reports `Last.fm could not be reached`, see [TLS Verification](configuration.md#tls-verification). A server error that lasts is a Last.fm outage, so wait for it to end.
+
+To confirm that Last.fm is reachable from this machine, run:
+
+```sh
+lastfm_monitor --doctor <lastfm_username>
+```
+
+<a id="too-many-open-files"></a>
+## Too Many Open Files
+
+`This process ran out of file descriptors` means the operating system limit on open files was reached. It is a local limit and not a Last.fm problem. Raise it with `ulimit -n 4096` in the shell that starts the tool or set `LimitNOFILE=` in the systemd unit, then restart the tool.
 
 <a id="terminal-colours-look-wrong"></a>
 ## Terminal Colours Look Wrong

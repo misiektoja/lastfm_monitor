@@ -143,6 +143,30 @@ class TestLastfmStatusMapping:
         assert monitor.classify_recovery_error(pylast.WSError(None, "not a code", "Invalid API key")).code == "auth.api_key_invalid"
 
 
+class TestAStatusNamedInTheMessage:
+    # The scraped website pages report their status as text, so a rule reading only the exception left every one of them unknown
+    @pytest.mark.parametrize("message, expected", [
+        ("Failed to fetch from Last.fm after 3 attempts: HTTP 600 from Last.fm", "lastfm.website_error"),
+        ("Failed to fetch from Last.fm after 3 attempts: HTTP 503 from Last.fm", "lastfm.unavailable"),
+        ("Failed to fetch from Last.fm after 3 attempts: HTTP 429 from Last.fm", "lastfm.rate_limited"),
+        ("Connection to the API failed with HTTP code 500", "lastfm.unavailable"),
+    ])
+    def test_a_status_written_into_the_message_is_classified(self, message, expected):
+        assert monitor.classify_recovery_error(RuntimeError(message)).code == expected
+
+    @pytest.mark.parametrize("message", ["cannot open http://example.invalid/500/page", "saved 600 scrobbles", "error 503 in the page body"])
+    def test_only_a_number_following_the_word_http_is_read_as_a_status(self, message):
+        assert monitor.recovery_text_http_status(message) is None
+
+    # Music monitoring reads the API rather than the website, so a scraping failure must not be reported as an API outage
+    def test_a_website_failure_names_the_feature_it_affects(self):
+        advice = monitor.classify_recovery_error(RuntimeError("Failed to fetch from Last.fm after 3 attempts: HTTP 600 from Last.fm"))
+        assert "600" in advice.summary
+        assert "music monitoring is unaffected" in advice.fix
+        assert monitor.WEBSITE_TRACKING_GUIDE_URL in advice.fix
+        assert advice.retryable is True
+
+
 class TestRetryability:
     @pytest.mark.parametrize("error, retryable", [
         (pylast.WSError(None, "29", "Rate limit exceeded"), True),
@@ -529,6 +553,45 @@ def test_the_guide_guard_still_inspects_the_source():
 
     assert len(inspected) > 40
     assert all(any(marker in summary for _, summary in bare) for marker in GUIDELESS_ADVICE), "an allowlisted summary stopped matching a builder"
+
+
+# The failures a lasting outage is made of, each with the summary and fix it pins
+TRANSIENT_FAILURES = [
+    (RuntimeError("the read operation timed out"), "network.timeout", "Last.fm did not answer in time", "Usually nothing to do, the tool retries on its own. If it continues, check network access, DNS, firewall and proxy settings"),
+    (RuntimeError("connection refused"), "network.unavailable", "Last.fm could not be reached", "Usually nothing to do, the tool retries on its own. If it continues, check network access, DNS, firewall and proxy settings"),
+    (pylast.WSError(None, 503, "Connection to the API failed with HTTP code 503"), "lastfm.unavailable", "Last.fm is temporarily unavailable", "Usually nothing to do, the tool retries on its own. If it continues, wait for Last.fm to recover"),
+]
+
+
+# A failure the monitor retries on its own says so first, then names the page that covers connection problems
+@pytest.mark.parametrize("error, code, summary, fix", TRANSIENT_FAILURES)
+def test_a_transient_failure_reports_the_retry_and_the_connection_guide(error, code, summary, fix):
+    advice = monitor.classify_recovery_error(error)
+
+    assert (advice.code, advice.summary, advice.retryable) == (code, summary, True)
+    assert advice.fix == f"{fix}\nGuide: {monitor.CONNECTION_GUIDE_URL}"
+
+
+# The logging levels explain the output modes and Doctor checks a run that has not started, so neither answers a network blip
+@pytest.mark.parametrize("error, code, summary, fix", TRANSIENT_FAILURES)
+def test_a_transient_failure_does_not_prescribe_diagnostics(error, code, summary, fix):
+    advice = monitor.classify_recovery_error(error)
+
+    assert "--doctor" not in advice.fix
+    assert "--debug" not in advice.fix
+    assert monitor.DIAGNOSTICS_GUIDE_URL not in advice.fix
+
+
+# A limit or a file on this machine is not a Last.fm failure, so each names the page that covers it
+@pytest.mark.parametrize("error, context, detail, guide_url", [
+    (OSError(24, "Too many open files"), "runtime", "", monitor.DESCRIPTOR_LIMIT_GUIDE_URL),
+    (None, "file", "Cannot load the last status from 'x.json'", monitor.CONFIG_GUIDE_URL),
+    (None, "file.unwritable", "the directory is read-only", monitor.CONFIG_GUIDE_URL),
+])
+def test_a_local_failure_names_the_page_that_covers_it(error, context, detail, guide_url):
+    advice = monitor.classify_recovery_error(error, context=context, detail=detail)
+
+    assert advice.fix.splitlines()[-1] == f"Guide: {guide_url}"
 
 
 # Verifies a local file descriptor limit is reported as itself rather than as a failure of the call that hit it

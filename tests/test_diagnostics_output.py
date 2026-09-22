@@ -708,7 +708,7 @@ class FakeNetwork:
 
 
 # Runs the real monitoring loop on a fake clock advanced by each patched sleep and returns what it printed
-def drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles, check_interval=30, liveness=0, fail_after=None, fail_recover_after=None, error_factory=None, friends_fail_after=None, friends_recover_after=None, friends_failing_calls=None, stub_notifications=True):
+def drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles, check_interval=30, liveness=0, fail_after=None, fail_recover_after=None, error_factory=None, friends_fail_after=None, friends_recover_after=None, friends_failing_calls=None, friends_check_interval=None, friends_call_log=None, stub_notifications=True):
     if friends_failing_calls is not None:
         friends_fail_after = 0
 
@@ -722,7 +722,7 @@ def drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles, check_interval=30,
     monkeypatch.setattr(monitor, "LIVENESS_CHECK_INTERVAL", liveness)
     monkeypatch.setattr(monitor, "LIVENESS_REMINDER_SECONDS", liveness)
     monkeypatch.setattr(monitor, "TRACK_FOLLOWINGS", friends_fail_after is not None)
-    monkeypatch.setattr(monitor, "FRIENDS_CHECK_INTERVAL", check_interval if friends_fail_after is not None else 0)
+    monkeypatch.setattr(monitor, "FRIENDS_CHECK_INTERVAL", (friends_check_interval or check_interval) if friends_fail_after is not None else 0)
     monkeypatch.setattr(monitor, "FRIENDS_RETRY_INTERVAL", check_interval)
     monkeypatch.setattr(monitor, "FRIENDS_CHANGE_COUNTER", 3)
     monkeypatch.setattr(monitor, "TRACK_FOLLOWERS", False)
@@ -742,6 +742,8 @@ def drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles, check_interval=30,
 
         def failing_friends(_username):
             call = next(friends_calls)
+            if friends_call_log is not None:
+                friends_call_log.append(clock.now)
             if friends_failing_calls is not None:
                 failing = call in friends_failing_calls
             else:
@@ -820,7 +822,7 @@ class TestARunThatIsRetryingSaysSo:
         transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=4, liveness=3600, fail_after=2)
         reports = [line for line in transcript.splitlines() if line.startswith("* Error:")]
         assert len(reports) == 1
-        assert reports[0] == "* Error: The Last.fm API is temporarily unavailable (retrying in 30 seconds)"
+        assert reports[0] == "* Error: Last.fm is temporarily unavailable (retrying in 30 seconds)"
 
     # A report with no timestamp under it cannot be placed in the run it came from
     def test_the_report_carries_the_fix_and_the_timestamp_trailer(self, monkeypatch, tmp_path, capsys):
@@ -962,6 +964,59 @@ class TestARecoveryIsNewsOnlyIfTheFailureWas:
         assert "available again" not in transcript
 
 
+class TestALastingFriendsOutageBacksOff:
+    def test_the_backoff_doubles_from_the_retry_interval_and_stops_at_the_check_interval(self, monkeypatch):
+        monkeypatch.setattr(monitor, "FRIENDS_RETRY_INTERVAL", 90)
+        monkeypatch.setattr(monitor, "FRIENDS_CHECK_INTERVAL", 10800)
+        assert [monitor.friends_error_retry_seconds(streak) for streak in range(1, 9)] == [90, 180, 360, 720, 1440, 2880, 5760, 10800]
+        # An outage lasting for days must not shift the interval into an astronomical number
+        assert monitor.friends_error_retry_seconds(400) == 10800
+
+    # A retry interval above the check interval throttles the confirmation phase on purpose, so the error path keeps it as the floor
+    def test_a_retry_interval_above_the_check_interval_is_kept(self, monkeypatch):
+        monkeypatch.setattr(monitor, "FRIENDS_RETRY_INTERVAL", 300)
+        monkeypatch.setattr(monitor, "FRIENDS_CHECK_INTERVAL", 60)
+        assert monitor.friends_error_retry_seconds(1) == 300
+        assert monitor.friends_error_retry_seconds(9) == 300
+
+    # A scraped page that Last.fm refuses for hours used to be re-requested at the confirmation pace, which is
+    # hundreds of requests against a host already turning them away, whatever the configured check interval said
+    def test_a_lasting_outage_stops_polling_at_the_confirmation_pace(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        calls = []
+        drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=190, friends_fail_after=1, friends_check_interval=1200, friends_call_log=calls)
+        # The first entry is the startup baseline, which succeeds before the outage starts
+        gaps = [later - earlier for earlier, later in zip(calls[1:], calls[2:])]
+        assert gaps == [30, 60, 120, 240, 480, 960, 1200, 1200]
+
+    # Counting attempts spaced the repeats evenly only while the retry interval was fixed
+    def test_the_repeat_report_follows_the_clock_not_the_attempt_count(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        monkeypatch.setattr(monitor, "OUTAGE_REMINDER_SECONDS", 1800)
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=190, friends_fail_after=1, friends_check_interval=1200)
+        reports = [line for line in transcript.splitlines() if line.startswith("* Error:")]
+        assert len(reports) == 3
+        assert reports[0].endswith("(next check in 2 minutes)")
+
+    # Nothing before the threshold is printed, so a short outage still passes unseen
+    def test_the_first_report_still_waits_for_the_confirmation_threshold(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=8, friends_fail_after=1, friends_recover_after=3)
+        assert "* Error:" not in transcript
+
+    # The recovering check left the regular timestamp stale, so the next iteration ran a second full check at once
+    def test_a_recovery_restarts_the_regular_cadence(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "VERBOSE_MODE", False)
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        calls = []
+        drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=100, friends_fail_after=1, friends_recover_after=2, friends_check_interval=1200, friends_call_log=calls)
+        assert calls[2] - calls[1] == 30
+        assert calls[3] - calls[2] == 1200
+
+
 # Raises one failure category for the first run of failing checks and another one after it
 def two_category_failure(call):
     return RuntimeError("HTTP code 500 from Last.fm") if call <= 8 else RuntimeError("The read operation timed out")
@@ -972,7 +1027,7 @@ def recording_channels(monkeypatch, outcomes):
     calls = []
 
     def record(notification_type, subject, body, body_html="", email_enabled=False, webhook_enabled=None, **kwargs):
-        calls.append({"type": notification_type, "subject": subject, "body": body, "body_html": body_html, "email": bool(email_enabled), "webhook": bool(webhook_enabled)})
+        calls.append({"type": notification_type, "subject": subject, "body": body, "body_html": body_html, "email": bool(email_enabled), "webhook": bool(webhook_enabled), "webhook_body": kwargs.get("webhook_body", "")})
         return outcomes[min(len(calls), len(outcomes)) - 1]
 
     monkeypatch.setattr(monitor, "ERROR_NOTIFICATION", True)
@@ -1011,7 +1066,7 @@ class TestAMonitoringFailureAlertsBothChannels:
         calls = recording_channels(monkeypatch, [(True, True)])
         drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=3, liveness=3600, fail_after=2, error_factory=lambda call: RuntimeError("Invalid API key - You must be granted a valid key by last.fm"), stub_notifications=False)
         errors = [call for call in calls if call["type"] == "error"]
-        assert [call["subject"] for call in errors] == ["Last.fm API key error! (user: someuser)"]
+        assert [call["subject"] for call in errors] == ["Last.fm Monitor error: Last.fm rejected the configured API key or shared secret (user: someuser)"]
 
     # An outage used to reach the webhook but not email, which only heard about a rejected API key
     def test_any_failure_alerts_both_channels_once(self, monkeypatch, tmp_path, capsys):
@@ -1019,8 +1074,8 @@ class TestAMonitoringFailureAlertsBothChannels:
         drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=8, liveness=3600, fail_after=2, stub_notifications=False)
         errors = [call for call in calls if call["type"] == "error"]
         assert [(call["email"], call["webhook"]) for call in errors] == [(True, True)]
-        assert errors[0]["subject"] == "Last.fm monitoring error (user: someuser)"
-        assert "The Last.fm API is temporarily unavailable" in errors[0]["body"]
+        assert errors[0]["subject"] == "Last.fm Monitor error: Last.fm is temporarily unavailable (user: someuser)"
+        assert errors[0]["body"].startswith("Last.fm is temporarily unavailable")
         assert "To fix:" in errors[0]["body"]
 
     # The guide link sits under the fix in both bodies, since HTML renders the newline the fix carries as a space
@@ -1033,7 +1088,9 @@ class TestAMonitoringFailureAlertsBothChannels:
         fix_index = next(index for index, line in enumerate(text_lines) if line.startswith("To fix: "))
         assert text_lines[fix_index + 1].startswith("Guide: https://")
         assert html_lines[fix_index] == escape(text_lines[fix_index])
-        assert html_lines[fix_index + 1] == text_lines[fix_index + 1]
+        # The HTML body links the guide it prints, so the line carries the same address as an anchor
+        guide_url = text_lines[fix_index + 1].removeprefix("Guide: ")
+        assert html_lines[fix_index + 1] == f'Guide: <a href="{guide_url}">{guide_url}</a>'
 
     # One outage earns one alert per channel, however the failure changes, until a check succeeds again
     def test_a_changed_failure_category_does_not_earn_a_second_alert(self, monkeypatch, tmp_path, capsys):
@@ -1072,7 +1129,114 @@ class TestAMonitoringFailureAlertsBothChannels:
         monkeypatch.setattr(monitor, "lastfm_get_recent_tracks", twice_failing_fetch)
         drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=13, liveness=3600, stub_notifications=False)
         errors = [call for call in calls if call["type"] == "error"]
-        assert [(call["email"], call["webhook"]) for call in errors] == [(True, True), (True, True)]
+        failures = [call for call in errors if call["subject"].startswith("Last.fm Monitor error:")]
+        assert [(call["email"], call["webhook"]) for call in failures] == [(True, True), (True, True)]
+        # The first outage ended before the second one began, so its recovery alert sits between the two failures
+        assert [call["subject"].startswith("Last.fm Monitor recovered:") for call in errors] == [False, True, False]
+
+    # A webhook shows its own delivery time, so its text leaves out the timestamp line only the email needs
+    def test_the_webhook_body_leaves_out_the_timestamp(self, monkeypatch, tmp_path, capsys):
+        calls = recording_channels(monkeypatch, [(True, True)])
+        drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=8, liveness=3600, fail_after=2, stub_notifications=False)
+        error = next(call for call in calls if call["type"] == "error")
+
+        assert "\n\nTimestamp: " in error["body"]
+        assert error["webhook_body"] == error["body"].split("\n\nTimestamp: ")[0]
+
+
+class TestTheFailureAlertText:
+    # Every monitoring failure shares one subject, so an inbox fed by several monitors sorts them by tool
+    def test_the_subject_names_the_tool_the_failure_and_the_target(self):
+        advice = monitor.classify_recovery_error(RuntimeError("connection refused"))
+
+        assert monitor.recovery_alert_subject(advice, "someuser") == "Last.fm Monitor error: Last.fm could not be reached (user: someuser)"
+
+    # A first failure has nothing to count yet, so the alert names only what to do and when the next check runs
+    def test_a_first_failure_lists_the_fix_and_the_next_retry(self, monkeypatch):
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        advice = monitor.classify_recovery_error(RuntimeError("connection refused"))
+
+        body = monitor.recovery_alert_body(advice, 30, timestamp=False)
+
+        assert body == f"Last.fm could not be reached\n\nTo fix: {advice.fix}\n\nNext retry in: 30 seconds"
+
+    # A lasting outage says how many checks it has cost and since when, which is what tells a blip from a real failure
+    def test_a_lasting_outage_counts_the_failed_checks_and_names_its_start(self, monkeypatch):
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        advice = monitor.classify_recovery_error(RuntimeError("connection refused"))
+
+        body = monitor.recovery_alert_body(advice, 30, failed_checks=5, failing_since=1700000000, timestamp=False)
+
+        assert body.endswith(f"\n\nFailed checks in a row: 5\nFailing since: {monitor.get_date_from_ts(1700000000)}\nNext retry in: 30 seconds")
+        assert "Technical detail:" not in body
+
+    # The technical cause belongs in a bug report rather than in every alert, so only debug mode carries it
+    def test_the_technical_detail_rides_only_with_debug_mode(self, monkeypatch):
+        advice = monitor.classify_recovery_error(RuntimeError("connection refused"))
+        monkeypatch.setattr(monitor, "DEBUG_MODE", True)
+
+        assert monitor.recovery_alert_body(advice, 30, timestamp=False).endswith(f"\n\nTechnical detail: {advice.detail}")
+
+    # The email closes with a timestamp, the webhook is stamped by the service that receives it
+    def test_only_the_email_body_carries_the_timestamp(self, monkeypatch):
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        advice = monitor.classify_recovery_error(RuntimeError("connection refused"))
+
+        assert "Timestamp: " in monitor.recovery_alert_body(advice, 30)
+        assert "Timestamp: " not in monitor.recovery_alert_body(advice, 30, timestamp=False)
+        assert "Timestamp: " in monitor.recovery_alert_body_html(advice, 30)
+        assert "Timestamp: " not in monitor.recovery_alert_body_html(advice, 30, timestamp=False)
+
+    # The HTML alert says the same as the plain one, with the summary in bold and the guide link still on its own line
+    def test_the_html_body_says_the_same_as_the_plain_one(self, monkeypatch):
+        monkeypatch.setattr(monitor, "DEBUG_MODE", False)
+        advice = monitor.classify_recovery_error(RuntimeError("connection refused"))
+        arguments = (advice, 30, 5, 1700000000)
+
+        plain = monitor.recovery_alert_body(*arguments, timestamp=False).split("\n\n")
+        html = monitor.recovery_alert_body_html(*arguments, timestamp=False).removeprefix("<html><head></head><body>").removesuffix("</body></html>").split("<br><br>")
+
+        assert html[0] == f"<b>{escape(plain[0])}</b>"
+        assert html[1:] == [monitor.html_bold_outage_fields(monitor.html_autolink_urls(monitor.html_text(paragraph))) for paragraph in plain[1:]]
+
+
+class TestTheRecoveryAlert:
+    # The alert that closes an outage names how long it lasted and what it was
+    def test_the_subject_and_body_name_the_outage_they_close(self):
+        assert monitor.recovered_alert_subject("someuser", 300) == "Last.fm Monitor recovered: monitoring someuser resumed after 5 minutes"
+        assert monitor.recovered_alert_body("someuser", 300, "Last.fm could not be reached", timestamp=False) == "Monitoring recovered for someuser after 5 minutes.\n\nThe failure was: Last.fm could not be reached"
+
+    # A channel that never heard about the outage has nothing to be told is over
+    def test_nothing_is_sent_when_no_failure_alert_went_out(self, monkeypatch):
+        calls = recording_channels(monkeypatch, [(True, True)])
+
+        assert monitor.send_outage_recovery_alert("someuser", 300, monitor.ErrorAlertState()) is False
+        assert calls == []
+
+    # Only the channel that carried the failure carries its recovery, so nobody hears the end of an outage they missed
+    def test_only_the_channel_that_carried_the_failure_carries_the_recovery(self, monkeypatch):
+        calls = recording_channels(monkeypatch, [(True, True)])
+        state = monitor.ErrorAlertState()
+        state.remember(monitor.classify_recovery_error(RuntimeError("connection refused")))
+        state.record("webhook", True, True, 0)
+
+        assert monitor.send_outage_recovery_alert("someuser", 300, state) is True
+        assert [(call["email"], call["webhook"]) for call in calls] == [(False, True)]
+        assert calls[0]["subject"] == "Last.fm Monitor recovered: monitoring someuser resumed after 5 minutes"
+        assert "The failure was: Last.fm could not be reached" in calls[0]["body"]
+        assert calls[0]["webhook_body"] == calls[0]["body"].split("\n\nTimestamp: ")[0]
+
+    # Switching a channel off between the failure and the recovery stops the recovery alert with it
+    def test_a_channel_switched_off_gets_no_recovery_alert(self, monkeypatch):
+        calls = recording_channels(monkeypatch, [(True, True)])
+        state = monitor.ErrorAlertState()
+        state.record("email", True, True, 0)
+        state.record("webhook", True, True, 0)
+        monkeypatch.setattr(monitor, "ERROR_NOTIFICATION", False)
+        monkeypatch.setattr(monitor, "WEBHOOK_ERROR_NOTIFICATION", False)
+
+        assert monitor.send_outage_recovery_alert("someuser", 300, state) is False
+        assert calls == []
 
 
 class TestALastingFailureIsReportedOnce:
@@ -1091,7 +1255,7 @@ class TestALastingFailureIsReportedOnce:
         transcript = drive_quiet_cycles(monkeypatch, capsys, tmp_path, cycles=20, liveness=3600, fail_after=2).splitlines()
         degraded = [number for number, line in enumerate(transcript) if line.startswith("* Monitoring degraded for someuser.")]
         assert len(degraded) == 4
-        assert "The Last.fm API is temporarily unavailable since " in transcript[degraded[0]]
+        assert "Last.fm is temporarily unavailable since " in transcript[degraded[0]]
         assert transcript[degraded[0]].endswith(" failed checks")
         assert transcript[degraded[0] + 1].startswith("Liveness check, timestamp:")
 
@@ -1172,7 +1336,7 @@ class TestALastingFailureIsReportedOnce:
         reports = [line for line in transcript if line.startswith("* Error:")]
         changes = [number for number, line in enumerate(transcript) if line.startswith("* Monitoring failure changed for someuser. ")]
         assert len(reports) == 1 and "temporarily unavailable" in reports[0]
-        assert len(changes) == 1 and transcript[changes[0]].endswith("The Last.fm request timed out")
+        assert len(changes) == 1 and transcript[changes[0]].endswith("Last.fm did not answer in time")
         assert transcript[changes[0] + 1].startswith("Timestamp:")
         assert "\n".join(transcript).count("To fix: ") == 1
 

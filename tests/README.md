@@ -45,6 +45,7 @@ python -m pytest -m e2e
 | `test_compact_commands.py` | Literal short command prefixes, real help output and dependency hints |
 | `test_release_safety.py` | Credential preservation, private error rendering, runtime timing validation and saved-state compatibility |
 | `test_partial_outage.py` | Real pylast history success followed by a now-playing outage and recovery |
+| `test_missed_alert_recovery.py` | The recovery alert sent to a channel that never received the failure alert |
 | `test_recovery_safety.py` | Real dotenv reloads, setup backups, oversized counts and provider-error privacy |
 | `test_secret_policy.py` | Shared credential priority, reload ownership and setup destination conflicts |
 | `test_smtp_error_privacy.py` | Short and escaped passwords in rejected SMTP sign-ins through commands, setup, Doctor and delivery |
@@ -59,6 +60,7 @@ python -m pytest -m e2e
 | `test_entry_points.py` | The welcome screen an empty command prints, the missing-target block, the argument combinations a secret command refuses and when the screen is cleared |
 | `test_diagnostics_output.py` | The verbose and debug printers: the grammar every debug line follows, what each mode covers and what neither prints when both are off |
 | `test_delivery_tests.py` | The messages both test commands send, the doctor's delivery tests and what each does with nothing to send |
+| `test_email_html.py` | HTML notification bodies: escaping, the Discord markdown form and the plain-text match |
 | `test_documentation.py` | Documentation site structure, its internal links, the links pointing into it from the repository and the guide constants the module prints |
 | `test_install_method_commands.py` | Install detection and the commands the tool prints, including the paths each one carries |
 | `test_help_screen.py` | The argument groups, the shared one-shot help sentences and the examples block |
