@@ -748,9 +748,9 @@ class TestWhereDoctorSitsInStartup:
     def test_the_command_line_overrides_are_applied_before_doctor(self):
         assert SOURCE.index("apply_cli_overrides(args)") < SOURCE.index("if args.doctor:")
 
-    # A channel main would switch off before doctor ran would be reported as merely disabled
+    # Doctor runs before the monitoring startup summary is rendered
     def test_the_unusable_webhook_gate_runs_after_doctor(self):
-        assert SOURCE.index("if args.doctor:") < SOURCE.index("if WEBHOOK_ENABLED and not validate_webhook_url():\n        verbose_print(\"Webhook notifications are off")
+        assert SOURCE.index("if args.doctor:") < SOURCE.index("emit_startup_summary(build_startup_summary(")
 
     def test_the_flag_is_advertised(self):
         assert '"--doctor",' in SOURCE

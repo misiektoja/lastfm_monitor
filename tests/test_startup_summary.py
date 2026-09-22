@@ -97,10 +97,13 @@ def row_named(rows, label):
     return next(row for row in rows if row.label == label)
 
 
-# Gives both channels a destination, since the rollup rows report a channel with none as off whatever its alert types are
+# Gives both channels valid local settings for startup rows
 def configure_channel_destinations(monkeypatch):
     monkeypatch.setattr(monitor, "SMTP_HOST", "smtp.example.com")
     monkeypatch.setattr(monitor, "SMTP_PORT", 587)
+    monkeypatch.setattr(monitor, "SMTP_USER", "sender@example.com")
+    monkeypatch.setattr(monitor, "SMTP_PASSWORD", "test-password")
+    monkeypatch.setattr(monitor, "SENDER_EMAIL", "sender@example.com")
     monkeypatch.setattr(monitor, "RECEIVER_EMAIL", "michal.k@example.com")
     monkeypatch.setattr(monitor, "WEBHOOK_PROVIDER", "discord")
     monkeypatch.setattr(monitor, "WEBHOOK_URL", "https://discord.com/api/webhooks/123/private-token")

@@ -169,9 +169,9 @@ class TestTheOrderTheLayersRunIn:
     def test_the_grouped_trace_runs_after_the_arguments_are_applied(self):
         assert SOURCE.index('record_secret_source("SP_CLIENT_SECRET", "command line")') < SOURCE.index("grouped_secrets = secrets_by_source()")
 
-    # An unusable setting switches its feature off once, rather than failing at every alert for the rest of the run
+    # Webhook CLI settings are applied before the startup summary checks channel readiness
     def test_the_webhook_channel_is_gated_where_the_configuration_is_settled(self):
-        assert SOURCE.index("apply_webhook_cli_overrides(args, parser)") < SOURCE.index("if WEBHOOK_ENABLED and not validate_webhook_url():\n        verbose_print(\"Webhook notifications are off") < SOURCE.index("if not check_internet():")
+        assert SOURCE.index("apply_webhook_cli_overrides(args, parser)") < SOURCE.index("emit_startup_summary(build_startup_summary(")
 
     # Applying the flags only before the config load lets the config erase them, only after hides its own failures
     def test_the_explicit_diagnostic_flags_are_applied_on_both_sides_of_the_config_load(self):
