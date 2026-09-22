@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.8
+v2.8.1
 
 Tool implementing real-time tracking of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -19,7 +19,7 @@ curl_cffi (optional, only for friends and profile tracking)
 colorama (optional, only for coloured output in the classic Windows Command Prompt)
 """
 
-VERSION = "2.8"
+VERSION = "2.8.1"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -2680,12 +2680,14 @@ def missed_alert_body_html(target, lasted, summary, timestamp=True):
 # Sends the recovery alert on each channel whose failure alert was delivered and tells a channel that never got one
 # about the whole outage at once, returning whether anything was attempted
 def send_outage_recovery_alert(target, lasted, error_alert):
-    email_enabled = bool(error_alert.email_sent and ERROR_NOTIFICATION)
-    webhook_enabled = bool(error_alert.webhook_sent and webhook_event_enabled("error"))
+    email_ready = bool(ERROR_NOTIFICATION and email_settings_problem() is None)
+    webhook_ready = bool(webhook_event_enabled("error") and webhook_settings_problem() is None)
+    email_enabled = bool(error_alert.email_sent and email_ready)
+    webhook_enabled = bool(error_alert.webhook_sent and webhook_ready)
     # A channel whose failure alert never got through hears about the outage and its end together, rather than
     # nothing at all, which is what a channel blocked for the length of the outage would otherwise receive
-    email_missed = error_alert.missed("email", ERROR_NOTIFICATION)
-    webhook_missed = error_alert.missed("webhook", webhook_event_enabled("error"))
+    email_missed = error_alert.missed("email", email_ready)
+    webhook_missed = error_alert.missed("webhook", webhook_ready)
     if not (email_enabled or webhook_enabled or email_missed or webhook_missed):
         return False
     lasted = max(1, int(lasted))
@@ -2820,11 +2822,11 @@ def _startup_webhook_notification_categories() -> List[str]:
     return _selected_webhook_notification_categories() if WEBHOOK_ENABLED else []
 
 
-# Rolls one channel's enabled alerts into the state its summary row reports, which is off while the channel has no destination
-def _startup_notification_state(categories: List[str], configured: bool) -> str:
+# Rolls selected alerts into the startup state and names an unusable local setting
+def _startup_notification_state(categories: List[str], problem: Optional[str]) -> str:
     if not categories:
         return "Off"
-    return "On (" + ", ".join(categories) + ")" if configured else "Off (not configured)"
+    return f"Unavailable ({problem})" if problem else "On (" + ", ".join(categories) + ")"
 
 
 # Returns whether one configured webhook alert is enabled independently of email settings
@@ -3201,8 +3203,9 @@ def send_webhook(title: str, description: str, notification_type: str = "song", 
 
 # Sends one alert through the enabled email and webhook channels
 def send_notification_channels(notification_type: str, subject: str, body: str, body_html: str = "", email_enabled: bool = False, webhook_enabled: Optional[bool] = None, subject_short: str = "", body_short: str = "", webhook_body: str = "", webhook_body_html: str = "") -> Tuple[bool, bool]:
-    email_attempted = bool(email_enabled)
-    webhook_attempted = webhook_event_enabled(notification_type) if webhook_enabled is None else bool(webhook_enabled)
+    email_attempted = bool(email_enabled and email_settings_problem() is None)
+    webhook_selected = webhook_event_enabled(notification_type) if webhook_enabled is None else bool(webhook_enabled)
+    webhook_attempted = bool(webhook_selected and WEBHOOK_ENABLED and webhook_settings_problem() is None)
     email_delivered = False
     webhook_delivered = False
     if email_attempted:
@@ -7519,8 +7522,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             # A failure the tool can retry away is alerted once the outage has lasted ERROR_ALERT_AFTER_SECONDS, one it cannot at once
             alert_due = not advice.retryable or int(time.time()) - outage.since >= ERROR_ALERT_AFTER_SECONDS
             now = int(time.time())
-            error_email_enabled = alert_due and error_alert.pending("email", ERROR_NOTIFICATION, now)
-            error_webhook_enabled = alert_due and error_alert.pending("webhook", webhook_event_enabled("error"), now)
+            error_email_enabled = alert_due and error_alert.pending("email", ERROR_NOTIFICATION and email_settings_problem() is None, now)
+            error_webhook_enabled = alert_due and error_alert.pending("webhook", webhook_event_enabled("error") and webhook_settings_problem() is None, now)
             error_alert.remember(advice)
             if error_email_enabled or error_webhook_enabled:
                 m_subject = recovery_alert_subject(advice, username)
@@ -8294,9 +8297,46 @@ def email_channel_configured() -> bool:
     return smtp_server_configured() and doctor_value_is_set(RECEIVER_EMAIL)
 
 
+# Names the first local SMTP setting that prevents automatic email delivery
+def email_settings_problem():
+    unset = [name for name in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD") if not doctor_value_is_set(globals()[name])]
+    if unset:
+        return f"{join_setting_names(unset, 'or')} is empty or still set to its placeholder"
+    fqdn_re = re.compile(r'(?=^.{4,253}$)(^((?!-)[a-zA-Z0-9-]{1,63}(?<!-)\.)+[a-zA-Z]{2,63}\.?$)')
+    email_re = re.compile(r'[^@]+@[^@]+\.[^@]+')
+    try:
+        ipaddress.ip_address(str(SMTP_HOST))
+    except ValueError:
+        if not fqdn_re.search(str(SMTP_HOST)):
+            return "SMTP_HOST is not a valid IP address or hostname"
+    try:
+        port = int(SMTP_PORT)
+        if isinstance(SMTP_PORT, bool) or not 1 <= port <= 65535:
+            raise ValueError
+    except (TypeError, ValueError, OverflowError):
+        return "SMTP_PORT is not a port number between 1 and 65535"
+    if not email_re.search(str(SENDER_EMAIL)) or not email_re.search(str(RECEIVER_EMAIL)):
+        return "SENDER_EMAIL or RECEIVER_EMAIL is not an email address"
+    return None
+
+
 # Returns whether a webhook alert has a destination to post to
 def webhook_channel_configured() -> bool:
     return bool(normalized_webhook_provider()) and doctor_value_is_set(WEBHOOK_URL)
+
+
+# Names the first local webhook setting that prevents automatic alert delivery
+def webhook_settings_problem():
+    if not doctor_value_is_set(WEBHOOK_URL):
+        return "WEBHOOK_URL is empty or still set to its placeholder"
+    if not validate_webhook_url():
+        return "WEBHOOK_URL must contain a complete HTTPS link"
+    provider = normalized_webhook_provider()
+    if not provider:
+        return "WEBHOOK_PROVIDER must be discord or ntfy"
+    if validate_webhook_customization(provider) is not None:
+        return "Webhook customization is invalid"
+    return validate_webhook_headers(provider)
 
 
 # Names the mail server this run would use, leaving out the account that signs in to it
@@ -8318,14 +8358,16 @@ def build_startup_summary(target=None, config_path=None, env_path=None, log_path
     grouped_secrets = dict(secrets_by_source())
     logging_enabled = bool(log_path) and not DISABLE_LOGGING
     tracked_fields = (TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME)
+    email_problem = email_settings_problem() if _startup_email_notification_categories() else None
+    webhook_problem = webhook_settings_problem() if _startup_webhook_notification_categories() else None
     return [
         StartupSummaryRow("Target", str(target) if target else "None", concise=True),
         StartupSummaryRow("Polling intervals", f"[offline: {display_time(LASTFM_CHECK_INTERVAL)}] [active: {display_time(LASTFM_ACTIVE_CHECK_INTERVAL)}]", concise=True),
         StartupSummaryRow("Inactivity timer", display_time(LASTFM_INACTIVITY_CHECK), concise=True),
-        StartupSummaryRow("Notifications (email)", _startup_notification_state(_startup_email_notification_categories(), email_channel_configured()), concise=True),
+        StartupSummaryRow("Notifications (email)", _startup_notification_state(_startup_email_notification_categories(), email_problem), concise=True),
         StartupSummaryRow("Email transport", startup_email_transport()),
         StartupSummaryRow("Email recipient", mask_email_address(RECEIVER_EMAIL) if doctor_value_is_set(RECEIVER_EMAIL) else "Not configured"),
-        StartupSummaryRow("Notifications (webhook)", _startup_notification_state(_startup_webhook_notification_categories(), webhook_channel_configured()), concise=True),
+        StartupSummaryRow("Notifications (webhook)", _startup_notification_state(_startup_webhook_notification_categories(), webhook_problem), concise=True),
         StartupSummaryRow("Webhook provider", startup_webhook_provider()),
         StartupSummaryRow("Delivery confirmations", str(DELIVERY_CONFIRMATIONS)),
         StartupSummaryRow("Output", str(log_path) if logging_enabled else "Terminal only (logging disabled)", concise=True, full=False),
@@ -10436,10 +10478,6 @@ def main():
             sys.exit(1)
         sys.exit(0)
 
-    if WEBHOOK_ENABLED and not validate_webhook_url():
-        verbose_print("Webhook notifications are off because WEBHOOK_URL is not a complete HTTPS link")
-        WEBHOOK_ENABLED = False
-
     if not check_internet():
         sys.exit(1)
 
@@ -10536,7 +10574,7 @@ def main():
             print_recovery_error(RecoveryError(missing_dependency_advice("curl_cffi", "Friend and profile tracking cannot run")))
             sys.exit(1)
 
-    if SMTP_HOST.startswith("your_smtp_server_"):
+    if SMTP_HOST.startswith("your_smtp_server_") and set(_startup_email_notification_categories()) <= {"errors"}:
         ACTIVE_NOTIFICATION = False
         INACTIVE_NOTIFICATION = False
         SONG_NOTIFICATION = False
