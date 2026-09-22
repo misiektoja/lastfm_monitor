@@ -2,6 +2,14 @@
 
 This is a high-level summary of the most important changes.
 
+# Changes in 2.8.1 (TBD)
+
+Version **2.8.1** shows when selected email or webhook alerts cannot be delivered and skips automatic sends until local settings are fixed.
+
+**Bug fixes**:
+
+- **BUGFIX:** **Unavailable notification channels stay quiet** - The startup summary shows **`Unavailable`** and names the missing or invalid local setting. Automatic email and webhook alerts make no send attempt and print no delivery line until that channel is configured. **`Off`** means alerts are disabled for that channel
+
 # Changes in 2.8 (22 Sep 2026)
 
 Version **2.8** sends the **new offline scrobbles** alert as HTML like every other alert and lines the HTML email up with the plain text so both separate the music and lyrics links the same way. It gives every monitoring failure alert one subject and body, follows it with a recovery alert when the failure clears and points network failures at a new **Connection Problems** guide. It also slows the friend and profile checks down while Last.fm refuses the pages they read and names that failure instead of reporting it as an unrecognised error, keeps the alert a failing check sends inside that check's report on screen and reports an alert channel that still holds the values from the sample configuration as unset.
