@@ -278,15 +278,17 @@ class TestRendering:
         assert monitor.RecoveryError(monitor.classify_recovery_error(cause), cause).__cause__ is cause
 
 
-# A real Last.fm key is 32 hex characters, so anything at that length has to be replaced wherever it appears
+# Uses a full-length synthetic key to exercise diagnostic redaction
 FULL_LENGTH_KEY = "lastfmapikey00000000000000000000"
 
 
 class TestRedaction:
-    def test_a_configured_secret_is_replaced_in_every_field(self, monkeypatch):
+    # Redacts diagnostic fields while keeping generated instructions unchanged
+    def test_a_configured_secret_is_replaced_in_diagnostic_fields(self, monkeypatch):
         monkeypatch.setattr(monitor, "LASTFM_API_KEY", FULL_LENGTH_KEY)
-        advice = monitor.make_recovery_advice("unknown", f"Failed with {FULL_LENGTH_KEY}", f"Retry with {FULL_LENGTH_KEY}", True, f"Sent {FULL_LENGTH_KEY}")
-        assert FULL_LENGTH_KEY not in advice.summary + advice.fix + advice.detail
+        advice = monitor.make_recovery_advice("unknown", f"Failed with {FULL_LENGTH_KEY}", f"Run: lastfm_monitor --env-file {FULL_LENGTH_KEY}.env", True, f"Sent {FULL_LENGTH_KEY}")
+        assert FULL_LENGTH_KEY not in advice.summary + advice.detail
+        assert advice.fix == f"Run: lastfm_monitor --env-file {FULL_LENGTH_KEY}.env"
         assert advice.summary.count("<redacted>") == 1
 
     def test_a_classified_failure_does_not_echo_the_key_back(self, monkeypatch):
