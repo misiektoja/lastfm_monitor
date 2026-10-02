@@ -1552,7 +1552,7 @@ class TerminalStream(object):
 
     # Writes one sanitized and coloured message to the terminal
     def write(self, message):
-        self.terminal.write(apply_color_to_text(for_terminal(sanitize_terminal_text(sanitize_error_text(message)))))
+        self.terminal.write(apply_color_to_text(for_terminal(sanitize_console_text(message))))
         self.terminal.flush()
 
     # Writes one terminal-only message, which is every message this stream receives
@@ -1691,7 +1691,7 @@ class Logger(object):
         self.logfile = open(filename, "a", buffering=1, encoding="utf-8")
 
     def write(self, message):
-        safe_message = sanitize_terminal_text(sanitize_error_text(message))
+        safe_message = sanitize_console_text(message)
         self.terminal.write(apply_color_to_text(self._truncate_terminal(safe_message)))
         # Colour codes are stripped so the log file stays plain text whatever the terminal was shown
         self.logfile.write(normalize_log_separators(ANSI_ESCAPE_RE.sub("", safe_message).expandtabs(8)))
@@ -1700,12 +1700,12 @@ class Logger(object):
 
     # Writes one message only to the terminal, so a line that orients a reader at a screen stays out of the log
     def terminal_only(self, message):
-        self.terminal.write(apply_color_to_text(self._truncate_terminal(sanitize_terminal_text(sanitize_error_text(message)))))
+        self.terminal.write(apply_color_to_text(self._truncate_terminal(sanitize_console_text(message))))
         self.terminal.flush()
 
     # Writes one message only to the log, so the file keeps the full view whichever one the terminal was shown
     def log_only(self, message):
-        self.logfile.write(normalize_log_separators(ANSI_ESCAPE_RE.sub("", sanitize_terminal_text(sanitize_error_text(message))).expandtabs(8)))
+        self.logfile.write(normalize_log_separators(ANSI_ESCAPE_RE.sub("", sanitize_console_text(message)).expandtabs(8)))
         self.logfile.flush()
 
     def flush(self):
@@ -2203,6 +2203,19 @@ def known_secret_values() -> List[str]:
     return sorted(set(values) | set(_DELIVERY_SECRET_VALUES.get()), key=len, reverse=True)
 
 
+# Marks generated instructions combined only with already-redacted diagnostic fields
+class CommandOutput(str):
+    # Preserves the output marker when print converts its argument to text
+    def __str__(self) -> str:
+        return self
+
+
+# Keeps generated instructions intact while filtering ordinary output and terminal controls
+def sanitize_console_text(message):
+    filtered = message if isinstance(message, CommandOutput) else sanitize_error_text(message)
+    return sanitize_terminal_text(filtered)
+
+
 # Redacts configured private values and common credential shapes from diagnostic text
 def sanitize_error_text(value: Any, extra_secrets: Sequence[Any] = ()) -> str:
     text = str(value)
@@ -2258,11 +2271,12 @@ class RecoveryError(Exception):
         super().__init__(advice.summary)
 
 
-# Builds one piece of recovery advice, refusing any code outside the closed set and sanitizing every field
+# Builds validated recovery advice with private diagnostics and unchanged generated instructions
 def make_recovery_advice(code, summary, fix, retryable, detail=""):
     if code not in RECOVERY_CODES:
         raise ValueError(f"Unsupported recovery code: {code}")
-    return RecoveryAdvice(code, sanitize_error_text(summary), sanitize_error_text(fix), bool(retryable), sanitize_error_text(detail) if detail else "")
+    # Fixes contain generated instructions and non-secret arguments, so redaction must not rewrite them
+    return RecoveryAdvice(code, sanitize_error_text(summary), fix, bool(retryable), sanitize_error_text(detail) if detail else "")
 
 
 # Adds a directly relevant documentation link on its own line
@@ -2508,13 +2522,13 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
 
 # Renders one built advice as the shared Error, To fix and optional Technical detail block
 def render_recovery_advice(advice, debug=None, retry_note="", with_fix=True, label="Error"):
-    lines = [f"* {label}: {advice.summary}" + (f" ({retry_note})" if retry_note else "")]
+    lines = [f"* {sanitize_error_text(label)}: {sanitize_error_text(advice.summary)}" + (f" ({sanitize_error_text(retry_note)})" if retry_note else "")]
     if with_fix:
         lines.append(f"To fix: {advice.fix}")
         # A detail that only repeats the summary spends a line saying nothing
         if (DEBUG_MODE if debug is None else debug) and advice.detail and advice.detail != advice.summary:
             lines.append(f"Technical detail: {sanitize_error_text(advice.detail)}")
-    return "\n".join(lines)
+    return CommandOutput("\n".join(lines))
 
 
 # Classifies one failure and renders it through the shared recovery block
@@ -5813,7 +5827,7 @@ def run_set_smtp_password(env_file=None, interactive=None, input_func=None, getp
     if os.environ.get("SMTP_PASSWORD"):
         print("* SMTP_PASSWORD is exported in this environment and an export wins at startup, so the next run uses that value rather than the one just saved")
         print(colorize("info", "To fix: Unset the exported SMTP_PASSWORD to use the saved one"))
-    print(f"* Test it with: {render_command(['--send-test-email'], env_path=destination)}")
+    print(CommandOutput(f"* Test it with: {render_command(['--send-test-email'], env_path=destination)}"))
     return str(destination)
 
 
@@ -5850,7 +5864,7 @@ def run_set_webhook_url(env_file=None, interactive=None, input_func=None, getpas
         raise PrivateSettingsError(f"Could not save the webhook URL in '{destination}'. Check file permissions or choose another path with --env-file") from None
     print("* Webhook URL looks valid")
     print(f"* Updated private settings file: {destination}")
-    print(f"* Test it with: {render_command(['--send-test-webhook'], env_path=destination)}")
+    print(CommandOutput(f"* Test it with: {render_command(['--send-test-webhook'], env_path=destination)}"))
     return str(destination)
 
 
@@ -8110,14 +8124,14 @@ def render_doctor_sections(report):
             continue
         lines.extend(("", colorize("section", section)))
         for check in section_checks:
-            lines.append(f"{render_doctor_marker(check.status)} {check.label}")
+            lines.append(f"{render_doctor_marker(check.status)} {sanitize_error_text(check.label)}")
             if check.detail:
-                lines.append(f"  {colorize_links(check.detail)}")
+                lines.append(f"  {colorize_links(sanitize_error_text(check.detail))}")
             if check.status != "PASS" and check.advice is not None:
                 # The fix carries its own guide line, so each line is indented and styled on its own rather
                 # than leaving one colour sequence open across the newline
                 lines.extend(f"  {colorize_fix_line(advice_line)}" for advice_line in f"To fix: {check.advice.fix}".splitlines())
-    return sanitize_error_text("\n".join(lines))
+    return CommandOutput("\n".join(lines))
 
 
 # Renders the one sentence that says whether the setup is usable and where to read more
@@ -8471,7 +8485,7 @@ def help_examples():
 # Prints one labelled command on its own indented line, the shared shape across these tools
 def _wizard_print_command(label, command, suffix=""):
     print(label)
-    print(f"    {colorize('section', command)}{colorize('info', suffix) if suffix else ''}\n")
+    print(CommandOutput(f"    {colorize('section', command)}{colorize('info', suffix) if suffix else ''}\n"))
 
 
 # Prints the command that starts monitoring with the files this run checked, so a report read on its own
@@ -8493,7 +8507,7 @@ def print_welcome_screen(input_func=None, interactive=None):
     _wizard_print_command("Easiest start (guided setup wizard):", render_command(["--setup"], include_paths=False), setup_suffix)
     _wizard_print_command("Check setup before monitoring:", render_command(["--doctor", "<lastfm_username>"], include_paths=False))
     _wizard_print_command("Show recent tracks and exit:", render_command(["-l", "<lastfm_username>"], include_paths=False))
-    print(f"Full options: {colorize('section', render_command(['--help'], include_paths=False))}")
+    print(CommandOutput(f"Full options: {colorize('section', render_command(['--help'], include_paths=False))}"))
     print(f"\nGuide:        {colorize('link', QUICK_START_GUIDE_URL)}\n")
     if terminal_is_interactive:
         try:
@@ -9157,7 +9171,7 @@ def _wizard_smtp_sign_in_accepted(values, password, input_func=None):
         print("  The mail server accepted the sign-in. No email was sent.")
         return True
     print(f"  {advice.summary}: {advice.detail}" if advice.detail else f"  {advice.summary}")
-    print(f"  To fix: {advice.fix}")
+    print(CommandOutput(f"  To fix: {advice.fix}"))
     if _wizard_offer_retry("mail server settings", input_func=input_func):
         return False
     if advice.retryable:
