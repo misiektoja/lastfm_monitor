@@ -2437,7 +2437,7 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
         return advice("secret.entry", safe_detail or "No value was saved and the dotenv file was not changed", f"Run {render_command([flag])} again and paste each value when it is asked for", False, guide)
 
     if context == "target.missing":
-        return advice("target.missing", safe_detail or "No Last.fm username was provided", f"Pass the username to monitor: {render_command(['<lastfm_username>'])}", False, QUICK_START_GUIDE_URL)
+        return advice("target.missing", safe_detail or "No Last.fm username was provided", f"Save LASTFM_USERNAME in the configuration file or include the username on each run: {render_command(['<lastfm_username>'])}", False, QUICK_START_GUIDE_URL)
 
     if context == "secret.missing":
         return advice("secret.missing", safe_detail or "A required Last.fm credential is missing", f"Save the API key and shared secret with '{render_command(['--set-lastfm-credentials'])}'", False, LASTFM_API_GUIDE_URL)
@@ -2486,7 +2486,7 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
     if lastfm_status in (10, 13, 26):
         return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", f"Save a working pair with '{render_command(['--set-lastfm-credentials'])}'", False, LASTFM_API_GUIDE_URL)
     if lastfm_status == 29:
-        return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. Increase the check intervals if this repeats", True, INTERVALS_GUIDE_URL)
+        return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. If this repeats, raise LASTFM_CHECK_INTERVAL and LASTFM_ACTIVE_CHECK_INTERVAL in the configuration file, then restart. To override them without saving, include --check-interval SECONDS and --active-interval SECONDS on each run", True, INTERVALS_GUIDE_URL)
     if lastfm_status in (6, 7):
         return advice("target.not_found", safe_detail or "Last.fm has no user with that name", "Check the username, since a deleted or renamed account cannot be monitored", False, USAGE_GUIDE_URL)
     if lastfm_status in (8, 11, 16) or (lastfm_status is not None and lastfm_status >= 500):
@@ -2498,7 +2498,7 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
     if text_status is not None and text_status >= 600:
         return advice("lastfm.website_error", f"Last.fm answered the website request with a nonstandard HTTP {text_status}", "Only friend and profile tracking reads those pages, so music monitoring is unaffected. The tool will keep retrying with a growing wait. If this lasts, update curl_cffi and open the Last.fm page in a browser", True, WEBSITE_TRACKING_GUIDE_URL)
     if http_status == 429 or text_status == 429 or "429 client" in message or "rate limit" in message or "too many requests" in message:
-        return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. Increase the check intervals if this repeats", True, INTERVALS_GUIDE_URL)
+        return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. If this repeats, raise LASTFM_CHECK_INTERVAL and LASTFM_ACTIVE_CHECK_INTERVAL in the configuration file, then restart. To override them without saving, include --check-interval SECONDS and --active-interval SECONDS on each run", True, INTERVALS_GUIDE_URL)
     if "invalid api key" in message or "api key suspended" in message or "invalid method signature" in message:
         return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", f"Save a working pair with '{render_command(['--set-lastfm-credentials'])}'", False, LASTFM_API_GUIDE_URL)
     if "user required to be logged in" in message:
@@ -8479,7 +8479,8 @@ def help_examples():
             ("Trace what the tool is doing", f"{prefix} <lastfm_username> --debug"),
         )),
     )
-    return render_help_examples(groups, QUICK_START_GUIDE_URL)
+    notice = "Setting options apply to the current run and do not update the configuration file.\nInclude them on each run or save the settings through --setup or in a configuration file.\n\n"
+    return notice + render_help_examples(groups, QUICK_START_GUIDE_URL)
 
 
 # Prints one labelled command on its own indented line, the shared shape across these tools
@@ -8488,13 +8489,40 @@ def _wizard_print_command(label, command, suffix=""):
     print(CommandOutput(f"    {colorize('section', command)}{colorize('info', suffix) if suffix else ''}\n"))
 
 
-# Prints the command that starts monitoring with the files this run checked, so a report read on its own
-# ends with the next action rather than leaving the reader to assemble the command
-def print_doctor_next_steps(target_value=None, doctor_exit=0):
+# Rebuilds explicit monitoring options while replacing private values with named placeholders
+def doctor_monitoring_overrides(args):
+    parts = []
+    value_options = (("webhook_provider", "--webhook-provider"), ("check_interval", "--check-interval"), ("active_interval", "--active-interval"), ("offline_timer", "--offline-timer"), ("break_multiplier", "--break-multiplier"), ("friends_check_interval", "--friends-check-interval"), ("friends_change_counter", "--friends-change-counter"), ("friends_retry_interval", "--friends-retry-interval"), ("csv_file", "--csv-file"), ("monitor_list", "--monitor-list"), ("truncate", "--truncate"))
+    for name, option in value_options:
+        value = getattr(args, name, None)
+        if value is not None:
+            # An equals sign keeps a value beginning with a dash from being parsed as another option
+            if str(value).startswith("-"):
+                parts.append(f"{option}={value}")
+            else:
+                parts.extend((option, str(value)))
+    switches = (("notify_active", "--notify-active", True), ("notify_inactive", "--notify-inactive", True), ("notify_track", "--notify-track", True), ("notify_song_changes", "--notify-song-changes", True), ("notify_offline_entries", "--notify-offline-entries", True), ("notify_loop", "--notify-loop", True), ("notify_followers", "--notify-followers", True), ("notify_followings", "--notify-followings", True), ("notify_profile", "--notify-profile", True), ("notify_errors", "--no-error-notify", False), ("webhook_enabled", "--webhook", True), ("webhook_enabled", "--no-webhook", False), ("webhook_active", "--webhook-active", True), ("webhook_inactive", "--webhook-inactive", True), ("webhook_track", "--webhook-track", True), ("webhook_song_changes", "--webhook-song-changes", True), ("webhook_loop", "--webhook-loop", True), ("webhook_offline_entries", "--webhook-offline-entries", True), ("webhook_followers", "--webhook-followers", True), ("webhook_followings", "--webhook-followings", True), ("webhook_profile", "--webhook-profile", True), ("webhook_errors", "--webhook-errors", True), ("webhook_errors", "--no-webhook-error-notify", False), ("progress", "--progress", True), ("track_in_spotify", "--track-in-spotify", True), ("fetch_duration", "--fetch-duration", True), ("hide_duration_source", "--hide-duration-source", True), ("track_followings", "--track-followings", True), ("track_followers", "--track-followers", True), ("track_bio", "--track-bio", True), ("track_display_name", "--track-display-name", True), ("disable_logging", "--disable-logging", True), ("no_color", "--no-color", True), ("verbose", "--verbose", True), ("debug_mode", "--debug", True))
+    for name, option, selected in switches:
+        if getattr(args, name, None) is selected:
+            parts.append(option)
+    private_options = (("lastfm_api_key", "--lastfm-api-key", "LASTFM_API_KEY"), ("lastfm_secret", "--lastfm-secret", "LASTFM_API_SECRET"), ("spotify_creds", "--spotify-creds", "SPOTIFY_CLIENT_ID:SPOTIFY_CLIENT_SECRET"), ("webhook_url", "--webhook-url", "WEBHOOK_URL"))
+    has_private_values = False
+    for name, option, placeholder in private_options:
+        if getattr(args, name, None) is not None:
+            parts.extend((option, placeholder))
+            has_private_values = True
+    return parts, has_private_values
+
+
+# Prints the monitoring command with the settings selected for Doctor
+def print_doctor_next_steps(target_value=None, doctor_exit=0, cli_args=None):
     print(colorize("header", "\nNext steps\n"))
     label = "After Doctor passes, start monitoring:" if doctor_exit else "Start monitoring:"
-    _wizard_print_command(label, render_command([target_value] if target_value else ['<lastfm_username>']))
-    # No trailing blank line: the command printer already left one and the report must not end on two
+    monitor_arguments = [target_value] if target_value else ['<lastfm_username>']
+    overrides, private_values = doctor_monitoring_overrides(cli_args)
+    _wizard_print_command(label, render_command(monitor_arguments + overrides))
+    if private_values:
+        print("Replace the uppercase credential placeholders before running. Doctor does not repeat private command-line values.\n")
     print(f"Guide: {colorize('link', QUICK_START_GUIDE_URL)}")
 
 
@@ -8961,7 +8989,7 @@ def _wizard_collect_target_section(state, initial_target=None, input_func=None):
         if not _wizard_offer_retry(question, input_func=input_func):
             break
     if not state.target:
-        print("  No target selected. Nothing can be monitored until one is set. Run --setup again or pass the target on the command line.")
+        print("  No target selected. Nothing can be monitored until one is set. Run --setup again to save a target or include the target on each monitoring run.")
         _wizard_apply_target(state)
         return
     state.persist_target = _wizard_ask_yes_no("Persist this target in the generated config?", default=state.persist_target, input_func=input_func)
@@ -10468,7 +10496,7 @@ def main():
     if args.doctor:
         doctor_exit = run_doctor(target_value=args.username, config_path=cfg_path, env_path=env_path)
         # Printed here rather than inside the run, so the wizard's own next steps are not followed by a second copy
-        print_doctor_next_steps(args.username, doctor_exit)
+        print_doctor_next_steps(args.username, doctor_exit, cli_args=args)
         sys.exit(doctor_exit)
 
     configuration_errors = runtime_configuration_errors() + runtime_boolean_errors()
