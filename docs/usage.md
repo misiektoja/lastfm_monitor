@@ -343,6 +343,8 @@ The local playback action itself uses the configured platform method such as App
 
 The tool fully supports automatic playback on **Linux** and **macOS**. This means it will automatically play the changed track. It will also automatically pause and resume playback following the tracked user's actions. Additionally, it can pause or play an indicated track once the user becomes inactive (see the `SP_USER_GOT_OFFLINE_TRACK_ID` configuration option).
 
+The tool pauses the client when the tracked user stops playing for the break time set by `LASTFM_BREAK_CHECK_MULTIPLIER` (`-m`). If you start your own music after that, the tool leaves it playing when the user becomes inactive, unless `SP_USER_GOT_OFFLINE_TRACK_ID` is set. The inactivity pause only happens when break detection is off or did not trigger first.
+
 For **Windows**, it works in a semi-automatic way: if you have the Spotify client running and you are not listening to any song, then the first track will play automatically. However, subsequent tracks will be located in the client, but you will need to press the play button manually.
 
 You can change the playback method per platform using the corresponding configuration option.
