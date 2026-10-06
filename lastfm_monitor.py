@@ -341,7 +341,7 @@ LONGER_SONG_THRESHOLD1 = 1.30  # 130% of track duration
 LONGER_SONG_THRESHOLD2 = 30  # 30 seconds beyond track duration
 
 # Spotify track ID to play when the user goes offline (used with track_songs feature)
-# Leave empty to simply pause
+# Leave empty to pause instead, unless playback was already paused when the user stopped playing
 # SP_USER_GOT_OFFLINE_TRACK_ID = "5wCjNjnugSUqGDBrmQhn0e"
 SP_USER_GOT_OFFLINE_TRACK_ID = ""
 
@@ -7432,6 +7432,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                                     debug_print("Waiting before pausing the finishing track", delay=f"{SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE}s")
                                     time.sleep(SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE)
                                     spotify_linux_play_pause("pause")
+                        # The break already paused the client, so another pause would only stop music started locally since then
+                        elif playing_paused:
+                            debug_print("Spotify pause on inactivity", outcome="skipped", reason="already paused at break")
                         else:
                             if platform.system() == 'Darwin':       # macOS
                                 spotify_macos_play_pause("pause")
