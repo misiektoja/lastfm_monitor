@@ -4,13 +4,14 @@ This is a high-level summary of the most important changes.
 
 # Changes in 2.8.1 (TBD)
 
-Version **2.8.1** reports unavailable notification channels and skips automatic sends until their settings are fixed. It fixes webhook delivery with non-ASCII custom headers and keeps generated recovery commands usable. Settings guidance explains which options need repeating and Doctor includes selected monitoring options in its start command.
+Version **2.8.1** reports unavailable notification channels and skips automatic sends until their settings are fixed. It fixes webhook delivery with non-ASCII custom headers and keeps generated recovery commands usable. Settings guidance explains which options need repeating and Doctor includes selected monitoring options in its start command. Spotify playback control no longer pauses your own music a second time when the tracked user becomes inactive.
 
 **Bug fixes**:
 
 - **BUGFIX:** **Recovery commands and saved settings** - Guidance distinguishes saved settings from command-line options needed on each run. Doctor's monitoring command retains the selected options and shows placeholders for private values. Generated commands keep paths, targets and flags intact when they match stored credentials. Error summaries and technical details still redact credentials
 - **BUGFIX:** **Unavailable notification channels stay quiet** - The startup summary shows **`Unavailable`** and names the missing or invalid local setting. Automatic email and webhook alerts make no send attempt and print no delivery line until that channel is configured. **`Off`** means alerts are disabled for that channel
 - **BUGFIX:** **Custom headers with emoji no longer drop webhook alerts** - A **`WEBHOOK_HEADERS`** value built from a placeholder such as `{title}` failed the whole alert with `'latin-1' codec can't encode character` when the expanded text held emoji or letters outside Latin-1. Such values are now sent RFC 2047 encoded (`=?UTF-8?B?...?=`) and the alert is delivered. ntfy decodes them back to the original text. Other receivers see the encoded form. ASCII values, including ones you already encoded, are sent unchanged
+- **BUGFIX:** **No second Spotify pause on inactivity** - With **`-g`**, the local Spotify client was paused when the tracked user stopped playing and paused again when they became inactive, which stopped any music you had started in between. The inactivity pause now runs only when the break pause did not, for example with **`LASTFM_BREAK_CHECK_MULTIPLIER = 0`**. A **`SP_USER_GOT_OFFLINE_TRACK_ID`** finishing track still plays on inactivity
 
 # Changes in 2.8 (22 Sep 2026)
 
