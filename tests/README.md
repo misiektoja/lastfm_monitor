@@ -86,6 +86,7 @@ python -m pytest -m e2e
 | `test_terminal_color.py` | Coloured output: the theme and its template block, which colour lands on which token, the single colour pass through the writers and the plain log file |
 | `test_spotify_oauth_recovery.py` | Rejected search attempts, one-time token refresh and app-specific cooldowns |
 | `test_spotify_web_backend.py` | TOTP generation and config override, anonymous token handling and caching |
+| `test_spotify_playback_control.py` | The play and pause commands sent to the local Spotify client at a break and on inactivity |
 | `test_tls_verification.py` | The TLS verification switch, the call sites that read it and the library sessions it reaches |
 | `test_webhook_notifications.py` | Webhook settings coverage, startup rollups, URL validation and independent event switches |
 | `test_moved_private_settings.py` | Kept credentials across dotenv destination changes and startup error handling |
