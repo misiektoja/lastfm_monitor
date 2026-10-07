@@ -5894,15 +5894,9 @@ def run_set_spotify_credentials(env_file=None, interactive=None, input_func=None
 
 # Finds an optional config file
 def find_config_file(cli_path=None):
-    """
-    Search for an optional config file in:
-      1) CLI-provided path (must exist if given)
-      2) ./{DEFAULT_CONFIG_FILENAME}
-      3) ~/.{DEFAULT_CONFIG_FILENAME}
-      4) script-directory/{DEFAULT_CONFIG_FILENAME}
+    """Return the first config file, without fallback for a missing explicit path.
 
-    The literal 'none' selects no file at all, which also switches the search off.
-    """
+    Disabled discovery or cli_path='none' selects no file."""
 
     if CONFIG_DISCOVERY_DISABLED or str(cli_path or "").casefold() == "none":
         return None
