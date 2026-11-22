@@ -2,9 +2,13 @@
 
 This is a high-level summary of the most important changes.
 
-# Changes in 2.8.1 (TBD)
+# Changes in 2.8.1 (22 Nov 2026)
 
-Version **2.8.1** reports unavailable notification channels and skips automatic sends until their settings are fixed. It fixes webhook delivery with non-ASCII custom headers and keeps generated recovery commands usable. Settings guidance explains which options need repeating and Doctor includes selected monitoring options in its start command. Spotify playback control no longer pauses your own music a second time when the tracked user becomes inactive.
+Version **2.8.1** tells you at the credential prompts and in the rejected-key error that Last.fm requires a **Pro subscription** for API keys from **1 December 2026**. It reports unavailable notification channels and skips automatic sends until their settings are fixed. It fixes webhook delivery with non-ASCII custom headers and keeps generated recovery commands usable. Settings guidance explains which options need repeating and Doctor includes selected monitoring options in its start command. Spotify playback control no longer pauses your own music a second time when the tracked user becomes inactive.
+
+**Features and improvements**:
+
+- **IMPROVE:** **Last.fm Pro requirement for API keys** - Last.fm [announced](https://support.last.fm/t/api-keys-will-require-pro-from-1st-december/121030) that from **1 December 2026** an API key works only while the account that owns it has **Last.fm Pro**. This tool uses your own key, so your Last.fm account needs the subscription. The monitored user does not. The setup wizard and **`--set-lastfm-credentials`** say so before asking for the key. The **`Last.fm rejected the configured API key or shared secret`** error tells you to check the subscription before replacing the credentials
 
 **Bug fixes**:
 
