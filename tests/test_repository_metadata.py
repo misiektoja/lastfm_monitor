@@ -162,6 +162,13 @@ def test_the_test_matrix_starts_at_the_supported_floor():
     assert floors["workflow matrix"] == floors["requires-python"]
 
 
+# Verifies CI tests every Python version the packaging metadata declares
+def test_ci_covers_every_declared_python_version():
+    declared = re.findall(r'"Programming Language :: Python :: (\d+\.\d+)"', read_asset("pyproject.toml"))
+    matrix = read_yaml_asset(".github/workflows/tests.yml")["jobs"]["test"]["strategy"]["matrix"]["python-version"]
+    assert set(matrix) == set(declared)
+
+
 # The gate is the only thing standing between an old interpreter and a syntax error it cannot explain
 def test_the_runtime_gate_reads_the_constant():
     source = read_asset("lastfm_monitor.py")
