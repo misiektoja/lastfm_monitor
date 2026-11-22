@@ -2,6 +2,22 @@
 
 This is a high-level summary of the most important changes.
 
+# Changes in 2.8.1 (22 Nov 2026)
+
+Version **2.8.1** prepares you for the **Last.fm Pro requirement for API keys** that starts on **1 December 2026** and adds **Python 3.15** support. It also fixes a second Spotify pause that could stop your own music, webhook alerts lost to emoji in custom headers and the handling of notification channels that are not fully configured.
+
+**Features and improvements**:
+
+- **IMPROVE:** **Last.fm Pro requirement for API keys** - Last.fm [announced](https://support.last.fm/t/api-keys-will-require-pro-from-1st-december/121030) that from **1 December 2026** an API key works only while the account that owns it has **Last.fm Pro**. You use your own key with this tool, so your Last.fm account needs the subscription. The monitored user does not. The setup wizard, **`--set-lastfm-credentials`** and the rejected-key error now say so
+- **IMPROVE:** **Python 3.15 support** - Last.fm Monitor is now tested on **Python 3.15** and PyPI lists it as a supported version. Python 3.9 is still the minimum
+
+**Bug fixes**:
+
+- **BUGFIX:** **No second Spotify pause on inactivity** - With **`-g`**, your Spotify client was paused when the tracked user stopped playing and again when they became inactive, which stopped any music you had started in between. It is now paused once. A **`SP_USER_GOT_OFFLINE_TRACK_ID`** finishing track still plays on inactivity
+- **BUGFIX:** **Webhook alerts with emoji in custom headers** - An alert was lost when a **`WEBHOOK_HEADERS`** value built from a placeholder such as `{title}` held emoji or letters outside Latin-1. Such values are now sent RFC 2047 encoded and the alert is delivered. ntfy shows the original text. Other receivers see the encoded form
+- **BUGFIX:** **Notification channels that cannot send** - A channel that is switched on but has a missing or invalid setting now shows as **`Unavailable`** in the startup summary, with the setting to fix. No email or webhook is attempted for it until then. **`Off`** means the channel is disabled
+- **BUGFIX:** **Suggested commands** - The commands printed with error fixes and by **`--doctor`** keep the options you started with and show placeholders for private values. They are no longer altered when a path or username happens to match a saved credential. The guidance says which settings are saved and which options you must repeat on each run
+
 # Changes in 2.8 (22 Sep 2026)
 
 Version **2.8** sends the **new offline scrobbles** alert as HTML like every other alert and lines the HTML email up with the plain text so both separate the music and lyrics links the same way. It gives every monitoring failure alert one subject and body, follows it with a recovery alert when the failure clears and points network failures at a new **Connection Problems** guide. It also slows the friend and profile checks down while Last.fm refuses the pages they read and names that failure instead of reporting it as an unrecognised error, keeps the alert a failing check sends inside that check's report on screen and reports an alert channel that still holds the values from the sample configuration as unset.

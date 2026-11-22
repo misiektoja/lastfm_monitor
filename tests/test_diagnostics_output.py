@@ -228,7 +228,8 @@ class TestTheLineFormat:
         assert capsys.readouterr().out == "* Email alerts are off\n"
 
     # The startup screen is one block, so the real notice a run prints there must not split it in half
-    def test_the_startup_notice_a_real_run_prints_stays_bare(self, restored_globals, tmp_path, capsys):
+    def test_the_startup_notice_a_real_run_prints_stays_bare(self, restored_globals, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(monitor, "MONITORING_ACTIVE", False)
         run_main_to_the_loop(tmp_path, arguments=["--verbose"])
         transcript = capsys.readouterr().out.splitlines()
         index = next(number for number, line in enumerate(transcript) if line.startswith("* Email notifications are off because"))
@@ -561,6 +562,8 @@ class TestEveryDeliveryIsTraced:
         assert "private-token-value" not in capsys.readouterr().out
 
     def test_each_channel_reports_its_own_outcome(self, debug_on, monkeypatch, capsys):
+        for name, value in (("SMTP_HOST", "smtp.example.com"), ("SMTP_PORT", 587), ("SMTP_USER", "sender@example.com"), ("SMTP_PASSWORD", "test-password"), ("SENDER_EMAIL", "sender@example.com"), ("RECEIVER_EMAIL", "receiver@example.com"), ("WEBHOOK_ENABLED", True), ("WEBHOOK_PROVIDER", "discord"), ("WEBHOOK_URL", "https://discord.com/api/webhooks/123/private-token")):
+            monkeypatch.setattr(monitor, name, value)
         monkeypatch.setattr(monitor, "send_email", lambda *args, **kwargs: 1)
         monkeypatch.setattr(monitor, "send_webhook", lambda *args, **kwargs: 0)
         monkeypatch.setattr(monitor, "RECEIVER_EMAIL", "to@example.com")
@@ -1033,6 +1036,8 @@ def recording_channels(monkeypatch, outcomes):
     monkeypatch.setattr(monitor, "ERROR_NOTIFICATION", True)
     monkeypatch.setattr(monitor, "WEBHOOK_ENABLED", True)
     monkeypatch.setattr(monitor, "WEBHOOK_ERROR_NOTIFICATION", True)
+    for name, value in (("SMTP_HOST", "smtp.example.com"), ("SMTP_PORT", 587), ("SMTP_USER", "sender@example.com"), ("SMTP_PASSWORD", "test-password"), ("SENDER_EMAIL", "sender@example.com"), ("RECEIVER_EMAIL", "receiver@example.com"), ("WEBHOOK_PROVIDER", "discord"), ("WEBHOOK_URL", "https://discord.com/api/webhooks/123/private-token")):
+        monkeypatch.setattr(monitor, name, value)
     monkeypatch.setattr(monitor, "send_notification_channels", record)
     return calls
 

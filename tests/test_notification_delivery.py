@@ -6,6 +6,13 @@ import lastfm_monitor as monitor
 from test_diagnostics_output import drive_quiet_cycles
 
 
+@pytest.fixture(autouse=True)
+# Gives transport tests valid local settings while their senders are replaced with doubles
+def configured_channels(monkeypatch):
+    for name, value in (("SMTP_HOST", "smtp.example.com"), ("SMTP_PORT", 587), ("SMTP_USER", "sender@example.com"), ("SMTP_PASSWORD", "test-password"), ("SENDER_EMAIL", "sender@example.com"), ("RECEIVER_EMAIL", "receiver@example.com"), ("WEBHOOK_ENABLED", True), ("WEBHOOK_PROVIDER", "discord"), ("WEBHOOK_URL", "https://discord.com/api/webhooks/123/private-token")):
+        monkeypatch.setattr(monitor, name, value)
+
+
 # Counts the calls each channel receives and answers with the queued result codes
 class FakeDeliveries:
     def __init__(self, email_results=(), webhook_results=()):

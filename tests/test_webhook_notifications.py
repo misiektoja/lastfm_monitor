@@ -41,13 +41,31 @@ def test_config_block_contains_complete_webhook_settings():
     assert "NTFY_ACCESS_TOKEN" in monitor.SECRET_KEYS
 
 
-# Gives both channels a destination, since the rollup rows report a channel with none as off whatever its alert types are
+# Gives both channels valid local settings for startup and delivery tests
 def configure_channel_destinations(monkeypatch):
     monkeypatch.setattr(monitor, "SMTP_HOST", "smtp.example.com")
     monkeypatch.setattr(monitor, "SMTP_PORT", 587)
+    monkeypatch.setattr(monitor, "SMTP_USER", "sender@example.com")
+    monkeypatch.setattr(monitor, "SMTP_PASSWORD", "test-password")
+    monkeypatch.setattr(monitor, "SENDER_EMAIL", "sender@example.com")
     monkeypatch.setattr(monitor, "RECEIVER_EMAIL", "michal.k@example.com")
     monkeypatch.setattr(monitor, "WEBHOOK_PROVIDER", "discord")
     monkeypatch.setattr(monitor, "WEBHOOK_URL", "https://discord.com/api/webhooks/123/private-token")
+
+
+# Verifies unavailable automatic channels make no attempt or status line
+def test_unavailable_channels_are_silent(monkeypatch, capsys):
+    email = Mock()
+    webhook = Mock()
+    monkeypatch.setattr(monitor, "SMTP_PASSWORD", "")
+    monkeypatch.setattr(monitor, "WEBHOOK_ENABLED", True)
+    monkeypatch.setattr(monitor, "WEBHOOK_URL", "")
+    monkeypatch.setattr(monitor, "send_email", email)
+    monkeypatch.setattr(monitor, "send_webhook", webhook)
+    assert monitor.send_notification_channels("error", "Subject", "Body", email_enabled=True, webhook_enabled=True) == (False, False)
+    email.assert_not_called()
+    webhook.assert_not_called()
+    assert capsys.readouterr().out == ""
 
 
 # Verifies startup summaries use short labels and unstarred bounded continuation lines
@@ -71,7 +89,7 @@ def test_startup_webhook_summary_respects_master_switch(monkeypatch):
     monkeypatch.setattr(monitor, "WEBHOOK_ENABLED", False)
     monkeypatch.setattr(monitor, "WEBHOOK_ACTIVE_NOTIFICATION", True)
     monkeypatch.setattr(monitor, "WEBHOOK_ERROR_NOTIFICATION", True)
-    assert monitor._startup_notification_state(monitor._startup_webhook_notification_categories(), monitor.webhook_channel_configured()) == "Off"
+    assert monitor._startup_notification_state(monitor._startup_webhook_notification_categories(), monitor.webhook_settings_problem()) == "Off"
 
 
 # Verifies URL validation and provider detection reject unsafe destinations
@@ -173,6 +191,7 @@ def test_only_discord_receives_the_formatted_body(monkeypatch, provider, destina
 # Verifies email and webhook attempts remain independent and compact text stays ntfy-only
 def test_notification_channels_are_independent_and_ntfy_short_is_scoped(monkeypatch):
     configure_discord(monkeypatch)
+    configure_channel_destinations(monkeypatch)
     monkeypatch.setattr(monitor, "WEBHOOK_PROVIDER", "ntfy")
     monkeypatch.setattr(monitor, "NTFY_SHORT", True)
     email = Mock(return_value=0)

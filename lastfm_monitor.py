@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.8
+v2.8.1
 
 Tool implementing real-time tracking of Last.fm users music activity:
 https://github.com/misiektoja/lastfm_monitor/
@@ -19,7 +19,7 @@ curl_cffi (optional, only for friends and profile tracking)
 colorama (optional, only for coloured output in the classic Windows Command Prompt)
 """
 
-VERSION = "2.8"
+VERSION = "2.8.1"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -341,7 +341,7 @@ LONGER_SONG_THRESHOLD1 = 1.30  # 130% of track duration
 LONGER_SONG_THRESHOLD2 = 30  # 30 seconds beyond track duration
 
 # Spotify track ID to play when the user goes offline (used with track_songs feature)
-# Leave empty to simply pause
+# Leave empty to pause instead, unless playback was already paused when the user stopped playing
 # SP_USER_GOT_OFFLINE_TRACK_ID = "5wCjNjnugSUqGDBrmQhn0e"
 SP_USER_GOT_OFFLINE_TRACK_ID = ""
 
@@ -768,6 +768,9 @@ LASTFM_API_REGISTRATION_URL = "https://www.last.fm/api/account/create"
 LASTFM_API_ACCOUNTS_URL = "https://www.last.fm/api/accounts"
 SPOTIFY_DASHBOARD_URL = "https://developer.spotify.com/dashboard"
 
+# Shown wherever the Last.fm credentials are requested
+LASTFM_PRO_NOTICE = "From 1 December 2026 Last.fm requires a Pro subscription on the account that owns the API key"
+
 # The accepted form of the positional target, shared by the welcome screen and the invalid-target error
 LASTFM_TARGET_FORMS = "username exactly as it appears on the user's Last.fm profile page"
 
@@ -912,7 +915,8 @@ import base64
 import hashlib
 import hmac
 from email.utils import parsedate_to_datetime
-import pyotp
+# Typed pyotp releases do not re-export TOTP from the package root for pyright
+from pyotp.totp import TOTP
 
 
 # Tracks the error alert per channel: what was delivered, how long a channel that failed waits before the next
@@ -1552,7 +1556,7 @@ class TerminalStream(object):
 
     # Writes one sanitized and coloured message to the terminal
     def write(self, message):
-        self.terminal.write(apply_color_to_text(for_terminal(sanitize_terminal_text(sanitize_error_text(message)))))
+        self.terminal.write(apply_color_to_text(for_terminal(sanitize_console_text(message))))
         self.terminal.flush()
 
     # Writes one terminal-only message, which is every message this stream receives
@@ -1669,8 +1673,13 @@ def colorize_help_text(text, epilog=None):
 # repaint the finished help with the rules meant for monitoring output
 class ColoredHelpParser(argparse.ArgumentParser):
     # Returns the help screen with the help palette already applied
-    def format_help(self) -> str:
-        return colorize_help_text(super().format_help(), self.epilog)
+    def format_help(self, formatter: Optional[argparse.HelpFormatter] = None) -> str:
+        # From Python 3.15 print_help passes the formatter it built for the output stream
+        if sys.version_info >= (3, 15):
+            text = super().format_help(formatter)
+        else:
+            text = super().format_help()
+        return colorize_help_text(text, self.epilog)
 
     # Writes one parser message straight to the terminal behind any colouring wrapper
     def _print_message(self, message, file=None) -> None:
@@ -1691,7 +1700,7 @@ class Logger(object):
         self.logfile = open(filename, "a", buffering=1, encoding="utf-8")
 
     def write(self, message):
-        safe_message = sanitize_terminal_text(sanitize_error_text(message))
+        safe_message = sanitize_console_text(message)
         self.terminal.write(apply_color_to_text(self._truncate_terminal(safe_message)))
         # Colour codes are stripped so the log file stays plain text whatever the terminal was shown
         self.logfile.write(normalize_log_separators(ANSI_ESCAPE_RE.sub("", safe_message).expandtabs(8)))
@@ -1700,12 +1709,12 @@ class Logger(object):
 
     # Writes one message only to the terminal, so a line that orients a reader at a screen stays out of the log
     def terminal_only(self, message):
-        self.terminal.write(apply_color_to_text(self._truncate_terminal(sanitize_terminal_text(sanitize_error_text(message)))))
+        self.terminal.write(apply_color_to_text(self._truncate_terminal(sanitize_console_text(message))))
         self.terminal.flush()
 
     # Writes one message only to the log, so the file keeps the full view whichever one the terminal was shown
     def log_only(self, message):
-        self.logfile.write(normalize_log_separators(ANSI_ESCAPE_RE.sub("", sanitize_terminal_text(sanitize_error_text(message))).expandtabs(8)))
+        self.logfile.write(normalize_log_separators(ANSI_ESCAPE_RE.sub("", sanitize_console_text(message)).expandtabs(8)))
         self.logfile.flush()
 
     def flush(self):
@@ -2203,6 +2212,19 @@ def known_secret_values() -> List[str]:
     return sorted(set(values) | set(_DELIVERY_SECRET_VALUES.get()), key=len, reverse=True)
 
 
+# Marks generated instructions combined only with already-redacted diagnostic fields
+class CommandOutput(str):
+    # Preserves the output marker when print converts its argument to text
+    def __str__(self) -> str:
+        return self
+
+
+# Keeps generated instructions intact while filtering ordinary output and terminal controls
+def sanitize_console_text(message):
+    filtered = message if isinstance(message, CommandOutput) else sanitize_error_text(message)
+    return sanitize_terminal_text(filtered)
+
+
 # Redacts configured private values and common credential shapes from diagnostic text
 def sanitize_error_text(value: Any, extra_secrets: Sequence[Any] = ()) -> str:
     text = str(value)
@@ -2258,11 +2280,12 @@ class RecoveryError(Exception):
         super().__init__(advice.summary)
 
 
-# Builds one piece of recovery advice, refusing any code outside the closed set and sanitizing every field
+# Builds validated recovery advice with private diagnostics and unchanged generated instructions
 def make_recovery_advice(code, summary, fix, retryable, detail=""):
     if code not in RECOVERY_CODES:
         raise ValueError(f"Unsupported recovery code: {code}")
-    return RecoveryAdvice(code, sanitize_error_text(summary), sanitize_error_text(fix), bool(retryable), sanitize_error_text(detail) if detail else "")
+    # Fixes contain generated instructions and non-secret arguments, so redaction must not rewrite them
+    return RecoveryAdvice(code, sanitize_error_text(summary), fix, bool(retryable), sanitize_error_text(detail) if detail else "")
 
 
 # Adds a directly relevant documentation link on its own line
@@ -2379,6 +2402,11 @@ def unknown_failure_fix():
     return "Open an issue with this output if the failure continues" if DEBUG_MODE else "Re-run with --debug to see the technical cause"
 
 
+# Returns the fix for a rejected Last.fm key or secret, including a key whose owner has no Pro subscription
+def lastfm_credentials_rejected_fix():
+    return f"Check that the account owning the key has Last.fm Pro, required for API keys from 1 December 2026. If it has, save a working pair with '{render_command(['--set-lastfm-credentials'])}'"
+
+
 # Maps one exception plus its status and calling context to stable recovery advice
 def classify_recovery_error(error=None, context="runtime", detail="", extra_secrets=()):
     if isinstance(error, RecoveryError):
@@ -2423,7 +2451,7 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
         return advice("secret.entry", safe_detail or "No value was saved and the dotenv file was not changed", f"Run {render_command([flag])} again and paste each value when it is asked for", False, guide)
 
     if context == "target.missing":
-        return advice("target.missing", safe_detail or "No Last.fm username was provided", f"Pass the username to monitor: {render_command(['<lastfm_username>'])}", False, QUICK_START_GUIDE_URL)
+        return advice("target.missing", safe_detail or "No Last.fm username was provided", f"Save LASTFM_USERNAME in the configuration file or include the username on each run: {render_command(['<lastfm_username>'])}", False, QUICK_START_GUIDE_URL)
 
     if context == "secret.missing":
         return advice("secret.missing", safe_detail or "A required Last.fm credential is missing", f"Save the API key and shared secret with '{render_command(['--set-lastfm-credentials'])}'", False, LASTFM_API_GUIDE_URL)
@@ -2470,9 +2498,9 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
     if lastfm_status == 17:
         return advice("target.not_visible", "The monitored user hides their recent listening information", "Ask the user to turn off 'Hide recent listening information' in their Last.fm privacy settings", False, PRIVACY_GUIDE_URL)
     if lastfm_status in (10, 13, 26):
-        return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", f"Save a working pair with '{render_command(['--set-lastfm-credentials'])}'", False, LASTFM_API_GUIDE_URL)
+        return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", lastfm_credentials_rejected_fix(), False, LASTFM_API_GUIDE_URL)
     if lastfm_status == 29:
-        return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. Increase the check intervals if this repeats", True, INTERVALS_GUIDE_URL)
+        return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. If this repeats, raise LASTFM_CHECK_INTERVAL and LASTFM_ACTIVE_CHECK_INTERVAL in the configuration file, then restart. To override them without saving, include --check-interval SECONDS and --active-interval SECONDS on each run", True, INTERVALS_GUIDE_URL)
     if lastfm_status in (6, 7):
         return advice("target.not_found", safe_detail or "Last.fm has no user with that name", "Check the username, since a deleted or renamed account cannot be monitored", False, USAGE_GUIDE_URL)
     if lastfm_status in (8, 11, 16) or (lastfm_status is not None and lastfm_status >= 500):
@@ -2484,9 +2512,9 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
     if text_status is not None and text_status >= 600:
         return advice("lastfm.website_error", f"Last.fm answered the website request with a nonstandard HTTP {text_status}", "Only friend and profile tracking reads those pages, so music monitoring is unaffected. The tool will keep retrying with a growing wait. If this lasts, update curl_cffi and open the Last.fm page in a browser", True, WEBSITE_TRACKING_GUIDE_URL)
     if http_status == 429 or text_status == 429 or "429 client" in message or "rate limit" in message or "too many requests" in message:
-        return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. Increase the check intervals if this repeats", True, INTERVALS_GUIDE_URL)
+        return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. If this repeats, raise LASTFM_CHECK_INTERVAL and LASTFM_ACTIVE_CHECK_INTERVAL in the configuration file, then restart. To override them without saving, include --check-interval SECONDS and --active-interval SECONDS on each run", True, INTERVALS_GUIDE_URL)
     if "invalid api key" in message or "api key suspended" in message or "invalid method signature" in message:
-        return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", f"Save a working pair with '{render_command(['--set-lastfm-credentials'])}'", False, LASTFM_API_GUIDE_URL)
+        return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", lastfm_credentials_rejected_fix(), False, LASTFM_API_GUIDE_URL)
     if "user required to be logged in" in message:
         return advice("target.not_visible", "The monitored user hides their recent listening information", "Ask the user to turn off 'Hide recent listening information' in their Last.fm privacy settings", False, PRIVACY_GUIDE_URL)
     if "user not found" in message or "no user with that name" in message or http_status == 404:
@@ -2508,13 +2536,13 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
 
 # Renders one built advice as the shared Error, To fix and optional Technical detail block
 def render_recovery_advice(advice, debug=None, retry_note="", with_fix=True, label="Error"):
-    lines = [f"* {label}: {advice.summary}" + (f" ({retry_note})" if retry_note else "")]
+    lines = [f"* {sanitize_error_text(label)}: {sanitize_error_text(advice.summary)}" + (f" ({sanitize_error_text(retry_note)})" if retry_note else "")]
     if with_fix:
         lines.append(f"To fix: {advice.fix}")
         # A detail that only repeats the summary spends a line saying nothing
         if (DEBUG_MODE if debug is None else debug) and advice.detail and advice.detail != advice.summary:
             lines.append(f"Technical detail: {sanitize_error_text(advice.detail)}")
-    return "\n".join(lines)
+    return CommandOutput("\n".join(lines))
 
 
 # Classifies one failure and renders it through the shared recovery block
@@ -2680,12 +2708,14 @@ def missed_alert_body_html(target, lasted, summary, timestamp=True):
 # Sends the recovery alert on each channel whose failure alert was delivered and tells a channel that never got one
 # about the whole outage at once, returning whether anything was attempted
 def send_outage_recovery_alert(target, lasted, error_alert):
-    email_enabled = bool(error_alert.email_sent and ERROR_NOTIFICATION)
-    webhook_enabled = bool(error_alert.webhook_sent and webhook_event_enabled("error"))
+    email_ready = bool(ERROR_NOTIFICATION and email_settings_problem() is None)
+    webhook_ready = bool(webhook_event_enabled("error") and webhook_settings_problem() is None)
+    email_enabled = bool(error_alert.email_sent and email_ready)
+    webhook_enabled = bool(error_alert.webhook_sent and webhook_ready)
     # A channel whose failure alert never got through hears about the outage and its end together, rather than
     # nothing at all, which is what a channel blocked for the length of the outage would otherwise receive
-    email_missed = error_alert.missed("email", ERROR_NOTIFICATION)
-    webhook_missed = error_alert.missed("webhook", webhook_event_enabled("error"))
+    email_missed = error_alert.missed("email", email_ready)
+    webhook_missed = error_alert.missed("webhook", webhook_ready)
     if not (email_enabled or webhook_enabled or email_missed or webhook_missed):
         return False
     lasted = max(1, int(lasted))
@@ -2820,11 +2850,11 @@ def _startup_webhook_notification_categories() -> List[str]:
     return _selected_webhook_notification_categories() if WEBHOOK_ENABLED else []
 
 
-# Rolls one channel's enabled alerts into the state its summary row reports, which is off while the channel has no destination
-def _startup_notification_state(categories: List[str], configured: bool) -> str:
+# Rolls selected alerts into the startup state and names an unusable local setting
+def _startup_notification_state(categories: List[str], problem: Optional[str]) -> str:
     if not categories:
         return "Off"
-    return "On (" + ", ".join(categories) + ")" if configured else "Off (not configured)"
+    return f"Unavailable ({problem})" if problem else "On (" + ", ".join(categories) + ")"
 
 
 # Returns whether one configured webhook alert is enabled independently of email settings
@@ -3076,6 +3106,18 @@ def validate_webhook_headers(provider: Any = None) -> Optional[str]:
     return None
 
 
+# Returns one text value as a base64 RFC 2047 UTF-8 encoded word
+def rfc2047_encoded_word(text: str) -> str:
+    return "=?UTF-8?B?" + base64.b64encode(text.encode("utf-8")).decode("ascii") + "?="
+
+
+# Encodes one HTTP header value as an RFC 2047 UTF-8 word when it contains non-ASCII text
+def encode_non_ascii_header_value(value: str) -> str:
+    text = str(value)
+    # HTTP clients send header values as Latin-1 or ASCII, which cannot carry emoji or most non-Latin letters
+    return text if text.isascii() else rfc2047_encoded_word(text)
+
+
 # Builds provider-specific headers while formatting placeholders and applying private ntfy authentication
 def build_webhook_headers(provider: str, values: dict) -> dict:
     validation_error = validate_webhook_headers(provider)
@@ -3098,7 +3140,9 @@ def build_webhook_headers(provider: str, values: dict) -> dict:
         if token:
             headers = {name: value for name, value in headers.items() if name.casefold() != "authorization"}
             headers["Authorization"] = f"Bearer {token}"
-    return headers
+    # Placeholders can expand to emoji or letters a raw header cannot carry. ASCII values stay as written,
+    # so a value already encoded as RFC 2047, as ntfy documents for emoji tags, is not encoded a second time
+    return {name: encode_non_ascii_header_value(value) for name, value in headers.items()}
 
 
 # Sends one webhook request with the destination, deadline and redirect policy every delivery shares
@@ -3201,8 +3245,9 @@ def send_webhook(title: str, description: str, notification_type: str = "song", 
 
 # Sends one alert through the enabled email and webhook channels
 def send_notification_channels(notification_type: str, subject: str, body: str, body_html: str = "", email_enabled: bool = False, webhook_enabled: Optional[bool] = None, subject_short: str = "", body_short: str = "", webhook_body: str = "", webhook_body_html: str = "") -> Tuple[bool, bool]:
-    email_attempted = bool(email_enabled)
-    webhook_attempted = webhook_event_enabled(notification_type) if webhook_enabled is None else bool(webhook_enabled)
+    email_attempted = bool(email_enabled and email_settings_problem() is None)
+    webhook_selected = webhook_event_enabled(notification_type) if webhook_enabled is None else bool(webhook_enabled)
+    webhook_attempted = bool(webhook_selected and WEBHOOK_ENABLED and webhook_settings_problem() is None)
     email_delivered = False
     webhook_delivered = False
     if email_attempted:
@@ -5020,7 +5065,7 @@ def generate_totp():
     joined = "".join(str(number) for number in transformed)
     hex_string = joined.encode().hex()
     secret = base64.b32encode(bytes.fromhex(hex_string)).decode().rstrip("=")
-    return pyotp.TOTP(secret, digits=6, interval=30)
+    return TOTP(secret, digits=6, interval=30)
 
 
 # Requests a fresh anonymous Spotify web-player access token
@@ -5796,7 +5841,7 @@ def run_set_smtp_password(env_file=None, interactive=None, input_func=None, getp
     if os.environ.get("SMTP_PASSWORD"):
         print("* SMTP_PASSWORD is exported in this environment and an export wins at startup, so the next run uses that value rather than the one just saved")
         print(colorize("info", "To fix: Unset the exported SMTP_PASSWORD to use the saved one"))
-    print(f"* Test it with: {render_command(['--send-test-email'], env_path=destination)}")
+    print(CommandOutput(f"* Test it with: {render_command(['--send-test-email'], env_path=destination)}"))
     return str(destination)
 
 
@@ -5833,7 +5878,7 @@ def run_set_webhook_url(env_file=None, interactive=None, input_func=None, getpas
         raise PrivateSettingsError(f"Could not save the webhook URL in '{destination}'. Check file permissions or choose another path with --env-file") from None
     print("* Webhook URL looks valid")
     print(f"* Updated private settings file: {destination}")
-    print(f"* Test it with: {render_command(['--send-test-webhook'], env_path=destination)}")
+    print(CommandOutput(f"* Test it with: {render_command(['--send-test-webhook'], env_path=destination)}"))
     return str(destination)
 
 
@@ -5844,6 +5889,7 @@ def run_set_lastfm_credentials(env_file=None, interactive=None, input_func=None,
     guidance = [
         f"Create your API key and shared secret at {LASTFM_API_REGISTRATION_URL}",
         f"View the credentials of an application you already registered at {LASTFM_API_ACCOUNTS_URL}",
+        LASTFM_PRO_NOTICE,
         f"Guide: {LASTFM_API_GUIDE_URL}",
     ]
     return _run_set_private_values("--set-lastfm-credentials", prompts, env_file, interactive, input_func, getpass_func, guidance, subject="Last.fm API credentials", guide_url=LASTFM_API_GUIDE_URL, plural=True)
@@ -5863,15 +5909,9 @@ def run_set_spotify_credentials(env_file=None, interactive=None, input_func=None
 
 # Finds an optional config file
 def find_config_file(cli_path=None):
-    """
-    Search for an optional config file in:
-      1) CLI-provided path (must exist if given)
-      2) ./{DEFAULT_CONFIG_FILENAME}
-      3) ~/.{DEFAULT_CONFIG_FILENAME}
-      4) script-directory/{DEFAULT_CONFIG_FILENAME}
+    """Return the first config file, without fallback for a missing explicit path.
 
-    The literal 'none' selects no file at all, which also switches the search off.
-    """
+    Disabled discovery or cli_path='none' selects no file."""
 
     if CONFIG_DISCOVERY_DISABLED or str(cli_path or "").casefold() == "none":
         return None
@@ -7401,6 +7441,9 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
                                     debug_print("Waiting before pausing the finishing track", delay=f"{SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE}s")
                                     time.sleep(SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE)
                                     spotify_linux_play_pause("pause")
+                        # The break already paused the client, so another pause would only stop music started locally since then
+                        elif playing_paused:
+                            debug_print("Spotify pause on inactivity", outcome="skipped", reason="already paused at break")
                         else:
                             if platform.system() == 'Darwin':       # macOS
                                 spotify_macos_play_pause("pause")
@@ -7519,8 +7562,8 @@ def lastfm_monitor_user(user, network, username, tracks, csv_file_name):  # pyri
             # A failure the tool can retry away is alerted once the outage has lasted ERROR_ALERT_AFTER_SECONDS, one it cannot at once
             alert_due = not advice.retryable or int(time.time()) - outage.since >= ERROR_ALERT_AFTER_SECONDS
             now = int(time.time())
-            error_email_enabled = alert_due and error_alert.pending("email", ERROR_NOTIFICATION, now)
-            error_webhook_enabled = alert_due and error_alert.pending("webhook", webhook_event_enabled("error"), now)
+            error_email_enabled = alert_due and error_alert.pending("email", ERROR_NOTIFICATION and email_settings_problem() is None, now)
+            error_webhook_enabled = alert_due and error_alert.pending("webhook", webhook_event_enabled("error") and webhook_settings_problem() is None, now)
             error_alert.remember(advice)
             if error_email_enabled or error_webhook_enabled:
                 m_subject = recovery_alert_subject(advice, username)
@@ -8093,14 +8136,14 @@ def render_doctor_sections(report):
             continue
         lines.extend(("", colorize("section", section)))
         for check in section_checks:
-            lines.append(f"{render_doctor_marker(check.status)} {check.label}")
+            lines.append(f"{render_doctor_marker(check.status)} {sanitize_error_text(check.label)}")
             if check.detail:
-                lines.append(f"  {colorize_links(check.detail)}")
+                lines.append(f"  {colorize_links(sanitize_error_text(check.detail))}")
             if check.status != "PASS" and check.advice is not None:
                 # The fix carries its own guide line, so each line is indented and styled on its own rather
                 # than leaving one colour sequence open across the newline
                 lines.extend(f"  {colorize_fix_line(advice_line)}" for advice_line in f"To fix: {check.advice.fix}".splitlines())
-    return sanitize_error_text("\n".join(lines))
+    return CommandOutput("\n".join(lines))
 
 
 # Renders the one sentence that says whether the setup is usable and where to read more
@@ -8294,9 +8337,46 @@ def email_channel_configured() -> bool:
     return smtp_server_configured() and doctor_value_is_set(RECEIVER_EMAIL)
 
 
+# Names the first local SMTP setting that prevents automatic email delivery
+def email_settings_problem():
+    unset = [name for name in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD") if not doctor_value_is_set(globals()[name])]
+    if unset:
+        return f"{join_setting_names(unset, 'or')} is empty or still set to its placeholder"
+    fqdn_re = re.compile(r'(?=^.{4,253}$)(^((?!-)[a-zA-Z0-9-]{1,63}(?<!-)\.)+[a-zA-Z]{2,63}\.?$)')
+    email_re = re.compile(r'[^@]+@[^@]+\.[^@]+')
+    try:
+        ipaddress.ip_address(str(SMTP_HOST))
+    except ValueError:
+        if not fqdn_re.search(str(SMTP_HOST)):
+            return "SMTP_HOST is not a valid IP address or hostname"
+    try:
+        port = int(SMTP_PORT)
+        if isinstance(SMTP_PORT, bool) or not 1 <= port <= 65535:
+            raise ValueError
+    except (TypeError, ValueError, OverflowError):
+        return "SMTP_PORT is not a port number between 1 and 65535"
+    if not email_re.search(str(SENDER_EMAIL)) or not email_re.search(str(RECEIVER_EMAIL)):
+        return "SENDER_EMAIL or RECEIVER_EMAIL is not an email address"
+    return None
+
+
 # Returns whether a webhook alert has a destination to post to
 def webhook_channel_configured() -> bool:
     return bool(normalized_webhook_provider()) and doctor_value_is_set(WEBHOOK_URL)
+
+
+# Names the first local webhook setting that prevents automatic alert delivery
+def webhook_settings_problem():
+    if not doctor_value_is_set(WEBHOOK_URL):
+        return "WEBHOOK_URL is empty or still set to its placeholder"
+    if not validate_webhook_url():
+        return "WEBHOOK_URL must contain a complete HTTPS link"
+    provider = normalized_webhook_provider()
+    if not provider:
+        return "WEBHOOK_PROVIDER must be discord or ntfy"
+    if validate_webhook_customization(provider) is not None:
+        return "Webhook customization is invalid"
+    return validate_webhook_headers(provider)
 
 
 # Names the mail server this run would use, leaving out the account that signs in to it
@@ -8318,14 +8398,16 @@ def build_startup_summary(target=None, config_path=None, env_path=None, log_path
     grouped_secrets = dict(secrets_by_source())
     logging_enabled = bool(log_path) and not DISABLE_LOGGING
     tracked_fields = (TRACK_FOLLOWINGS, TRACK_FOLLOWERS, TRACK_BIO, TRACK_DISPLAY_NAME)
+    email_problem = email_settings_problem() if _startup_email_notification_categories() else None
+    webhook_problem = webhook_settings_problem() if _startup_webhook_notification_categories() else None
     return [
         StartupSummaryRow("Target", str(target) if target else "None", concise=True),
         StartupSummaryRow("Polling intervals", f"[offline: {display_time(LASTFM_CHECK_INTERVAL)}] [active: {display_time(LASTFM_ACTIVE_CHECK_INTERVAL)}]", concise=True),
         StartupSummaryRow("Inactivity timer", display_time(LASTFM_INACTIVITY_CHECK), concise=True),
-        StartupSummaryRow("Notifications (email)", _startup_notification_state(_startup_email_notification_categories(), email_channel_configured()), concise=True),
+        StartupSummaryRow("Notifications (email)", _startup_notification_state(_startup_email_notification_categories(), email_problem), concise=True),
         StartupSummaryRow("Email transport", startup_email_transport()),
         StartupSummaryRow("Email recipient", mask_email_address(RECEIVER_EMAIL) if doctor_value_is_set(RECEIVER_EMAIL) else "Not configured"),
-        StartupSummaryRow("Notifications (webhook)", _startup_notification_state(_startup_webhook_notification_categories(), webhook_channel_configured()), concise=True),
+        StartupSummaryRow("Notifications (webhook)", _startup_notification_state(_startup_webhook_notification_categories(), webhook_problem), concise=True),
         StartupSummaryRow("Webhook provider", startup_webhook_provider()),
         StartupSummaryRow("Delivery confirmations", str(DELIVERY_CONFIRMATIONS)),
         StartupSummaryRow("Output", str(log_path) if logging_enabled else "Terminal only (logging disabled)", concise=True, full=False),
@@ -8409,22 +8491,50 @@ def help_examples():
             ("Trace what the tool is doing", f"{prefix} <lastfm_username> --debug"),
         )),
     )
-    return render_help_examples(groups, QUICK_START_GUIDE_URL)
+    notice = "Setting options apply to the current run and do not update the configuration file.\nInclude them on each run or save the settings through --setup or in a configuration file.\n\n"
+    return notice + render_help_examples(groups, QUICK_START_GUIDE_URL)
 
 
 # Prints one labelled command on its own indented line, the shared shape across these tools
 def _wizard_print_command(label, command, suffix=""):
     print(label)
-    print(f"    {colorize('section', command)}{colorize('info', suffix) if suffix else ''}\n")
+    print(CommandOutput(f"    {colorize('section', command)}{colorize('info', suffix) if suffix else ''}\n"))
 
 
-# Prints the command that starts monitoring with the files this run checked, so a report read on its own
-# ends with the next action rather than leaving the reader to assemble the command
-def print_doctor_next_steps(target_value=None, doctor_exit=0):
+# Rebuilds explicit monitoring options while replacing private values with named placeholders
+def doctor_monitoring_overrides(args):
+    parts = []
+    value_options = (("webhook_provider", "--webhook-provider"), ("check_interval", "--check-interval"), ("active_interval", "--active-interval"), ("offline_timer", "--offline-timer"), ("break_multiplier", "--break-multiplier"), ("friends_check_interval", "--friends-check-interval"), ("friends_change_counter", "--friends-change-counter"), ("friends_retry_interval", "--friends-retry-interval"), ("csv_file", "--csv-file"), ("monitor_list", "--monitor-list"), ("truncate", "--truncate"))
+    for name, option in value_options:
+        value = getattr(args, name, None)
+        if value is not None:
+            # An equals sign keeps a value beginning with a dash from being parsed as another option
+            if str(value).startswith("-"):
+                parts.append(f"{option}={value}")
+            else:
+                parts.extend((option, str(value)))
+    switches = (("notify_active", "--notify-active", True), ("notify_inactive", "--notify-inactive", True), ("notify_track", "--notify-track", True), ("notify_song_changes", "--notify-song-changes", True), ("notify_offline_entries", "--notify-offline-entries", True), ("notify_loop", "--notify-loop", True), ("notify_followers", "--notify-followers", True), ("notify_followings", "--notify-followings", True), ("notify_profile", "--notify-profile", True), ("notify_errors", "--no-error-notify", False), ("webhook_enabled", "--webhook", True), ("webhook_enabled", "--no-webhook", False), ("webhook_active", "--webhook-active", True), ("webhook_inactive", "--webhook-inactive", True), ("webhook_track", "--webhook-track", True), ("webhook_song_changes", "--webhook-song-changes", True), ("webhook_loop", "--webhook-loop", True), ("webhook_offline_entries", "--webhook-offline-entries", True), ("webhook_followers", "--webhook-followers", True), ("webhook_followings", "--webhook-followings", True), ("webhook_profile", "--webhook-profile", True), ("webhook_errors", "--webhook-errors", True), ("webhook_errors", "--no-webhook-error-notify", False), ("progress", "--progress", True), ("track_in_spotify", "--track-in-spotify", True), ("fetch_duration", "--fetch-duration", True), ("hide_duration_source", "--hide-duration-source", True), ("track_followings", "--track-followings", True), ("track_followers", "--track-followers", True), ("track_bio", "--track-bio", True), ("track_display_name", "--track-display-name", True), ("disable_logging", "--disable-logging", True), ("no_color", "--no-color", True), ("verbose", "--verbose", True), ("debug_mode", "--debug", True))
+    for name, option, selected in switches:
+        if getattr(args, name, None) is selected:
+            parts.append(option)
+    private_options = (("lastfm_api_key", "--lastfm-api-key", "LASTFM_API_KEY"), ("lastfm_secret", "--lastfm-secret", "LASTFM_API_SECRET"), ("spotify_creds", "--spotify-creds", "SPOTIFY_CLIENT_ID:SPOTIFY_CLIENT_SECRET"), ("webhook_url", "--webhook-url", "WEBHOOK_URL"))
+    has_private_values = False
+    for name, option, placeholder in private_options:
+        if getattr(args, name, None) is not None:
+            parts.extend((option, placeholder))
+            has_private_values = True
+    return parts, has_private_values
+
+
+# Prints the monitoring command with the settings selected for Doctor
+def print_doctor_next_steps(target_value=None, doctor_exit=0, cli_args=None):
     print(colorize("header", "\nNext steps\n"))
     label = "After Doctor passes, start monitoring:" if doctor_exit else "Start monitoring:"
-    _wizard_print_command(label, render_command([target_value] if target_value else ['<lastfm_username>']))
-    # No trailing blank line: the command printer already left one and the report must not end on two
+    monitor_arguments = [target_value] if target_value else ['<lastfm_username>']
+    overrides, private_values = doctor_monitoring_overrides(cli_args)
+    _wizard_print_command(label, render_command(monitor_arguments + overrides))
+    if private_values:
+        print("Replace the uppercase credential placeholders before running. Doctor does not repeat private command-line values.\n")
     print(f"Guide: {colorize('link', QUICK_START_GUIDE_URL)}")
 
 
@@ -8437,7 +8547,7 @@ def print_welcome_screen(input_func=None, interactive=None):
     _wizard_print_command("Easiest start (guided setup wizard):", render_command(["--setup"], include_paths=False), setup_suffix)
     _wizard_print_command("Check setup before monitoring:", render_command(["--doctor", "<lastfm_username>"], include_paths=False))
     _wizard_print_command("Show recent tracks and exit:", render_command(["-l", "<lastfm_username>"], include_paths=False))
-    print(f"Full options: {colorize('section', render_command(['--help'], include_paths=False))}")
+    print(CommandOutput(f"Full options: {colorize('section', render_command(['--help'], include_paths=False))}"))
     print(f"\nGuide:        {colorize('link', QUICK_START_GUIDE_URL)}\n")
     if terminal_is_interactive:
         try:
@@ -8891,7 +9001,7 @@ def _wizard_collect_target_section(state, initial_target=None, input_func=None):
         if not _wizard_offer_retry(question, input_func=input_func):
             break
     if not state.target:
-        print("  No target selected. Nothing can be monitored until one is set. Run --setup again or pass the target on the command line.")
+        print("  No target selected. Nothing can be monitored until one is set. Run --setup again to save a target or include the target on each monitoring run.")
         _wizard_apply_target(state)
         return
     state.persist_target = _wizard_ask_yes_no("Persist this target in the generated config?", default=state.persist_target, input_func=input_func)
@@ -8919,6 +9029,7 @@ def _wizard_verify_lastfm_credentials(api_key, api_secret):
 def _wizard_collect_auth_section(state, input_func=None, getpass_func=None, validator=None):
     print(colorize_links(f"Create or view your Last.fm API key and shared secret: {LASTFM_API_REGISTRATION_URL}"))
     print(colorize_links(f"Credentials of an application you already registered: {LASTFM_API_ACCOUNTS_URL}"))
+    print(f"{LASTFM_PRO_NOTICE}.")
     configured = all(doctor_value_is_set(state.config_values.get(name)) or _wizard_existing_secret(name, state.env_path, secret_updates=state.secret_updates) for name in ("LASTFM_API_KEY", "LASTFM_API_SECRET"))
     # The key and the secret are one credential, so the replace question covers the pair rather than each value
     if configured and not _wizard_ask_yes_no("Replace the Last.fm API credentials already configured?", default=False, input_func=input_func):
@@ -9101,7 +9212,7 @@ def _wizard_smtp_sign_in_accepted(values, password, input_func=None):
         print("  The mail server accepted the sign-in. No email was sent.")
         return True
     print(f"  {advice.summary}: {advice.detail}" if advice.detail else f"  {advice.summary}")
-    print(f"  To fix: {advice.fix}")
+    print(CommandOutput(f"  To fix: {advice.fix}"))
     if _wizard_offer_retry("mail server settings", input_func=input_func):
         return False
     if advice.retryable:
@@ -10398,7 +10509,7 @@ def main():
     if args.doctor:
         doctor_exit = run_doctor(target_value=args.username, config_path=cfg_path, env_path=env_path)
         # Printed here rather than inside the run, so the wizard's own next steps are not followed by a second copy
-        print_doctor_next_steps(args.username, doctor_exit)
+        print_doctor_next_steps(args.username, doctor_exit, cli_args=args)
         sys.exit(doctor_exit)
 
     configuration_errors = runtime_configuration_errors() + runtime_boolean_errors()
@@ -10435,10 +10546,6 @@ def main():
         else:
             sys.exit(1)
         sys.exit(0)
-
-    if WEBHOOK_ENABLED and not validate_webhook_url():
-        verbose_print("Webhook notifications are off because WEBHOOK_URL is not a complete HTTPS link")
-        WEBHOOK_ENABLED = False
 
     if not check_internet():
         sys.exit(1)
@@ -10536,7 +10643,7 @@ def main():
             print_recovery_error(RecoveryError(missing_dependency_advice("curl_cffi", "Friend and profile tracking cannot run")))
             sys.exit(1)
 
-    if SMTP_HOST.startswith("your_smtp_server_"):
+    if SMTP_HOST.startswith("your_smtp_server_") and set(_startup_email_notification_categories()) <= {"errors"}:
         ACTIVE_NOTIFICATION = False
         INACTIVE_NOTIFICATION = False
         SONG_NOTIFICATION = False

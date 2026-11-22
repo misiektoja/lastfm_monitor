@@ -35,7 +35,7 @@ python -m ruff check lastfm_monitor.py tools tests
 
 The default suite is offline. It never contacts Last.fm and network calls are replaced with local test doubles. See [tests/README.md](tests/README.md) for what each test file covers.
 
-CI runs the same two checks on every push and pull request, across Python 3.9 through 3.14. The linter is pinned in the `lint` extra so a new ruff release cannot fail a build on a rule that did not exist when the change was written; the pre-commit hook pins the same version.
+CI runs the same two checks on every push and pull request, across Python 3.9 through 3.15. The linter is pinned in the `lint` extra so a new ruff release cannot fail a build on a rule that did not exist when the change was written; the pre-commit hook pins the same version.
 
 A change to the monitoring loop, authentication or Last.fm data handling is not verified by the offline suite alone. Exercise it against a real account and say so in the pull request, without usernames or credentials.
 
@@ -50,4 +50,4 @@ Pull requests target `dev`. The pull request template lists the checks to report
 
 ## Code style
 
-The codebase favors complete implementations over minimal patches, explicit validation of anything Last.fm supplies and one concise summary comment directly above each shared function. Follow the surrounding code rather than introducing a new style.
+Use complete implementations and validate data supplied by Last.fm. Place a concise comment immediately before every function and method, including private helpers. Summarize its purpose or contract. Use additional comments for non-obvious constraints and reasons. Follow the surrounding code.

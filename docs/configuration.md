@@ -9,7 +9,7 @@ Examples on this page use the PyPI command `lastfm_monitor`. Manual script users
 <a id="configuration-file"></a>
 ## Configuration File
 
-You can pass most settings as command-line options or save them in a configuration file for later runs.
+Command-line setting options apply to the current run and do not update the configuration file. Include them on every run that needs those settings. To reuse settings without repeating the options, save them through `--setup` or edit the configuration file. Commands such as `--setup` and `--set-smtp-password` save the values they collect.
 
 The easiest way to create this file is `lastfm_monitor --setup`.
 
@@ -138,6 +138,8 @@ With `-r`, a successful duration from either Spotify backend is marked `S*`. Las
 
 Email notifications need SMTP server details for the sending account. Add them to `lastfm_monitor.conf` or use the setup wizard. Setup checks the login without sending an email. To replace only the password, run `lastfm_monitor --set-smtp-password`. Password entry is hidden and preserves spaces.
 
+If email alerts are selected but local SMTP settings are missing or invalid, the startup summary shows `Unavailable` with the reason. Automatic email sends are skipped silently until the settings are fixed. `Off` means no email alert types are selected.
+
 Every alert is sent as both HTML and plain text in one message. Mail clients that render HTML show the track, the account name and the values that changed in bold. The music and lyrics links are clickable. Clients that do not render HTML fall back to the plain text, which lists the same addresses in full.
 
 Send one test message to verify the settings:
@@ -152,6 +154,8 @@ Configure `SMTP_HOST`, `SMTP_USER`, `SENDER_EMAIL` and `RECEIVER_EMAIL` before s
 ## Webhook Settings
 
 Last.fm Monitor can send activity alerts through Discord or the native [ntfy publish API](https://docs.ntfy.sh/publish/). Webhook alerts work with or without email. Run `lastfm_monitor --setup`, choose webhook alerts and select Discord or ntfy.
+
+If webhook alerts are selected but the URL, provider or other local settings are invalid, the startup summary shows `Unavailable` with the reason. Automatic webhook sends are skipped silently until the settings are fixed. `Off` means the master switch or all webhook alert types are off.
 
 `WEBHOOK_PROVIDER` defaults to `"discord"`. Standard Discord and public `ntfy.sh` URLs are recognized automatically, including after a `SIGHUP` reload. Set the provider explicitly for a self-hosted ntfy server or a compatible endpoint. For one run, use `--webhook-provider discord` or `--webhook-provider ntfy`.
 
@@ -213,6 +217,8 @@ WEBHOOK_HEADERS = {
 ```
 
 Header values support the same placeholders as `WEBHOOK_TEMPLATE`. They must be strings without line breaks. Headers apply to both Discord and ntfy. Prefer `NTFY_ACCESS_TOKEN` in `.env` for Bearer authentication. Basic authentication is available through a custom `Authorization` header. Customize ntfy delivery further through `WEBHOOK_HEADERS`, for example `X-Priority` or `X-Tags`.
+
+A header value that contains emoji or other non-ASCII text after placeholder expansion is sent in RFC 2047 encoded form (`=?UTF-8?B?...?=`), since a plain HTTP header cannot carry it. ntfy decodes it back to the original text. Other receivers see the encoded form unless they decode RFC 2047. ASCII values are sent exactly as written, including values you already encoded yourself, such as an emoji tag from the ntfy documentation.
 
 <a id="discord"></a>
 ### Discord

@@ -22,7 +22,7 @@ pip install -e '.[lint]'
 python -m ruff check lastfm_monitor.py tools tests
 ```
 
-CI runs both on every push and pull request, across Python 3.9 through 3.14,
+CI runs both on every push and pull request, across Python 3.9 through 3.15,
 and again before anything is published to PyPI.
 
 `test_offline_e2e.py` starts a loopback HTTP server and a subprocess, so it is marked
@@ -36,6 +36,8 @@ python -m pytest -m e2e
 
 | File | Area under test |
 | --- | --- |
+| `test_setting_persistence.py` | Setting lifetime in help, Doctor CLI options, disabled switches and private-value placeholders |
+| `test_recovery_command_privacy.py` | Generated commands, credential redaction and output stream handling |
 | `test_notification_receipts.py` | SMTP acceptance despite cleanup failures, receipt controls and unchanged notification content |
 | `test_configuration_notification_boundaries.py` | Invalid output settings, CLI precedence and strict webhook fields with legacy JSON support |
 | `test_credentials_state_boundaries.py` | Fresh credential validation, candidate redaction, damaged friends state and resource failures with real HTTP clients |
@@ -84,6 +86,7 @@ python -m pytest -m e2e
 | `test_terminal_color.py` | Coloured output: the theme and its template block, which colour lands on which token, the single colour pass through the writers and the plain log file |
 | `test_spotify_oauth_recovery.py` | Rejected search attempts, one-time token refresh and app-specific cooldowns |
 | `test_spotify_web_backend.py` | TOTP generation and config override, anonymous token handling and caching |
+| `test_spotify_playback_control.py` | The play and pause commands sent to the local Spotify client at a break and on inactivity |
 | `test_tls_verification.py` | The TLS verification switch, the call sites that read it and the library sessions it reaches |
 | `test_webhook_notifications.py` | Webhook settings coverage, startup rollups, URL validation and independent event switches |
 | `test_moved_private_settings.py` | Kept credentials across dotenv destination changes and startup error handling |

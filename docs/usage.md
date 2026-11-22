@@ -4,6 +4,8 @@ description: "Use lastfm_monitor: monitoring mode, terminal output, email and we
 
 # Usage
 
+Setting flags in these examples apply to that run. Repeat them on later runs or [save the corresponding settings](configuration.md#configuration-file).
+
 <a id="command-format-by-installation-method"></a>
 ## Command Format by Installation Method
 
@@ -344,6 +346,8 @@ Automatic playback needs a Spotify track ID for every scrobble. The tool resolve
 The local playback action itself uses the configured platform method such as AppleScript on macOS or D-Bus on Linux. It does not use Spotify Web API playback control.
 
 The tool fully supports automatic playback on **Linux** and **macOS**. This means it will automatically play the changed track. It will also automatically pause and resume playback following the tracked user's actions. Additionally, it can pause or play an indicated track once the user becomes inactive (see the `SP_USER_GOT_OFFLINE_TRACK_ID` configuration option).
+
+The tool pauses the client when the tracked user stops playing for the break time set by `LASTFM_BREAK_CHECK_MULTIPLIER` (`-m`). If you start your own music after that, the tool leaves it playing when the user becomes inactive, unless `SP_USER_GOT_OFFLINE_TRACK_ID` is set. The inactivity pause only happens when break detection is off or did not trigger first.
 
 For **Windows**, it works in a semi-automatic way: if you have the Spotify client running and you are not listening to any song, then the first track will play automatically. However, subsequent tracks will be located in the client, but you will need to press the play button manually.
 
