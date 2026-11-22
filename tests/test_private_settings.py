@@ -56,6 +56,13 @@ def test_set_lastfm_credentials_saves_both_values(tmp_path, capsys):
     assert "lastfm-secret" not in output
 
 
+# Pro requirement shown before the hidden prompts
+def test_set_lastfm_credentials_names_the_pro_requirement(tmp_path, capsys):
+    values = iter(["lastfm-key", "lastfm-secret"])
+    monitor.run_set_lastfm_credentials(env_file=tmp_path / ".env", interactive=True, getpass_func=lambda prompt: next(values))
+    assert monitor.LASTFM_PRO_NOTICE in capsys.readouterr().out
+
+
 # Verifies Spotify credentials are collected privately and committed atomically as a pair
 def test_set_spotify_credentials_saves_both_values(tmp_path, capsys):
     destination = tmp_path / ".env"

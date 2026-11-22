@@ -138,6 +138,18 @@ class TestLastfmStatusMapping:
         assert "recent listening" in advice.summary
         assert monitor.PRIVACY_GUIDE_URL in advice.fix
 
+    # A rejected key can be a valid one whose owner has no Pro, so the fix covers both causes
+    @pytest.mark.parametrize("error", [
+        pylast.WSError(None, "10", "Invalid API key - You must be granted a valid key by last.fm"),
+        pylast.WSError(None, "26", "Suspended API key - Access for your account has been suspended"),
+        Exception("Invalid API key"),
+    ])
+    def test_a_rejected_key_names_the_pro_requirement_and_the_credentials_command(self, error):
+        advice = monitor.classify_recovery_error(error)
+        assert "Last.fm Pro" in advice.fix
+        assert "--set-lastfm-credentials" in advice.fix
+        assert monitor.LASTFM_API_GUIDE_URL in advice.fix
+
     def test_a_status_that_is_not_a_number_falls_through_to_the_message(self):
         assert monitor.recovery_lastfm_status(pylast.WSError(None, "not a code", "x")) is None
         assert monitor.classify_recovery_error(pylast.WSError(None, "not a code", "Invalid API key")).code == "auth.api_key_invalid"

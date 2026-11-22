@@ -734,6 +734,9 @@ class TestTheFrameAroundTheQuestions:
             assert f"\n\n{opener}" in printed, f"{opener!r} does not open a group"
         assert "\n\n\n" not in printed
 
+    def test_the_credentials_group_names_the_pro_requirement(self, transcript):
+        assert monitor.LASTFM_PRO_NOTICE in transcript(full_run_answers())
+
     def test_each_block_heading_stands_alone(self, transcript):
         printed = transcript(full_run_answers())
 
