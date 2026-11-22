@@ -915,7 +915,8 @@ import base64
 import hashlib
 import hmac
 from email.utils import parsedate_to_datetime
-import pyotp
+# Typed pyotp releases do not re-export TOTP from the package root for pyright
+from pyotp.totp import TOTP
 
 
 # Tracks the error alert per channel: what was delivered, how long a channel that failed waits before the next
@@ -5059,7 +5060,7 @@ def generate_totp():
     joined = "".join(str(number) for number in transformed)
     hex_string = joined.encode().hex()
     secret = base64.b32encode(bytes.fromhex(hex_string)).decode().rstrip("=")
-    return pyotp.TOTP(secret, digits=6, interval=30)
+    return TOTP(secret, digits=6, interval=30)
 
 
 # Requests a fresh anonymous Spotify web-player access token
