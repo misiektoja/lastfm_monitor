@@ -1,3 +1,7 @@
+---
+description: "Use lastfm_monitor: monitoring mode, terminal output, email and webhook alerts, CSV export, Last.fm Wrapped, Spotify playback sync and check intervals."
+---
+
 # Usage
 
 Setting flags in these examples apply to that run. Repeat them on later runs or [save the corresponding settings](configuration.md#configuration-file).

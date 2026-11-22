@@ -1,3 +1,7 @@
+---
+description: "About lastfm_monitor: change log, how to contribute, security policy, maintainers, license and ways to support the project."
+---
+
 # About
 
 <a id="change-log"></a>

@@ -1,3 +1,7 @@
+---
+description: "Fix lastfm_monitor problems with the Doctor preflight check, Last.fm website tracking, connection errors, logging levels and saved settings."
+---
+
 # Troubleshooting
 
 Examples on this page use the PyPI command `lastfm_monitor`. If you installed the manual script, replace that command with the matching [command prefix](usage.md#command-format-by-installation-method).
