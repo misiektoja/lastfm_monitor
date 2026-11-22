@@ -1,3 +1,7 @@
+---
+description: "Use lastfm_monitor: monitoring mode, terminal output, email and webhook alerts, CSV export, Last.fm Wrapped, Spotify playback sync and check intervals."
+---
+
 # Usage
 
 <a id="command-format-by-installation-method"></a>

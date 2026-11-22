@@ -1,3 +1,7 @@
+---
+description: "Install lastfm_monitor from PyPI or as a single Python script. Covers requirements for Windows, macOS and Linux and how to upgrade."
+---
+
 # Installation
 
 Last.fm Monitor runs as a local Python program. Choose the PyPI package for the shortest command or the manual script to run a downloaded file.

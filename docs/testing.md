@@ -1,3 +1,7 @@
+---
+description: "Run the offline pytest suite for lastfm_monitor, which replaces Last.fm and Spotify calls with test doubles. Shows what the tests cover."
+---
+
 # Testing
 
 The offline test suite covers everything in `lastfm_monitor.py` that can run without network access. Last.fm and Spotify calls are replaced with test doubles.

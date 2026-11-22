@@ -1,3 +1,7 @@
+---
+description: "Run the lastfm_monitor setup wizard, get a Last.fm API key and shared secret, check privacy settings and start monitoring a user."
+---
+
 # Setup & First Run
 
 <a id="run-the-setup-wizard"></a>

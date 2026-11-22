@@ -1,3 +1,8 @@
+---
+title: "Last.fm listening activity tracker with Spotify playback"
+description: "Track Last.fm listening activity and profile changes in real time, play the same songs in Spotify and get email or webhook alerts with lastfm_monitor."
+---
+
 # lastfm_monitor
 
 [![GitHub Release](https://img.shields.io/github/v/release/misiektoja/lastfm_monitor?style=flat-square&color=blue)](https://github.com/misiektoja/lastfm_monitor/releases)

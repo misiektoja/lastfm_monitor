@@ -1,3 +1,7 @@
+---
+description: "Configure lastfm_monitor: target Last.fm user, Spotify metadata backends and OAuth app, SMTP email, Discord and ntfy webhooks and stored secrets."
+---
+
 # Configuration
 
 Examples on this page use the PyPI command `lastfm_monitor`. Manual script users should keep the shown options and use the matching prefix under [Command Format by Installation Method](usage.md#command-format-by-installation-method).
