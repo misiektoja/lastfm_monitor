@@ -768,6 +768,9 @@ LASTFM_API_REGISTRATION_URL = "https://www.last.fm/api/account/create"
 LASTFM_API_ACCOUNTS_URL = "https://www.last.fm/api/accounts"
 SPOTIFY_DASHBOARD_URL = "https://developer.spotify.com/dashboard"
 
+# Shown wherever the Last.fm credentials are requested
+LASTFM_PRO_NOTICE = "From 1 December 2026 Last.fm requires a Pro subscription on the account that owns the API key"
+
 # The accepted form of the positional target, shared by the welcome screen and the invalid-target error
 LASTFM_TARGET_FORMS = "username exactly as it appears on the user's Last.fm profile page"
 
@@ -2393,6 +2396,11 @@ def unknown_failure_fix():
     return "Open an issue with this output if the failure continues" if DEBUG_MODE else "Re-run with --debug to see the technical cause"
 
 
+# Returns the fix for a rejected Last.fm key or secret, including a key whose owner has no Pro subscription
+def lastfm_credentials_rejected_fix():
+    return f"Check that the account owning the key has Last.fm Pro, required for API keys from 1 December 2026. If it has, save a working pair with '{render_command(['--set-lastfm-credentials'])}'"
+
+
 # Maps one exception plus its status and calling context to stable recovery advice
 def classify_recovery_error(error=None, context="runtime", detail="", extra_secrets=()):
     if isinstance(error, RecoveryError):
@@ -2484,7 +2492,7 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
     if lastfm_status == 17:
         return advice("target.not_visible", "The monitored user hides their recent listening information", "Ask the user to turn off 'Hide recent listening information' in their Last.fm privacy settings", False, PRIVACY_GUIDE_URL)
     if lastfm_status in (10, 13, 26):
-        return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", f"Save a working pair with '{render_command(['--set-lastfm-credentials'])}'", False, LASTFM_API_GUIDE_URL)
+        return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", lastfm_credentials_rejected_fix(), False, LASTFM_API_GUIDE_URL)
     if lastfm_status == 29:
         return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. If this repeats, raise LASTFM_CHECK_INTERVAL and LASTFM_ACTIVE_CHECK_INTERVAL in the configuration file, then restart. To override them without saving, include --check-interval SECONDS and --active-interval SECONDS on each run", True, INTERVALS_GUIDE_URL)
     if lastfm_status in (6, 7):
@@ -2500,7 +2508,7 @@ def classify_recovery_error(error=None, context="runtime", detail="", extra_secr
     if http_status == 429 or text_status == 429 or "429 client" in message or "rate limit" in message or "too many requests" in message:
         return advice("lastfm.rate_limited", "Last.fm is rate limiting requests", "The tool will wait and retry. If this repeats, raise LASTFM_CHECK_INTERVAL and LASTFM_ACTIVE_CHECK_INTERVAL in the configuration file, then restart. To override them without saving, include --check-interval SECONDS and --active-interval SECONDS on each run", True, INTERVALS_GUIDE_URL)
     if "invalid api key" in message or "api key suspended" in message or "invalid method signature" in message:
-        return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", f"Save a working pair with '{render_command(['--set-lastfm-credentials'])}'", False, LASTFM_API_GUIDE_URL)
+        return advice("auth.api_key_invalid", "Last.fm rejected the configured API key or shared secret", lastfm_credentials_rejected_fix(), False, LASTFM_API_GUIDE_URL)
     if "user required to be logged in" in message:
         return advice("target.not_visible", "The monitored user hides their recent listening information", "Ask the user to turn off 'Hide recent listening information' in their Last.fm privacy settings", False, PRIVACY_GUIDE_URL)
     if "user not found" in message or "no user with that name" in message or http_status == 404:
@@ -5875,6 +5883,7 @@ def run_set_lastfm_credentials(env_file=None, interactive=None, input_func=None,
     guidance = [
         f"Create your API key and shared secret at {LASTFM_API_REGISTRATION_URL}",
         f"View the credentials of an application you already registered at {LASTFM_API_ACCOUNTS_URL}",
+        LASTFM_PRO_NOTICE,
         f"Guide: {LASTFM_API_GUIDE_URL}",
     ]
     return _run_set_private_values("--set-lastfm-credentials", prompts, env_file, interactive, input_func, getpass_func, guidance, subject="Last.fm API credentials", guide_url=LASTFM_API_GUIDE_URL, plural=True)
@@ -9014,6 +9023,7 @@ def _wizard_verify_lastfm_credentials(api_key, api_secret):
 def _wizard_collect_auth_section(state, input_func=None, getpass_func=None, validator=None):
     print(colorize_links(f"Create or view your Last.fm API key and shared secret: {LASTFM_API_REGISTRATION_URL}"))
     print(colorize_links(f"Credentials of an application you already registered: {LASTFM_API_ACCOUNTS_URL}"))
+    print(f"{LASTFM_PRO_NOTICE}.")
     configured = all(doctor_value_is_set(state.config_values.get(name)) or _wizard_existing_secret(name, state.env_path, secret_updates=state.secret_updates) for name in ("LASTFM_API_KEY", "LASTFM_API_SECRET"))
     # The key and the secret are one credential, so the replace question covers the pair rather than each value
     if configured and not _wizard_ask_yes_no("Replace the Last.fm API credentials already configured?", default=False, input_func=input_func):
