@@ -37,7 +37,7 @@ Run the setup wizard:
 lastfm_monitor --setup
 ```
 
-The wizard asks for the target, the Last.fm API credentials and optional notifications. Review the settings before saving them. See [Setup & First Run](setup-and-first-run.md) for how to get the Last.fm API key and shared secret and the required privacy settings.
+The wizard asks for the target, the Last.fm API credentials and optional notifications. Review the settings before saving them. See [Setup & First Run](setup-and-first-run.md) for how to get the Last.fm API key and shared secret and the required privacy settings. From 1 December 2026 Last.fm requires a [Pro subscription](https://www.last.fm/pro) on the account that owns the API key.
 
 For the manual single-file method, dependencies and upgrade commands, see [Installation](installation.md).
 

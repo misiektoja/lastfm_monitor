@@ -21,7 +21,7 @@ Each row is one result:
 Authentication
 [FAIL] Last.fm rejected the configured API key or shared secret
   Invalid API key - You must be granted a valid key by last.fm
-  To fix: Save a working pair with 'lastfm_monitor --set-lastfm-credentials'
+  To fix: Check that the account owning the key has Last.fm Pro, required for API keys from 1 December 2026. If it has, save a working pair with 'lastfm_monitor --set-lastfm-credentials'
   Guide: https://misiektoja.github.io/lastfm_monitor/setup-and-first-run/#lastfm-api-key-and-shared-secret
 ```
 
@@ -48,7 +48,7 @@ Every failure is reported in the same three-part shape: what went wrong, a `To f
 | Symptom | Likely cause | Where to look |
 | --- | --- | --- |
 | Last.fm error 17, `Login: User required to be logged in` | The monitored user hides recent listening information | [User Privacy Settings](setup-and-first-run.md#user-privacy-settings) |
-| `Last.fm rejected the configured API key or shared secret` | The credentials are missing, wrong or suspended | Run `lastfm_monitor --set-lastfm-credentials` |
+| `Last.fm rejected the configured API key or shared secret` | The credentials are missing, wrong or suspended, or the account that owns the key has no [Last.fm Pro](setup-and-first-run.md#lastfm-api-key-and-shared-secret) subscription | Check the subscription, then run `lastfm_monitor --set-lastfm-credentials` |
 | `Last.fm is rate limiting requests` | Too many requests in a short time | Nothing to do, the tool waits and retries |
 | Track durations are missing | The optional Spotify credentials are not saved | [Spotify Metadata Backends](configuration.md#spotify-metadata-backends) |
 | The run stops naming a file and a line number | A configuration line is not a plain `SETTING = value` assignment | [Configuration File](configuration.md#configuration-file) |

@@ -45,11 +45,13 @@ With a saved target, running Last.fm Monitor without a target starts monitoring 
 You need three things before the first monitoring run:
 
 1. A Last.fm target. Use the Last.fm username of the account you want to monitor.
-2. A Last.fm API key and shared secret. See [Last.fm API Key and Shared Secret](#lastfm-api-key-and-shared-secret).
+2. A Last.fm API key and shared secret. From 1 December 2026 the Last.fm account that owns the key needs Last.fm Pro. See [Last.fm API Key and Shared Secret](#lastfm-api-key-and-shared-secret).
 3. The monitored account must publish its recent listening. See [User Privacy Settings](#user-privacy-settings).
 
 <a id="lastfm-api-key-and-shared-secret"></a>
 ## Last.fm API Key and Shared Secret
+
+> **Last.fm Pro is required from 1 December 2026:** Last.fm [announced](https://support.last.fm/t/api-keys-will-require-pro-from-1st-december/121030) that an API key only works while the account that owns it has a [Last.fm Pro](https://www.last.fm/pro) subscription. This tool uses your own key, so that account is yours. Creating a key needs Pro. An existing key stops working until its owner subscribes. The monitored user does not need Pro.
 
 - Create your Last.fm `API key` and `Shared secret` at: [https://www.last.fm/api/account/create](https://www.last.fm/api/account/create)
    - Or get your existing credentials from: [https://www.last.fm/api/accounts](https://www.last.fm/api/accounts)
