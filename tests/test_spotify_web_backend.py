@@ -64,7 +64,8 @@ class SpotifyWebBackendTests(unittest.TestCase):
 
     # Verifies a configured TOTP override flows through to the generated token
     def test_totp_config_override_is_used(self):
-        with patch.object(monitor, "SPOTIFY_TOTP_VERSION", 99), patch.object(monitor, "SPOTIFY_TOTP_SECRET_CIPHER_BYTES", (12, 34, 56, 78)):
+        # pyotp rejects short secrets, so the override decodes to 176 bits
+        with patch.object(monitor, "SPOTIFY_TOTP_VERSION", 99), patch.object(monitor, "SPOTIFY_TOTP_SECRET_CIPHER_BYTES", (12, 34, 56, 78, 90, 21, 43, 65, 87, 19, 32, 54)):
             token = monitor.generate_totp()
         self.assertEqual(len(token.now()), 6)
 
