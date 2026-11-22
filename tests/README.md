@@ -22,7 +22,7 @@ pip install -e '.[lint]'
 python -m ruff check lastfm_monitor.py tools tests
 ```
 
-CI runs both on every push and pull request, across Python 3.9 through 3.14,
+CI runs both on every push and pull request, across Python 3.9 through 3.15,
 and again before anything is published to PyPI.
 
 `test_offline_e2e.py` starts a loopback HTTP server and a subprocess, so it is marked
