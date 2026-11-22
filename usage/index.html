@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Real-time tracker for Last.fm listening activity with automated Spotify playback, instant alerts and scrobble analytics">
+        <meta name="description" content="Use lastfm_monitor: monitoring mode, terminal output, email and webhook alerts, CSV export, Last.fm Wrapped, Spotify playback sync and check intervals.">
       
       
       
@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -968,6 +968,7 @@
 
 
 <h1 id="usage">Usage<a class="headerlink" href="#usage" title="Permanent link">&para;</a></h1>
+<p>Setting flags in these examples apply to that run. Repeat them on later runs or <a href="../configuration/#configuration-file">save the corresponding settings</a>.</p>
 <p><a id="command-format-by-installation-method"></a></p>
 <h2 id="command-format-by-installation-method">Command Format by Installation Method<a class="headerlink" href="#command-format-by-installation-method" title="Permanent link">&para;</a></h2>
 <p>Examples use the PyPI command. For a downloaded script, run commands from the directory containing <code>lastfm_monitor.py</code> and keep the same arguments:</p>
@@ -1233,6 +1234,7 @@
 <p>Automatic playback needs a Spotify track ID for every scrobble. The tool resolves that ID through the <a href="../configuration/#spotify-metadata-backends">Spotify metadata backends</a>. It tries the official OAuth app Web API when credentials are configured, then uses the anonymous web-player backend. OAuth app credentials are optional.</p>
 <p>The local playback action itself uses the configured platform method such as AppleScript on macOS or D-Bus on Linux. It does not use Spotify Web API playback control.</p>
 <p>The tool fully supports automatic playback on <strong>Linux</strong> and <strong>macOS</strong>. This means it will automatically play the changed track. It will also automatically pause and resume playback following the tracked user's actions. Additionally, it can pause or play an indicated track once the user becomes inactive (see the <code>SP_USER_GOT_OFFLINE_TRACK_ID</code> configuration option).</p>
+<p>The tool pauses the client when the tracked user stops playing for the break time set by <code>LASTFM_BREAK_CHECK_MULTIPLIER</code> (<code>-m</code>). If you start your own music after that, the tool leaves it playing when the user becomes inactive, unless <code>SP_USER_GOT_OFFLINE_TRACK_ID</code> is set. The inactivity pause only happens when break detection is off or did not trigger first.</p>
 <p>For <strong>Windows</strong>, it works in a semi-automatic way: if you have the Spotify client running and you are not listening to any song, then the first track will play automatically. However, subsequent tracks will be located in the client, but you will need to press the play button manually.</p>
 <p>You can change the playback method per platform using the corresponding configuration option.</p>
 <p>For <strong>macOS</strong> set <code>SPOTIFY_MACOS_PLAYING_METHOD</code> to one of the following values:
@@ -1371,6 +1373,9 @@
 
 
 
+  
+  
+
 
 
 
@@ -1426,7 +1431,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.top", "navigation.sections", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

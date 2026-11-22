@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Real-time tracker for Last.fm listening activity with automated Spotify playback, instant alerts and scrobble analytics">
+        <meta name="description" content="Run the lastfm_monitor setup wizard, get a Last.fm API key and shared secret, check privacy settings and start monitoring a user.">
       
       
       
@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -832,11 +832,14 @@
 <p>You need three things before the first monitoring run:</p>
 <ol>
 <li>A Last.fm target. Use the Last.fm username of the account you want to monitor.</li>
-<li>A Last.fm API key and shared secret. See <a href="#lastfm-api-key-and-shared-secret">Last.fm API Key and Shared Secret</a>.</li>
+<li>A Last.fm API key and shared secret. From 1 December 2026 the Last.fm account that owns the key needs Last.fm Pro. See <a href="#lastfm-api-key-and-shared-secret">Last.fm API Key and Shared Secret</a>.</li>
 <li>The monitored account must publish its recent listening. See <a href="#user-privacy-settings">User Privacy Settings</a>.</li>
 </ol>
 <p><a id="lastfm-api-key-and-shared-secret"></a></p>
 <h2 id="lastfm-api-key-and-shared-secret">Last.fm API Key and Shared Secret<a class="headerlink" href="#lastfm-api-key-and-shared-secret" title="Permanent link">&para;</a></h2>
+<blockquote>
+<p><strong>Last.fm Pro is required from 1 December 2026:</strong> Last.fm <a href="https://support.last.fm/t/api-keys-will-require-pro-from-1st-december/121030">announced</a> that an API key only works while the account that owns it has a <a href="https://www.last.fm/pro">Last.fm Pro</a> subscription. This tool uses your own key, so that account is yours. Creating a key needs Pro. An existing key stops working until its owner subscribes. The monitored user does not need Pro.</p>
+</blockquote>
 <ul>
 <li>Create your Last.fm <code>API key</code> and <code>Shared secret</code> at: <a href="https://www.last.fm/api/account/create">https://www.last.fm/api/account/create</a></li>
 <li>
@@ -987,6 +990,9 @@
 
 
 
+  
+  
+
 
 
 
@@ -1042,7 +1048,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.top", "navigation.sections", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>
