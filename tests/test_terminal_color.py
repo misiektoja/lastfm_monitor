@@ -637,6 +637,25 @@ def test_the_help_screen_is_not_repainted_by_the_monitoring_rules(help_palette):
     assert help_palette["help_option"] in written
 
 
+# Verifies help renders with the formatter print_help builds instead of the TypeError fallback
+@pytest.mark.skipif(sys.version_info < (3, 15), reason="print_help passes a formatter from Python 3.15")
+def test_the_help_screen_uses_the_formatter_from_print_help(monkeypatch):
+    received = []
+    base_format_help = argparse.ArgumentParser.format_help
+
+    # Records the formatter the base parser renders with
+    def recording_format_help(self, *args, **kwargs):
+        received.append(kwargs.get("formatter", args[0] if args else None))
+        return base_format_help(self, *args, **kwargs)
+
+    monkeypatch.setattr(argparse.ArgumentParser, "format_help", recording_format_help)
+    parser = monitor.ColoredHelpParser(prog="monitor")
+    parser.print_help(StringIO())
+
+    assert len(received) == 1
+    assert isinstance(received[0], argparse.HelpFormatter)
+
+
 # Verifies the setup screens colour their links, since they print before the output stream colouriser is installed
 def test_setup_screen_links_are_coloured(monkeypatch):
     link = monitor._build_ansi_sequence(monitor.DEFAULT_COLOR_THEME["link"])
